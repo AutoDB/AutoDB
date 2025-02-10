@@ -2,7 +2,44 @@
 
 Automatic persistence and database handling for Swift, built on SQLite to cross-compile. Fast, automatic migrations and thread safe.
 
-## More to be announced...
+## Quick start
+
+Implement the AutoDB protocol for your data classes, and make sure they are both Codable and Sendable. Usually they are by default. Then add the `var id: AutoId` to handle identity.
+
+```
+final class Artist: AutoDB, @unchecked Sendable {
+	var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
+	var name: String = ""	// we must have a default value (or nil)
+}
+```
+
+Create new objects:
+``` 
+let first = await Artist.create()
+// Specify id if you don't want the system to assign one 
+// let first = await Artist.create(1)
+
+first.name = "The Cure"
+try await first.save()
+```
+
+Fetch existing objects:
+```
+let artist = try await Artist.fetchQuery("WHERE name = ?", first.name).first
+```
+Note that these are the same object: `artist === first`
+
+That is all!
+
+## Status
+
+This is currently a work in progress. Everything is implemented and working, more test-cases are needed. See [Backlog.md](Documentation/Backlog.md) for things to be built.
+
+## Details
+
+Read the [Documentation.md](Documentation/Documentation.md) for more details.
+
+All platforms are/will be supported by AutoDB, read more in [Android.md](Documentation/Android.md).
 
 ## Contact
 
