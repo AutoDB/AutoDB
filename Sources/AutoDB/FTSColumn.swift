@@ -199,7 +199,7 @@ class FTSColumn<AutoType: AutoModelObject>: Codable, AnyRelation, @unchecked Sen
 			return
 		}
 		
-		let limit = 20000	// replace with maxQueryVariableCount / 2 - NO that is not the same thing!
+		let limit = 20000	// any limit will do, just make it small enough to not take noticable RAM/CPU per fetch, while big enough to handle most updates in one go.
 		let ids = try await OwnerType.query("SELECT id FROM `\(tableInfo.ownerName)` WHERE id NOT in (SELECT id FROM `\(tableInfo.tableName)`) LIMIT \(limit)").flatMap { $0.values.compactMap { $0.uint64Value } }
 		if ids.isEmpty {
 			return
@@ -260,6 +260,7 @@ class FTSColumn<AutoType: AutoModelObject>: Codable, AnyRelation, @unchecked Sen
 		return try await OwnerType.fetchIds(ids)
 	}
 	
+	/// Only remove diacritics for chars that has the same meaning without them, "lizard" and "farming" is not related! (Ödla vs Odla) While "fiancé" vs "fiance" has the same meaning.
 	static func removeDiacritics(_ phrase: String) -> String {
 		let regular = Set("äöåÖÄÅ".precomposedStringWithCanonicalMapping)
 		return String(phrase.precomposedStringWithCanonicalMapping.map { regular.contains($0) ? $0 : String($0).folding(options: .diacriticInsensitive, locale: nil).first! })

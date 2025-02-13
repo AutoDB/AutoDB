@@ -21,9 +21,8 @@ class TransactionTests: @unchecked Sendable {
 	
 	@Test func testTransaction() async throws {
 		
-		let autoDB = try await TransClass.db()
-		await autoDB.setDebug()
-		try? await autoDB.transaction { db, token in
+		try await TransClass.db().setDebug()
+		try? await TransClass.transaction { db, token in
 			print("in transaction")
 			
 			let first = await TransClass.create(token: token, 1)

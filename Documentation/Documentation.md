@@ -62,17 +62,19 @@ It will not use the anExampleObject for anything but to fill in the generic info
 Transactions are supported, wrap your code in a closure where no calls may throw errors. If it does, DB-state is rolled back to its initial state. Like this:
 
 ```
-try? await TransClass.db() { db in
-	let first = await TransClass.create(1)
+try? await TransClass.transaction { _, token in
+	let first = await TransClass.create(token: token, 1)
 	first.integer = 2
-	try await first.save()
+	try await first.save(token: token)
 	
 	#expect(first.integer == 2)
 	
+	// any error will cause rollback
 	throw CancellationError()
 }
 
 // TransClass has no objects here, and none with integer == 2
+// All other calls to db will await until this point where the transaction is done.
 ```
 
 ## Write to DB in bulk

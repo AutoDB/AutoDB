@@ -1,10 +1,10 @@
 # AutoDB
 
-Automatic persistence and database handling for Swift, built on SQLite to cross-compile. Fast, automatic migrations and thread safe.
+Automatic persistence and database handling for all platforms in Swift, built on SQLite. Fast, automatic migrations and thread safe using actors and async/await. 
 
 ## Quick start
 
-Implement the AutoDB protocol for your data classes, and make sure they are both Codable and Sendable. Usually they are by default. Then add the `var id: AutoId` to handle identity.
+Implement the AutoDB protocol for your data classes, making them both Codable and Sendable. Then add the `var id: AutoId` to handle identity. All types must have a default value.
 
 ```
 final class Artist: AutoDB, @unchecked Sendable {
@@ -30,6 +30,15 @@ let artist = try await Artist.fetchQuery("WHERE name = ?", first.name).first
 Note that these are the same object: `artist === first`
 
 That is all!
+
+## History
+
+AutoDB was written for Objective-C around 2015 and made open source 2019, it was fast and automatic taking out all the pain of persistant storage for all your development needs. I built a lot of apps at that time, and needed something that never failed or had migration issues. I was also bored and was amazed by how great the Obj-C runtime really was (and still is). Swift wasn't capable enough in 2015, but since its release I wanted to re-implement AutoDB in Swift. Because of its type-system you need to re-implement many of the same functions over and over for each type, which made starting tideous and boring.  Thankfully I found [Blackbird](https://github.com/marcoarment/Blackbird) in which most of that grunt-work was already done. So I just shamelessly copied the code and modified it to fit my existing SQL encoder/decoder for Swift-classes. It was all my ADHD needed to get going, and I quite quickly built a usable 
+
+
+## Big thanks
+
+Big thanks to Marco Armendt and his [Blackbird](https://github.com/marcoarment/Blackbird) from which I've copied a lot of the code. If you want your data to be structs and are ok with property wrappers, it is a good alternative to AutoDB with basically the same mindset.
 
 ## Status
 

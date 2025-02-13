@@ -223,6 +223,13 @@ public extension AutoModel {
 		try await AutoDBManager.shared.setupDB(self, nil, settings: settings ?? autoDBSettings())
 	}
 	
+	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
+	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
+	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are inside the transaction / holding the lock.
+	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated AutoDB, _ token: AutoId) async throws -> R) ) async throws -> R {
+		try await db().transaction(action)
+	}
+	
 	static func autoDBSettings() -> AutoDBSettings? {
 		nil
 	}
