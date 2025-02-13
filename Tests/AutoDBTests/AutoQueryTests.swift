@@ -21,19 +21,19 @@ final class AlbumArt: AutoModel, @unchecked Sendable {
 	var album = OneRelation<Album>()
 }
 
-@available(macOS 14.0, *)
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class CureAlbums: AutoModel, @unchecked Sendable {
 	var id: AutoId = 0
 	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
 }
 
-@available(macOS 14.0, *)
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class SaveFail: AutoModel, @unchecked Sendable {
 	var id: AutoId = 0
 	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
 }
 
-@available(macOS 14.0, *)
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class DeallocTest: AutoModel, @unchecked Sendable {
 	var id: AutoId = 0
 	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 20000, limit: 3)
@@ -163,7 +163,6 @@ class AutoQueryTests2: @unchecked Sendable {
 	}
 }
 
-
 class AutoQueryTests {
 	
 	var listeners = Set<AnyCancellable>()
@@ -276,7 +275,6 @@ class AutoQueryTests {
 		try await Album.saveChanges()
 		
 		// newly fetched from DB should have items already populated (after a short delay).
-		var first: CureAlbums? = try await CureAlbums.fetchId(1)
 		let cure = try await CureAlbums.fetchId(1)
 		try await waitForCondition {
 			cure.albums.items.isEmpty == false
@@ -305,6 +303,7 @@ enum WaitError: Error {
 	case reason(String)
 }
 
+@available(macOS 14.0, iOS 15.0, *)
 public func waitForCondition(delay: Double = 15, _ reason: String? = nil, _ closure: (() async throws -> Bool)) async throws {
 	let endDate = Date.now.addingTimeInterval(delay)
 	while Date.now < endDate {

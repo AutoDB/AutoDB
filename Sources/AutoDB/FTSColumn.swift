@@ -212,7 +212,7 @@ class FTSColumn<AutoType: AutoModelObject>: Codable, AnyRelation, @unchecked Sen
 			}.flatMap { $0 }
 			
 			let questionMarks = AutoDBManager.questionMarksForQueriesWithObjects(ids.count, 2)
-			try await OwnerType.query("INSERT OR REPLACE INTO `\(tableInfo.tableName)` (id, text) VALUES \(questionMarks)", args)
+			try await OwnerType.query("INSERT OR REPLACE INTO `\(tableInfo.tableName)` (id, text) VALUES \(questionMarks)", sqlArguments: args)
 		}
 		if ids.count == limit {
 			try await populateIndexIterate(typeID, column)

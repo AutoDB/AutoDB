@@ -62,7 +62,7 @@ class TransactionTests: @unchecked Sendable {
 			print("\(threadBlocker)")
 		}
 		
-		await autoDB.setDebug(false)
+		try await TransClass.db().setDebug(false)
 	}
 	
 	// this is an example of how actors and threads are different:

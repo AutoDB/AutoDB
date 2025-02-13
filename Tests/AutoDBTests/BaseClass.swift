@@ -54,8 +54,7 @@ final class BaseClass: AutoModel, @unchecked Sendable {
     }
 }
 
-@available(macOS 14.0, *)
-@available(iOS 17.0, *)
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable final class ObserveBasic: AutoModel, @unchecked Sendable {
 	
 	var hasChanges: Bool = false
@@ -110,8 +109,7 @@ final class IntTester: AutoModel, @unchecked Sendable {
 	}
 }
 
-@available(macOS 14.0, *)
-@available(iOS 17.0, *)
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable final class Artist: AutoModel, @unchecked Sendable {
 	var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
 	var name: String = ""	// we must have default values or nil
@@ -119,8 +117,7 @@ final class IntTester: AutoModel, @unchecked Sendable {
 	// note that all @Observables will show warning "Immutable property will not be decoded because ..." as long as there are no CodingKeys.
 }
 
-@available(macOS 14.0, *)
-@available(iOS 17.0, *)
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable
 final class CodeWithKeys: AutoModel, @unchecked Sendable {
 	
@@ -140,8 +137,7 @@ final class CodeWithKeys: AutoModel, @unchecked Sendable {
 }
 
 // Building something to handle relations
-@available(macOS 14.0, *)
-@available(iOS 17.0, *)
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable
 final class Parent: AutoModel, @unchecked Sendable {
 	

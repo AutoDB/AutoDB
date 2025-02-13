@@ -15,7 +15,6 @@ public struct RowChangeParameters: Sendable, Codable, Hashable, Equatable {
 	let id: AutoId
 }
 
-public typealias UpdateHookCallback = @Sendable (_ table: String, _ operation: SQLiteOperation, _ rowId: AutoId) -> Void
 public enum SQLiteOperation: Int32, Sendable, Codable {
 	case insert = 18
 	case update = 23
@@ -61,10 +60,12 @@ public actor AutoDB {
 	
 	public init(_ path: String, ramDB: Bool = false) throws {
 		
+		let url = URL(fileURLWithPath: path)
+		let folder = url.deletingLastPathComponent()
+		try FileManager.default.createDirectory(atPath: folder.path, withIntermediateDirectories: true)
+		
 		var flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
 		if ramDB {
-			
-			//normalizedOptions.remove(.monitorForExternalChanges)	//we need this if we are supporting structs
 			flags |= SQLITE_OPEN_MEMORY
 		}
 		var handle: OpaquePointer? = nil
@@ -72,7 +73,7 @@ public actor AutoDB {
 		if #available(iOS 5.0, macOS 10.7, tvOS 9.0, visionOS 1, watchOS 2, *) {
 			
 			var coordinatorError: NSError?
-			NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: URL(fileURLWithPath: path), options: .forMerging, error: &coordinatorError) { _ in
+			NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: .forMerging, error: &coordinatorError) { _ in
 				result = sqlite3_open_v2(path, &handle, flags, nil)
 			}
 			if let coordinatorError {
@@ -187,12 +188,12 @@ public actor AutoDB {
 			// we must cast or somehow find out which SQL-type each argument is!
 			try SQLValue.fromAny($0)
 		}
-		return try await query(token: token, queryString, values)
+		return try await query(token: token, queryString, sqlArguments: values)
 	}
 	
 	@discardableResult
-	public func query(token: AutoId? = nil, _ query: String, _ arguments: [SQLValue] = []) async throws -> [Row] {
-		// only take semaphore if in transaction - other times we can run queries async
+	public func query(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue] = []) async throws -> [Row] {
+		// only take semaphore if in transaction - other times we can run queries in parallel (as much as being an actor allows)
 		let hasSemaphore = inTransaction || token != nil
 		if hasSemaphore {
 			await semaphore.wait(token: token)
@@ -203,8 +204,7 @@ public actor AutoDB {
 		let statement = try preparedStatement(query)
 		let statementHandle = statement.handle
 		var idx = 1 // SQLite bind-parameter indices start at 1, not 0!
-		for value in arguments {
-			// we must cast or somehow find out which SQL-type each argument is!
+		for value in sqlArguments {
 			try value.bind(database: self, statement: statementHandle, index: Int32(idx), for: query)
 			idx += 1
 		}
@@ -252,7 +252,7 @@ public actor AutoDB {
 	
 	private func rowsByExecutingPreparedStatement(_ statement: PreparedStatement, from query: String) throws -> [Row] {
 		if debugPrintEveryQuery {
-			if debugPrintQueryParameterValues, let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
+			if debugPrintQueryParameterValues, let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: scStr, encoding: .utf8) {
 				print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(expandedQuery)")
 			} else {
 				print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(query)")

@@ -46,8 +46,7 @@ class Resource {
 	 
 	 */
 	
-@available(iOS 17.0, *)
-@available(macOS 14.0, *)
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class AutoDBTests: XCTestCase {
 	
 	static let resourcePath: String = {
@@ -173,8 +172,7 @@ final class AutoDBTests: XCTestCase {
 		XCTAssertEqual(next.id, id)
 	}
 	
-	@available(macOS 14.0, *)
-	@available(iOS 17.0, *)
+	@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 	func testTableGeneration() async throws {
 		
 		// test that values get copied correctly when changing column types

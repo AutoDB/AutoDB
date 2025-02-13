@@ -39,12 +39,12 @@ public enum TableError: Error {
 public struct AutoDBSettings: Sendable {
     
 	// Common settings for all tables to be stored in the cache
-	static func cache(path: String = "AutoDB.db", ignoreProperties: Set<String>? = nil, shareDB: Bool = true) -> AutoDBSettings {
+	static func cache(path: String = "AutoDB/AutoDB.db", ignoreProperties: Set<String>? = nil, shareDB: Bool = true) -> AutoDBSettings {
 		AutoDBSettings(path: path, iCloudBackup: false, inCacheFolder: true, ignoreProperties: ignoreProperties, shareDB: shareDB)
 	}
 	
 	// Common settings for all tables to be stored in the app-folder and allow for being backed up.
-	public init(path: String = "AutoDB.db", iCloudBackup: Bool = true, inCacheFolder: Bool = false, ignoreProperties: Set<String>? = nil, shareDB: Bool = true) {
+	public init(path: String = "AutoDB/AutoDB.db", iCloudBackup: Bool = true, inCacheFolder: Bool = false, ignoreProperties: Set<String>? = nil, shareDB: Bool = true) {
 		self.path = path
 		self.iCloudBackup = iCloudBackup
 		self.inCacheFolder = inCacheFolder
@@ -52,8 +52,11 @@ public struct AutoDBSettings: Sendable {
 		self.shareDB = shareDB
 	}
 	
+	/// the path or fileName inside your app's supportDirectory or cachesDirectory
 	let path: String
+	/// Should this data be backed up and transfered to new devices?
 	let iCloudBackup: Bool
+	/// Should this data be in the cache folder so the system may remove it whenever the user is low on disc-space?
 	let inCacheFolder: Bool
 	
 	/// Should this get its own unique actor to issue queries from, or share with other tables with the same DB-file? If you have a lot of writes it is usually FASTER to share (one actor are better at scheduling than many SQLite connectors who uses locks with busy/retries). In normal usage you won't see any difference so there is typically no need to split them up. It may improve performance in some esotheric situations, so the option is available. Measure!
@@ -246,7 +249,10 @@ public extension AutoModel {
 		try await AutoDBManager.shared.fetchId(token: token, id)
 	}
 	static func fetchIds(token: AutoId? = nil, _ ids: [AutoId]) async throws -> [Self] where Self: AnyObject {
-		try await AutoDBManager.shared.fetchIds(token: token, ids)
+		if ids.isEmpty {
+			return []
+		}
+		return try await AutoDBManager.shared.fetchIds(token: token, ids)
 	}
 	
 	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Self] where Self: AnyObject {
@@ -270,9 +276,10 @@ public extension AutoModel {
 		try await AutoDBManager.shared.query(token: token, Self.self, query, arguments)
 	}
 	
+	// this cannot have the same signature
 	@discardableResult
-	static func query(token: AutoId? = nil, _ query: String = "", _ arguments: [SQLValue]? = nil)  async throws -> [Row] {
-		try await AutoDBManager.shared.query(token: token, Self.self, query, arguments)
+	static func query(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil)  async throws -> [Row] {
+		try await AutoDBManager.shared.query(token: token, Self.self, query, sqlArguments: sqlArguments ?? [])
 	}
 	
 	/// A non-throwable query, returns nil instead of throwing

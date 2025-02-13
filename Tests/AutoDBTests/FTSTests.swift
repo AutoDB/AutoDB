@@ -52,6 +52,9 @@ class FTSTests {
 		//now let's change it
 		item.text = "ÖÄÅ"
 		try await item.save()
+		let other = try await FTS.fetchQuery("WHERE text LIKE '%ÖÄÅ%'").first
+		#expect(other?.id == 1)
+		
 		// wait for change trigger in DB
 		try await waitForCondition("should give us one result only - should not match oaa") {
 			try await someNew.fts.search("ÖÄÅ").count == 1	//should give us one result - we need to discover changes and re-index! - delete on change!

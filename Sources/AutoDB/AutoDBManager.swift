@@ -121,11 +121,6 @@ import Foundation
 		if path.hasSuffix("/") == false {
 			path += "/"
 		}
-		if path.hasSuffix("/Application Support/") {
-			// TODO: Check if we get our app when imported into an app...
-			path += "AutoDB/"
-			try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
-		}
 		path += settings.path
 		print("sqlite3 \"\(path)\"")
 		let db = try AutoDB(path)
@@ -189,6 +184,9 @@ import Foundation
 	
 	/// Fetch objects for these ids, missing objects will not be returned and no error thrown for missing objects.
 	func fetchIds<T: AutoModel>(token: AutoId? = nil, _ ids: [UInt64]) async throws -> [T] {
+		if ids.isEmpty {
+			return []
+		}
 		let typeID = ObjectIdentifier(T.self)
 		var cache = [AutoId: T]()
 		
@@ -274,7 +272,7 @@ import Foundation
 			// we must cast or somehow find out which SQL-type each argument is!
 			try SQLValue.fromAny($0)
 		}
-		return try await self.query(token: token, classType, query, arguments: values ?? [])
+		return try await self.query(token: token, classType, query, sqlArguments: values ?? [])
 	}
 	
 	public func valueQuery<T: AutoModel, Val: SQLColumnWrappable>(token: AutoId? = nil, _ classType: T.Type, _ query: String = "", _ arguments: [Sendable]? = nil)  async throws -> Val? {
@@ -287,9 +285,9 @@ import Foundation
 	// MARK: - direct database access, these methods must be locked.
 	
 	@discardableResult
-	public func query<T: AutoModel>(token: AutoId? = nil, _ classType: T.Type, _ query: String, arguments: [SQLValue] = []) async throws -> [Row] {
+	public func query<T: AutoModel>(token: AutoId? = nil, _ classType: T.Type, _ query: String, sqlArguments: [SQLValue] = []) async throws -> [Row] {
 		let database = try await setupDB(classType)
-		return try await database.query(token: token, query, arguments)
+		return try await database.query(token: token, query, sqlArguments)
 	}
 	
 	public func transaction<T: AutoModel, R: Sendable>(_ classType: T.Type, _ action: (@Sendable (_ db: isolated AutoDB, _ token: AutoId) async throws -> R) ) async throws -> R {
