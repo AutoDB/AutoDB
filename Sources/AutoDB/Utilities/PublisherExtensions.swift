@@ -4,6 +4,8 @@
 //  Created by Olof Thorén on 2021-03-31.
 //
 
+#if canImport(Combine)
+
 import Foundation
 
 /// Publishers need their initial value to be set manually when decoding
@@ -73,3 +75,4 @@ extension EncodingError
         .invalidValue(value, .init(codingPath: codingPath, debugDescription: debugDescription))
     }
 }
+#endif

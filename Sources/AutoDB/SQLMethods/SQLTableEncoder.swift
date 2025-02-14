@@ -197,7 +197,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
     }
 	
 	static func alwaysIgnoreType<T>(_ value: T) -> Bool {
-#if canImport(Observation)
+#if canImport(Darwin) && canImport(Observation)
 		if #available(macOS 14.0, *), #available(iOS 17.0, *) {
 			if type(of: value) is Observation.ObservationRegistrar.Type {
 				// all observed objects get this, we ignore it

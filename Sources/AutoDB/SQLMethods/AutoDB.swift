@@ -2,11 +2,33 @@
 //  AutoDB.swift
 //  AutoDB
 //
-//  Heavily copied from Blackbird, only minor changes and bugfixes: https://github.com/marcoarment/Blackbird
+//  Heavily copied from Blackbird: https://github.com/marcoarment/Blackbird
 //
 
 import Foundation
+#if canImport(Darwin)
 import SQLite3
+#else
+fileprivate class NSFileCoordinator {
+	struct WritingOptions : OptionSet, @unchecked Sendable {
+		
+		var rawValue: UInt
+		init(rawValue: UInt) {
+			self.rawValue = rawValue
+		}
+		static var forMerging: NSFileCoordinator.WritingOptions { .init(rawValue: 0) }
+	}
+	init(filePresenter whateverNilThing: Int?) {}
+	func coordinate(writingItemAt url: URL, options: NSFileCoordinator.WritingOptions = [], error: inout NSError?, byAccessor writer: (URL) -> Void) {}
+}
+import SQLCipher
+#endif
+
+#if canImport(Android)
+import Android
+#elseif canImport(GlibC)
+import GlibC
+#endif
 
 public typealias ChangeObserver = AsyncObserver<RowChangeParameters>
 public struct RowChangeParameters: Sendable, Codable, Hashable, Equatable {

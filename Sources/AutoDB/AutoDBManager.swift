@@ -43,7 +43,9 @@ import Foundation
 	static var isSetup = Set<ObjectIdentifier>()
 	var databases = [ObjectIdentifier: AutoDB]()
 	var sharedDatabases = [String: AutoDB]()
-	
+
+	#if os(Android)
+	#else
 	// keep track of low memory warnings, save any unsaved objects to release memory.
 	private let lowMemoryEventSource: DispatchSourceMemoryPressure
 	
@@ -63,6 +65,7 @@ import Foundation
 	private func _init() async {
 		lowMemoryEventSource.resume()
 	}
+	#endif
 	
 	func truncateTable<Table: AutoModel>(token: AutoId? = nil, _ table: Table.Type) async throws {
 		let db = try await setupDB(table)

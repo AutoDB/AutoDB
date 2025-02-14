@@ -38,7 +38,11 @@
 //
 
 import Foundation
+#if canImport(Darwin)
 import SQLite3
+#else
+import SQLCipher
+#endif
 
 typealias EncodableSendable = Encodable & Sendable
 
