@@ -3,7 +3,7 @@ know at autoDB@aggressive.se.
 
 In short, this is the MIT License.
 
-Copyright (c) 2020 Aggressive Development AB
+Copyright (c) 2025 Aggressive Development AB
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
