@@ -12,9 +12,11 @@ Fetching
 
 Support for Structs, when you don't need/want auto collision handling but rather just want to handle a huge table of data efficiently (but still automatic in other ways).  
 
+- remove ignoreProperties since we are using codable now.
+
 # That is all!
 
 ## Thinking
 
-* Don't build cascading deletes and similar!
+* Don't build cascading deletes and similar! Why?
 * but think about syncing. Perhaps its a good idea to have some basic functionality for iCloud/Firebase sync?

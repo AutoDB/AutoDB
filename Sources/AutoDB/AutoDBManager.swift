@@ -81,7 +81,7 @@ import Foundation
 		if AutoDBManager.isSetup.insert(typeID).inserted {
 			
 			let database: AutoDB
-			let settings = settings ?? AutoDBSettings()
+			let settings = settings ?? table.autoDBSettings() ?? AutoDBSettings()
 			if settings.shareDB {
 				let sharedKey = "\(settings.path)\(settings.inCacheFolder ? "_cache" : "")"
 				if let db = sharedDatabases[sharedKey] {
@@ -120,11 +120,16 @@ import Foundation
 	@discardableResult
 	func initDB(_ settings: AutoDBSettings = AutoDBSettings()) async throws -> AutoDB {
 		
-		var path = settings.inCacheFolder ? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].path : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].path
-		if path.hasSuffix("/") == false {
-			path += "/"
+		var path: String
+		if settings.inAppFolder || settings.inCacheFolder {
+			path = settings.inCacheFolder ? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].path : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].path
+			if path.hasSuffix("/") == false {
+				path += "/"
+			}
+			path += settings.path
+		} else {
+			path = settings.path
 		}
-		path += settings.path
 		print("sqlite3 \"\(path)\"")
 		let db = try AutoDB(path)
 		
@@ -142,7 +147,8 @@ import Foundation
 		lookupTable.changedObjects[typeName]?.count ?? 0
 	}
 	
-	func cached<T: AutoModel>(_ objectType: T.Type, _ id: AutoId) async -> T? {
+	/// Check if init has run, or if this is a temp-object
+	public func cached<T: AutoModel>(_ objectType: T.Type, _ id: AutoId) async -> T? {
 		let typeID = ObjectIdentifier(T.self)
 		return cachedObjects[typeID]?[id] as? T
 	}
@@ -193,20 +199,21 @@ import Foundation
 		let typeID = ObjectIdentifier(T.self)
 		var cache = [AutoId: T]()
 		
-		for id in ids {
-			if let obj = cachedObjects[typeID]?[id] as? T {
-				cache[id] = obj
+			for id in ids {
+				if let obj = cachedObjects[typeID]?[id] as? T {
+					cache[id] = obj
+				}
 			}
-		}
+			
+			// Don't fetch cached ids!
+			let fetchIds = ids.filter { cache[$0] == nil }
+			if fetchIds.isEmpty {
+				// we don't need to fetch
+				return ids.compactMap { id in
+					cache[id]
+				}
+			}
 		
-		// Don't fetch cached ids!
-		let fetchIds = ids.filter { cache[$0] == nil }
-		if fetchIds.isEmpty {
-			// we don't need to fetch
-			return ids.compactMap { id in
-				cache[id]
-			}
-		}
 		
 		let questionMarks = Self.questionMarks(fetchIds.count)
 		let list: [AutoId: T] = try await fetchQuery(token: token, "WHERE id IN (\(questionMarks))", arguments: fetchIds.map({ SQLValue.uinteger($0) })).dictionary()
@@ -229,7 +236,7 @@ import Foundation
 	//	try await _fetchQuery(whereQuery, arguments: arguments)
 	//}
 	
-	func fetchQuery<T: AutoModel>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue]) async throws -> [T] {
+	func fetchQuery<T: AutoModel>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue], refreshData: Bool = false) async throws -> [T] {
 		let typeID = ObjectIdentifier(T.self)
 		try await setupDB(T.self, typeID)
 		let decoder = try await getDecoder(T.self)
@@ -251,6 +258,7 @@ import Foundation
 				// we must have an id to create AutoDB objects
 				throw AutoError.missingId
 			}
+			
 			if let cached = cachedObjects[typeID]?[id] as? T {
 				// Don't recreate objects that exist
 				return cached
@@ -309,7 +317,7 @@ import Foundation
 		guard ids.isEmpty == false, let table = tables[typeID] else {
 			return
 		}
-		lookupTable.setDeleted(ids, true, typeID)
+		lookupTable.setDeleted(ids, typeID)
 		
 		let query = String(format: table.deleteQuery, Self.questionMarks(ids.count))
 		let database = databases[typeID]!
@@ -320,6 +328,7 @@ import Foundation
 		// lookupTable.removeDeleted(typeID, Set(ids))
 	}
 	
+	// TODO: in progress
 	func deleteLater(token: AutoId? = nil, _ ids: [AutoId], _ typeID: ObjectIdentifier) {
 		guard ids.isEmpty == false else {
 			return
@@ -355,9 +364,10 @@ import Foundation
 	public func saveChanges<T: AutoModel>(token: AutoId? = nil, _ classType: T.Type) async throws {
 		var anyError: Error? = nil
 		let typeID = ObjectIdentifier(T.self)
-		if let ids = lookupTable.deleted[typeID] {
+		if let ids = lookupTable.deleteLater[typeID] {
 			do {
 				try await delete(token: token, Array(ids), typeID)
+				lookupTable.removeDeleteLater(typeID, ids)
 			} catch {
 				anyError = error
 			}

@@ -115,10 +115,6 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 		values[key.deleteUnderscorePrefix()] = value
 	}
 	
-	func ignoreKey(_ column: String) -> Bool {
-		table.settings?.ignoreProperties?.contains(column) ?? false
-	}
-	
 	public func container<Key>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> where Key : CodingKey {
 		// if we have started a new object
 		try? commitRow()
@@ -146,24 +142,15 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 		
 		func encodeNil(forKey key: KeyType) throws { fatalError("All columns must have a value") }
 		func encode(_ value: String, forKey key: KeyType) throws {
-			if enc.ignoreKey(key.stringValue) {
-				return
-			}
 			enc.addColumn(key.stringValue, value)
 		}
 		
 		func encode<T>(_ value: T, forKey key: KeyType) throws where T : Encodable {
 			
-			if enc.ignoreKey(key.stringValue) {
-				return
-			}
 			enc.addColumn(key.stringValue, value)
 		}
 		
 		func encodeIfPresent<T>(_ value: T?, forKey key: KeyType) throws where T : Encodable {
-			if enc.ignoreKey(key.stringValue) {
-				return
-			}
 			if let value {
 				try encode(value, forKey: key)
 			} else {

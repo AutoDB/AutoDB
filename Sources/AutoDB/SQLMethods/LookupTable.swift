@@ -12,9 +12,10 @@ struct LookupTable {
 	
 	var changedObjects = [ObjectIdentifier: [AutoId: any AutoModel]]()
 	var deleted = [ObjectIdentifier: Set<AutoId>]()
+	var deleteLater = [ObjectIdentifier: Set<AutoId>]()
 	
-	/// Mark an object as deleted, we can now batch delete at a future time and prevent saves.
-	mutating func setDeleted(_ ids: [AutoId], _ isDeleted: Bool, _ typeID: ObjectIdentifier) {
+	/// Mark an object as deleted, prevent save for any lingering objects
+	mutating func setDeleted(_ ids: [AutoId], _ typeID: ObjectIdentifier) {
 		
 		if deleted[typeID] == nil {
 			deleted[typeID] = Set(ids)
@@ -35,6 +36,21 @@ struct LookupTable {
 	
 	func isDeleted(_ id: AutoId, _ identifier: ObjectIdentifier) -> Bool {
 		deleted[identifier]?.contains(id) ?? false
+	}
+	
+	/// Mark an object as deleted, but don't delete it - we can now batch delete at a future time and prevent saves.
+	mutating func setDeleteLater(_ ids: [AutoId], _ typeID: ObjectIdentifier) {
+		
+		if deleteLater[typeID] == nil {
+			deleteLater[typeID] = Set(ids)
+		} else {
+			deleteLater[typeID]?.formUnion(ids)
+		}
+		setDeleted(ids, typeID)
+	}
+	
+	mutating func removeDeleteLater(_ identifier: ObjectIdentifier, _ toRemove: Set<AutoId>) {
+		deleteLater[identifier]?.subtract(toRemove)
 	}
 	
 	mutating func objectHasChanged<T: AutoModel>(_ object: T, _ identifier: ObjectIdentifier? = nil) {

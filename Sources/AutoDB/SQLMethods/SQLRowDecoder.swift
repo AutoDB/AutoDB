@@ -14,7 +14,7 @@
 //        \   |   o   |   /       Copyright 2025 - ∞ Olof Andersson-Thorén
 //         \ /    o    \ /             Released under the MIT License
 //          |     o     |
-//         /______|______\             No paradise without automation
+//         /______|______\               The paradise is automatic
 //            ||    ||
 //            ||    ||
 //            ~~    ~~

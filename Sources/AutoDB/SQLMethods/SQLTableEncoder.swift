@@ -164,24 +164,11 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
     
 	func addColumn<T: EncodableSendable>(_ column: String, _ type: ColumnType, _ valueType: Any.Type, _ nullable: Bool, _ defaultValue: T? = nil) {
         
-        if ignoreKey(column) {
-            return
-        }
-		if column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
+        if column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
 			print("ignoring \(column)")
 			return
 		}
 		columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: nullable, defaultValue: defaultValue))
-    }
-    
-    func ignoreKey(_ column: String) -> Bool {
-		if column == "hasChanges" {
-			return true
-		}
-		if let settings = settings {
-            return settings.ignoreProperties?.contains(column) ?? false
-        }
-        return false
     }
     
     public func container<Key>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> where Key : CodingKey {
@@ -285,7 +272,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
         
         func encode<T>(_ value: T, forKey key: KeyType) throws where T : EncodableSendable {
             
-            if enc.ignoreKey(key.stringValue) || SQLTableEncoder.alwaysIgnoreType(value) {
+            if SQLTableEncoder.alwaysIgnoreType(value) {
 				return
 			}
             if let (sqlType, nullable) = SQLTableEncoder.getColumnType(value) {
@@ -309,7 +296,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		}
 		
 		func encodeIfPresent<T>(_ value: T?, forKey key: KeyType) throws where T : EncodableSendable {
-			if enc.ignoreKey(key.stringValue) || SQLTableEncoder.alwaysIgnoreType(value) {
+			if SQLTableEncoder.alwaysIgnoreType(value) {
 				return
 			}
 			let metaType = type(of: value)
@@ -363,50 +350,3 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
     }
     
 }
-
-/*
-//THIS IS WEIRD!
-extension BinaryFloatingPoint {
-    // Creates a new instance from the given value if possible otherwise returns nil
-    var double: Double? { Double(exactly: self) }
-    // Creates a new instance from the given value, rounded to the closest possible representation.
-    var doubleValue: Double { .init(self) }
-}
- 
-protocol SQLType {
-    func columnType() -> ColumnType
-}
-
-protocol BinaryFloatingPoint: SQLType {
-}
-
- protocol BinaryInteger: SQLType {
-}
-extension BinaryFloatingPoint {
-    func columnType() -> ColumnType {
-        .real
-    }
-}
-
-extension BinaryInteger {
-    func columnType() -> ColumnType {
-        .integer
-    }
-}
- 
-extension Date: SQLType {
-    func columnType() -> ColumnType {
-        .date
-    }
-}
-extension String: SQLType {
-    func columnType() -> ColumnType {
-        .text
-    }
-}
-extension Data: SQLType {
-    func columnType() -> ColumnType {
-        .blob
-    }
-}
- */

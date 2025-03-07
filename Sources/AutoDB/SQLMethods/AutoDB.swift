@@ -4,6 +4,42 @@
 //
 //  Heavily copied from Blackbird: https://github.com/marcoarment/Blackbird
 //
+//
+//
+//             _______
+//           _|       |_
+//          | |  O O  | |                         AutoDB
+//          |_|   ^   |_|
+//            \  'U' /                   https://github.com/AutoDB
+//       []    |--∞--|    []
+//        \   |   o   |   /       Copyright 2025 - ∞ Olof Andersson-Thorén
+//         \ /    o    \ /             Released under the MIT License
+//          |     o     |
+//         /______|______\               The paradise is automatic
+//            ||    ||
+//            ||    ||
+//            ~~    ~~
+//
+//  Permission is hereby granted, free of charge, to any person obtaining a copy
+//  of this software and associated documentation files (the "Software"), to deal
+//  in the Software without restriction, including without limitation the rights
+//  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//  copies of the Software, and to permit persons to whom the Software is
+//  furnished to do so, subject to the following conditions:
+//
+//  The above copyright notice and this permission notice shall be included in all
+//  copies or substantial portions of the Software.
+//
+//  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//  SOFTWARE.
+
+
+
 
 import Foundation
 #if canImport(Darwin)
@@ -142,6 +178,9 @@ public actor AutoDB {
 	var gentleClose: Task<Void, Swift.Error>?
 	var harshClose: Task<Void, Swift.Error>?
 	public func close(_ token: AutoId? = nil) async {
+		gentleClose?.cancel()
+		harshClose?.cancel()
+		
 		gentleClose = Task {
 			let hasSemaphore = inTransaction || token != nil
 			if hasSemaphore {
@@ -154,18 +193,24 @@ public actor AutoDB {
 		
 		// kill after some time?
 		harshClose = Task {
-			try await Task.sleep(nanoseconds: 10_000_000_000)
+			let waitSec: Double = 10
+			let date = Date().addingTimeInterval(waitSec * 2.0)
+			try await Task.sleep(nanoseconds: 100_000_000 * UInt64(waitSec))
 			try Task.checkCancellation()
+			if Date.now > date {
+				// we have gone too long to be relevant, perhaps was backgrounded and couldn't finish until restarted.
+				return
+			}
 			isClosed = true
-			// print("killing sqlite and forcing close")
-			// sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
+			print("Interrupting sqlite to force close")
+			sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
 		}
 	}
 	
 	public func open() async {
-		isClosed = false
-		gentleClose?.cancel()
 		harshClose?.cancel()
+		gentleClose?.cancel()
+		isClosed = false
 	}
 	
 	nonisolated internal func errorDesc(_ dbHandle: OpaquePointer?, _ query: String? = nil) -> String {

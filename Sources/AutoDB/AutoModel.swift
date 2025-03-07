@@ -38,17 +38,17 @@ public enum TableError: Error {
 ///Class specific settings to generate SQL information that can't be known automatically, each DB needs to define its path and cache settings. Then every table may subscribe to one of these settings, if none is chosen the default will be used
 public struct AutoDBSettings: Sendable {
     
-	// Common settings for all tables to be stored in the cache
+	// Cache settings-shorthand for all tables to be stored in the cache
 	static func cache(path: String = "AutoDB/AutoDB.db", ignoreProperties: Set<String>? = nil, shareDB: Bool = true) -> AutoDBSettings {
-		AutoDBSettings(path: path, iCloudBackup: false, inCacheFolder: true, ignoreProperties: ignoreProperties, shareDB: shareDB)
+		AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: true, shareDB: shareDB)
 	}
 	
 	// Common settings for all tables to be stored in the app-folder and allow for being backed up.
-	public init(path: String = "AutoDB/AutoDB.db", iCloudBackup: Bool = true, inCacheFolder: Bool = false, ignoreProperties: Set<String>? = nil, shareDB: Bool = true) {
+	public init(path: String = "AutoDB/AutoDB.db", iCloudBackup: Bool = true, inAppFolder: Bool = true, inCacheFolder: Bool = false, shareDB: Bool = true) {
 		self.path = path
 		self.iCloudBackup = iCloudBackup
+		self.inAppFolder = inAppFolder
 		self.inCacheFolder = inCacheFolder
-		self.ignoreProperties = ignoreProperties
 		self.shareDB = shareDB
 	}
 	
@@ -56,14 +56,13 @@ public struct AutoDBSettings: Sendable {
 	let path: String
 	/// Should this data be backed up and transfered to new devices?
 	let iCloudBackup: Bool
-	/// Should this data be in the cache folder so the system may remove it whenever the user is low on disc-space?
+	/// Is the path relative to the applications folder?
+	let inAppFolder: Bool
+	/// Is the path relative to the cache folder - so the system may remove it whenever the user is low on disc-space?
 	let inCacheFolder: Bool
 	
 	/// Should this get its own unique actor to issue queries from, or share with other tables with the same DB-file? If you have a lot of writes it is usually FASTER to share (one actor are better at scheduling than many SQLite connectors who uses locks with busy/retries). In normal usage you won't see any difference so there is typically no need to split them up. It may improve performance in some esotheric situations, so the option is available. Measure!
 	let shareDB: Bool
-	
-	/// by default we store everything, note that this is controlled by CodingKeys already only use if you must include a CodingKey that you don't want to be stored.
-	let ignoreProperties: Set<String>?
 }
 
 public typealias AutoId = UInt64
@@ -104,7 +103,7 @@ public protocol AutoModel: Codable, Hashable, Identifiable, Sendable, AnyObject 
 	
 	/// If this object needs to be saved at some point in the future
 	func didChange() async
-    
+	
 	/// Called after fetching from DB, default implementation does nothing
 	func awakeFromFetch()
 	
@@ -133,6 +132,10 @@ public protocol AutoModel: Codable, Hashable, Identifiable, Sendable, AnyObject 
 	static func saveAllChanges(token: AutoId?) async throws
 	/// save changes to all changed objects and don't wait until completed, ignoring errors
 	static func saveAllChangesDetacted(token: AutoId?)
+	/// called before storing to DB, default implementation does nothing
+	static func willSave(_ objects: [Self]) async throws
+	/// called after storing to DB, default implementation does nothing
+	static func didSave(_ objects: [Self]) async throws
 }
 
 public extension AutoModel {
@@ -325,8 +328,14 @@ public extension AutoModel {
 		}
 	}
 	
+	static func willSave(_ objects: [Self]) async throws {}
+	static func didSave(_ objects: [Self]) async throws {}
+	
+	/// All save functions ends up here, where we encode the objects to SQL queries, store them, remove from isChanged and call did/will save.
 	static func saveList(token: AutoId? = nil, _ objects: [Self]) async throws {
 		guard objects.isEmpty == false else { return }
+		
+		try await willSave(objects)
 		
 		let encoder = try await AutoDBManager.shared.getEncoder(Self.self)
 		await encoder.semaphore.wait()
@@ -341,6 +350,8 @@ public extension AutoModel {
 		//remove all changed objects
 		let typeID = ObjectIdentifier(self)
 		await AutoDBManager.shared.removeFromChanged(objects, typeID)
+		
+		try await didSave(objects)
 	}
 	
 	var isDeleted: Bool {
@@ -357,6 +368,7 @@ public extension AutoModel {
 		try await AutoDBManager.shared.delete(token: token, ids, ObjectIdentifier(self))
 	}
 	
+	// TODO: in progress
 	static func deleteIdsLater(token: AutoId? = nil, _ ids: [AutoId]) async {
 		await AutoDBManager.shared.deleteLater(token: token, ids, ObjectIdentifier(self))
 	}
@@ -370,6 +382,10 @@ public extension AutoModel {
 		Task {
 			await AutoDBManager.shared.objectHasChanged(self)
 		}
+	}
+	
+	func refresh() async throws {
+		//try await AutoDBManager.shared.fetchQuery()
 	}
 	
 	// MARK: - callbacks

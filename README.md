@@ -1,5 +1,11 @@
 # AutoDB
 
+#Big change, TODO:
+
+We will move all AutoModel to structs. Then we can auto-handle all updates on the db, and refresh when/if needed. No struct will be cached, since value-type.
+On top we built the AutoModelObject which holds these structs. It has identity and can be cached. If you don't need classes, you get the pros of structs, but when you do you get the pros of classes. This way we can also auto-detect changes by keeping the original struct and calling didSet.   
+
+
 Automatic persistence and database handling for all platforms in Swift, built on SQLite. Fast, automatic migrations and thread safe using actors and async/await. 
 
 ## Quick start
