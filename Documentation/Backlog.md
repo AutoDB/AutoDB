@@ -1,7 +1,7 @@
 # AutoDB Swift
 
 SQL
-	- update hook when having fetch-lists in AutoRelation (as in AutoQuery)
+	- update hook when having fetch-lists in AutoRelation (as in RelationQuery)
 	- remember our types for faster encoding of classes and performing queries. 
 	- test all types
 

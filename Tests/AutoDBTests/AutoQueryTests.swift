@@ -1,5 +1,5 @@
 //
-//  AutoQueryClass.swift
+//  RelationQueryClass.swift
 //  AutoDB
 //
 //  Created by Olof Andersson-Thorén on 2024-12-05.
@@ -45,7 +45,7 @@ final class DeallocTest: @unchecked Sendable {
 		albums.setOwner(self)
 	}
 	
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 20000, limit: 3)
+	var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 20000, limit: 3)
 	var callback: (() -> Void)?
 	deinit {
 		callback?()
@@ -57,13 +57,13 @@ final class DeallocTest: @unchecked Sendable {
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class CureAlbums: AutoModelObject, @unchecked Sendable {
 	var id: AutoId = 0
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
+	var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class SaveFail: AutoModelObject, @unchecked Sendable {
 	var id: AutoId = 0
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
+	var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
 }
 */
 
@@ -71,7 +71,7 @@ final class SaveFail: AutoModelObject, @unchecked Sendable {
 final class CombineTest: AutoModel, @unchecked Sendable, ObservableObject {
 	var id: AutoId = 0
 	@Published
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
+	var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
 	var listeners = Set<AnyCancellable>()
 	var someInt: Int = 1
 	
@@ -147,7 +147,7 @@ class ListenerHelp: @unchecked Sendable {
 
 
 // experimenting with publishers
-class AutoQueryTests2: @unchecked Sendable {
+class RelationQueryTests2: @unchecked Sendable {
 	var gotMessage = false
 	
 	func exampleOfAsyncObserver() async throws {
@@ -182,12 +182,12 @@ class AutoQueryTests2: @unchecked Sendable {
 	}
 }
 */
-class AutoQueryTests {
+class RelationQueryTests {
 	
 	var listeners = Set<AnyCancellable>()
 	var gotMessage = false
 	
-	@Test func deallocAutoQuery() async throws {
+	@Test func deallocRelationQuery() async throws {
 		//try await AutoDBManager.shared.truncateTable(DeallocTest.self)
 		var owner: DeallocTest? = DeallocTest()
 		weak var listener = owner?.albums
@@ -237,9 +237,9 @@ class AutoQueryTests {
 	
 	/*
 	@Test
-	func testAutoQueryXTimes() async throws {
+	func testRelationQueryXTimes() async throws {
 		for index in 0..<300 {
-			try await testAutoQuery()
+			try await testRelationQuery()
 			if index % 100 == 0 {
 				print("autoQ completed: \(index)")
 			}
@@ -269,7 +269,7 @@ class AutoQueryTests {
 		}
 	}
 	
-	func testAutoQuery() async throws {
+	func testRelationQuery() async throws {
 		try await AutoDBManager.shared.truncateTable(CureAlbums.self)
 		try await AutoDBManager.shared.truncateTable(Album.self)
 		//try await Album.db().setDebug()

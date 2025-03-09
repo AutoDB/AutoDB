@@ -1,5 +1,5 @@
 //
-//  AutoQuery.swift
+//  RelationQuery.swift
 //  AutoDB
 //
 //  Created by Olof Andersson-Thorén on 2024-12-05.
@@ -11,10 +11,10 @@ protocol ObserverSubject {
 	func willChange()
 }
 
-/// Since swift forces the use of names, we cannot have one AutoQuery that with combine and the same with Observable - and then a third one with nothing. So instead we have a plain AutoQuery that is an exact copy of AutoQueryObservable but that also sends changes to an asyncPublisher called changePublisher
+/// Since swift forces the use of names, we cannot have one RelationQuery that with combine and the same with Observable - and then a third one with nothing. So instead we have a plain RelationQuery that is an exact copy of RelationQueryObservable but that also sends changes to an asyncPublisher called changePublisher
 // TODO: just solve it with a protocoll!
 /// non-observable version for use in other circumstanses, just a plain copy without @Observable
-public final class AutoQuery<AutoType: AutoModelObject>: Codable, @unchecked Sendable, AnyRelation {
+public final class RelationQuery<AutoType: AutoModelObject>: Codable, @unchecked Sendable, AnyRelation {
 	
 	let query: String
 	var arguments: [Value]? = nil
@@ -146,7 +146,7 @@ public final class AutoQuery<AutoType: AutoModelObject>: Codable, @unchecked Sen
 #if canImport(Combine)
 import Combine
 @available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
-extension AutoQuery: ObservableObject, ObserverSubject {
+extension RelationQuery: ObservableObject, ObserverSubject {
 	func willChange() {
 		objectWillChange.send()
 	}
@@ -156,16 +156,19 @@ extension AutoQuery: ObservableObject, ObserverSubject {
 #if canImport(Observation)
 import Observation
 /**
-A query that fetches incrementally. Specify how many objects to fetch like this:
-var cureAlbums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
-NOTE: The query obviously cannot have limit or offset clauses of its own!
+ A Relation based on a query that fetches incrementally.
+ Specify the relation and how many objects to fetch like this:
+ var cureAlbums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
+ Now this class holds a relation to all albums of The Cure, fetched when needed.
+ 
+ NOTE: The query obviously cannot have limit or offset clauses of its own!
  
  Avoid using propertyWrappers if you can - they are not compatible with @Observable
  */
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
 @Observable
-public final class AutoQuery<AutoType: Model>: Codable, @unchecked Sendable, Relation {
-	public static func == (lhs: AutoQuery<AutoType>, rhs: AutoQuery<AutoType>) -> Bool {
+public final class RelationQuery<AutoType: Model>: Codable, @unchecked Sendable, Relation {
+	public static func == (lhs: RelationQuery<AutoType>, rhs: RelationQuery<AutoType>) -> Bool {
 		lhs.query == rhs.query && lhs.arguments == rhs.arguments
 	}
 	
