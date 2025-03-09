@@ -48,7 +48,7 @@ class SQLRowDecoder: Decoder {
 	let tableInfo: TableInfo
 	var usedKeys: [String] = []
 	
-	init<TableClass: AutoModel>(_ classType: TableClass.Type, _ tableInfo: TableInfo, _ values: [String: SQLValue]? = nil) {
+	init<TableClass: Model>(_ classType: TableClass.Type, _ tableInfo: TableInfo, _ values: [String: SQLValue]? = nil) {
 		self.tableInfo = tableInfo
 		let base = TableClass.init()
 		for (key, path) in base.allKeyPaths {
@@ -131,7 +131,9 @@ class SQLRowDecoder: Decoder {
 	}
 	
 	func hasValue(_ key: String) -> Bool {
-		guard let _ = values[key] ?? values[key.trimmingCharacters(in: prefixPropertyChars)] else {
+		guard let value = values[key] ?? values[key.trimmingCharacters(in: prefixPropertyChars)],
+			  value != .null
+		else {
 			return false
 		}
 		return true

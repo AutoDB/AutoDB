@@ -318,7 +318,7 @@ public actor AutoDB {
 	}
 	
 	private func rowsByExecutingPreparedStatement(_ statement: PreparedStatement, from query: String) throws -> [Row] {
-		if debugPrintEveryQuery {
+		if true || debugPrintEveryQuery {
 			if debugPrintQueryParameterValues, let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
 				print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(expandedQuery)")
 			} else {

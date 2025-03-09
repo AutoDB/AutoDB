@@ -10,7 +10,7 @@ import Foundation
 
 @testable import AutoDB
 
-final class Mig: AutoModel, @unchecked Sendable {
+struct Mig: Model {
 	var id: AutoId = 1
 	var name = 1
 	var plain = "plain"

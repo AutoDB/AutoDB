@@ -11,6 +11,7 @@ import Foundation
 class SQLTableEncoder: Encoder, @unchecked Sendable {
     
 	var columns = [Column]()
+	var addedColumns: Set<String> = []
 	var settings: AutoDBSettings?
 	
 	public var codingPath: [CodingKey]
@@ -22,16 +23,24 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		self.userInfo = userInfo
 	}
 	
-	func setup<T: AutoModel>(_ classType: T.Type, _ db: AutoDB) async throws -> TableInfo {
-		let object = classType.init()
+	func setup<T: Model>(_ classType: T.Type, _ db: AutoDB) async throws -> TableInfo {
+		let instance = classType.init()
 		let tableName = classType.typeName
 		
 		self.settings = classType.autoDBSettings()
 		
 		//we automatically get all values, this will call container<Key>(keyedBy type: Key.Type) -> ...
-		// and then encode<T>(_ value: T, forKey key: KeyType) for each value.
-		try object.encode(to: self)
-		// we can also use reflection, but we don't need to since we get everything from codable.
+		// and then encode<T>(_ value: T, forKey key: KeyType) for each value, including optionals with a default value.
+		try instance.encode(to: self)
+		
+		// now we are missing all optionals with default nil-value, add all optionals again (we ignore duplicate keys)
+		for (column, path) in instance.allKeyPaths {
+			if let type = (instance[keyPath: path] as? OptionalProtocol)?.wrappedType(),
+			   let (columnType, _) = SQLTableEncoder.getColumnType(type) {
+				
+				addColumn(column, columnType, type)
+			}
+		}
 		
 		// now we have all columns and can create our table
 		let tableInfo = TableInfo(settings: classType.autoDBSettings(), tableName, columns)
@@ -42,7 +51,6 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			columnsInDB.append(try Column(row: row, tableName: tableName))
 		}
 		
-		let instance = T.init()
 		if columnsInDB.isEmpty {
 			// table does not exist. Create it!
 			try await db.query(tableInfo.createTableSyntax())
@@ -162,14 +170,27 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		return tableInfo
 	}
     
-	func addColumn<T: EncodableSendable>(_ column: String, _ type: ColumnType, _ valueType: Any.Type, _ nullable: Bool, _ defaultValue: T? = nil) {
+	/// add a column that defaults to non-nil, can still be optional
+	func addColumn<T: EncodableSendable>(_ column: String, _ type: ColumnType, _ valueType: Any.Type, _ nullable: Bool, _ defaultValue: T?) {
         
-        if column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
+		if addedColumns.contains(column) || column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
 			print("ignoring \(column)")
 			return
 		}
+		addedColumns.insert(column)
 		columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: nullable, defaultValue: defaultValue))
     }
+	
+	/// add an optional column that defaults to nil
+	func addColumn(_ column: String, _ type: ColumnType, _ valueType: Any.Type) {
+		
+		if addedColumns.contains(column) || column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
+			print("ignoring \(column)")
+			return
+		}
+		addedColumns.insert(column)
+		columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: true, defaultValue: nil))
+	}
     
     public func container<Key>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> where Key : CodingKey {
         
@@ -195,11 +216,9 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		return false
 	}
     
-    //It was impossible to extend protocols to do this automatically, now we need to do this for every individual type - they are not that many so perhaps it is ok?
+    /// Must convert each type to SQLite-types, note that they are dynamic so SQL doesn't really care what type we claim it to be.
 	static func getColumnType<T>(_ value: T) -> (ColumnType, Bool)? {
         
-        //Problem: There are too many types, we need the encoded result!
-        //do we? We know they are Encodable so we can always turn them into data
 		if alwaysIgnoreType(value) {
 			return nil
 		}
@@ -265,7 +284,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			self.enc = enc
 		}
         
-		func encodeNil(forKey key: KeyType) throws { fatalError("All columns must have a value") }
+		func encodeNil(forKey key: KeyType) throws { fatalError("This will not happen, but if it does - give it a default value.") }
         func encode(_ value: String, forKey key: KeyType) throws {
 			enc.addColumn(key.stringValue, .text, String.self, false, value)
         }

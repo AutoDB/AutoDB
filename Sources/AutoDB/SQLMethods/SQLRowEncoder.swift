@@ -21,7 +21,7 @@ extension String {
 public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	
 	let database: AutoDB
-	let tableClass: any AutoModel.Type
+	let tableClass: any Model.Type
 	let table: TableInfo
 	let query: String
 	let maxQueryVariableCount: Int
@@ -35,7 +35,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	/// take this before starting to encode
 	let semaphore = Semaphore()
 	
-	init<TableClass: AutoModel>(_ classType: TableClass.Type) async {
+	init<TableClass: Model>(_ classType: TableClass.Type) async {
 		
 		tableClass = classType
 		guard let database = try? await AutoDBManager.shared.setupDB(classType) else {

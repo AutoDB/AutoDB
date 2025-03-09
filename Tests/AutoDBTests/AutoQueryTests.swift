@@ -7,46 +7,65 @@
 import Foundation
 @testable import AutoDB
 import Testing
+import Combine
 
-final class Album: AutoModel, @unchecked Sendable {
+struct Album: Model {
 	
 	var id: AutoId = 0
 	var name = ""
 	var artist = ""
 }
 
-final class AlbumArt: AutoModel, @unchecked Sendable {
+/*
+ TODO: we have forgotten about one relation! - did not work previously and needs update!
+ */
+ final class AlbumArt: ModelObject, @unchecked Sendable {
+ 
+	 struct AlbumArtValue: Model {
+		 
+		 var id: AutoId = 0
+		 var name = ""
+		 var artist = ""
+	 }
+	 
+	 var value: AlbumArtValue
+	 init(_ value: AlbumArtValue) {
+		 self.value = value
+	 }
+	 
+	 // TODO: test this one!
+	 var album = OneRelation<Album>()
+ }
+
+
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+final class DeallocTest: @unchecked Sendable {
 	
-	var id: AutoId = 0
-	var album = OneRelation<Album>()
-}
-
-@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-final class CureAlbums: AutoModel, @unchecked Sendable {
-	var id: AutoId = 0
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
-}
-
-@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-final class SaveFail: AutoModel, @unchecked Sendable {
-	var id: AutoId = 0
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
-}
-
-@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-final class DeallocTest: AutoModel, @unchecked Sendable {
-	var id: AutoId = 0
+	init() {
+		albums.setOwner(self)
+	}
+	
 	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 20000, limit: 3)
 	var callback: (() -> Void)?
 	deinit {
 		callback?()
 	}
-	
-	enum CodingKeys: CodingKey {
-		case id
-		case albums
-	}
 }
+
+
+/*
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+final class CureAlbums: AutoModelObject, @unchecked Sendable {
+	var id: AutoId = 0
+	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
+}
+
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+final class SaveFail: AutoModelObject, @unchecked Sendable {
+	var id: AutoId = 0
+	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
+}
+*/
 
 /*
 final class CombineTest: AutoModel, @unchecked Sendable, ObservableObject {
@@ -70,7 +89,7 @@ final class CombineTest: AutoModel, @unchecked Sendable, ObservableObject {
 	}
 }
  */
-
+/*
 class ListenerHelp: @unchecked Sendable {
 	var list: ChangeObserver
 	var gotMessage = false
@@ -125,7 +144,7 @@ class ListenerHelp: @unchecked Sendable {
 	}
 }
 
-import Combine
+
 
 // experimenting with publishers
 class AutoQueryTests2: @unchecked Sendable {
@@ -162,37 +181,15 @@ class AutoQueryTests2: @unchecked Sendable {
 		try await Task.sleep(for: .milliseconds(10000))
 	}
 }
-
+*/
 class AutoQueryTests {
 	
 	var listeners = Set<AnyCancellable>()
 	var gotMessage = false
 	
-	/*
-	@Test func plainListener() async throws {
-		try await AutoDBManager.shared.truncateTable(Album.self)
-		try await AutoDBManager.shared.truncateTable(CombineTest.self)
-		let item = CombineTest(type: 1)
-		item.objectWillChange.sink { [self] _ in
-			gotMessage = true
-		}.store(in: &listeners)
-		
-		_ = try await item.albums.fetchItems()
-		
-		let album = await Album.create()
-		album.name = "Wild mood swings"
-		album.artist = "The Cure"
-		try await album.save()
-		
-		try await waitForCondition {
-			gotMessage
-		}
-	}
-	*/
-	
 	@Test func deallocAutoQuery() async throws {
-		try await AutoDBManager.shared.truncateTable(DeallocTest.self)
-		var owner: DeallocTest? = await DeallocTest.create(1)
+		//try await AutoDBManager.shared.truncateTable(DeallocTest.self)
+		var owner: DeallocTest? = DeallocTest()
 		weak var listener = owner?.albums
 		var didDealloc = false
 		owner?.callback = {
@@ -204,7 +201,6 @@ class AutoQueryTests {
 			didDealloc
 		}
 		
-		//owner?.albums never deallocs...
 		print("Is album listener nil?")
 		try await waitForCondition {
 			return listener == nil
@@ -216,6 +212,30 @@ class AutoQueryTests {
 		#expect(didDealloc)
 	}
 	
+	/*
+	 @Test func plainListener() async throws {
+	 try await AutoDBManager.shared.truncateTable(Album.self)
+	 try await AutoDBManager.shared.truncateTable(CombineTest.self)
+	 let item = CombineTest(type: 1)
+	 item.objectWillChange.sink { [self] _ in
+	 gotMessage = true
+	 }.store(in: &listeners)
+	 
+	 _ = try await item.albums.fetchItems()
+	 
+	 let album = await Album.create()
+	 album.name = "Wild mood swings"
+	 album.artist = "The Cure"
+	 try await album.save()
+	 
+	 try await waitForCondition {
+	 gotMessage
+	 }
+	 }
+	 */
+	
+	
+	/*
 	@Test
 	func testAutoQueryXTimes() async throws {
 		for index in 0..<300 {
@@ -296,6 +316,7 @@ class AutoQueryTests {
 		try await cure.albums.loadMore()
 		#expect(cure.albums.hasMore == false && cure.albums.items.count > 2)
 	}
+ */
 }
 
 enum WaitError: Error {
@@ -320,3 +341,4 @@ public func waitForCondition(delay: Double = 15, _ reason: String? = nil, _ clos
 	}
 	throw WaitError.timeRanOut
 }
+

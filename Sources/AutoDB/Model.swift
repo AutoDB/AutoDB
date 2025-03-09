@@ -74,16 +74,13 @@ public extension AutoId {
 	}
 }
 
-public typealias AnyAutoModel = (any AutoModel)
-public typealias AutoModelObject = (AutoModel & AnyObject)
+public typealias AnyModel = (any Model)
 
 /// A set of column names.
 public typealias ColumnNames = Set<String>
-/// AutoDB tructs need to implement this protocol - not completed, just proof of concept that it works.
-public protocol AutoDBStruct {}
 
-/// All table classes must implement AutoDB and be @unchecked Sendable. Regular Sendable is not meaningful (must both be decodable and owned by a global actor).
-public protocol AutoModel: Codable, Hashable, Identifiable, Sendable, AnyObject {
+/// All table structs must implement AutoDB and be Sendable.
+public protocol Model: Codable, Hashable, Identifiable, Sendable {
 	typealias ColumnKeyPath = PartialKeyPath<Self>
 	var allKeyPaths: [String: ColumnKeyPath] { get }
 	
@@ -101,18 +98,6 @@ public protocol AutoModel: Codable, Hashable, Identifiable, Sendable, AnyObject 
 	/// return a list of keypaths to the variables that have unique index, grouped together to make multi-column index
 	static var uniqueIndices: [[String]] { get }
 	
-	/// If this object needs to be saved at some point in the future
-	func didChange() async
-	
-	/// Called after fetching from DB, default implementation does nothing
-	func awakeFromFetch()
-	
-	/// Called after calling the create() method, calls setOwnerOnRelations() - call this if you implement this function
-	func awakeFromInit()
-	
-	/// Find relationship-variables and set the owner
-	func setOwnerOnRelations()
-	
 	/// Fetch one object, throw missingId if no object was found
 	static func fetchId(token: AutoId?, _ id: AutoId) async throws -> Self
 	static func fetchIds(token: AutoId?, _ ids: [AutoId]) async throws -> [Self]
@@ -120,6 +105,8 @@ public protocol AutoModel: Codable, Hashable, Identifiable, Sendable, AnyObject 
 	/// Fetch all objects matching this query.
 	static func fetchQuery(token: AutoId?, _ query: String, _ arguments: [Sendable]?) async throws -> [Self]
 	//static func fetchQuery(_ query: String, _ arguments: Sendable...) async throws -> [Self]
+	
+	/*
 	/// save and wait until completed, potentially handling errors
 	func save(token: AutoId?) async throws
 	/// save and don't wait until completed, ignoring errors
@@ -136,9 +123,34 @@ public protocol AutoModel: Codable, Hashable, Identifiable, Sendable, AnyObject 
 	static func willSave(_ objects: [Self]) async throws
 	/// called after storing to DB, default implementation does nothing
 	static func didSave(_ objects: [Self]) async throws
+	 */
 }
 
-public extension AutoModel {
+/// When we are using classes we must loop through every value and check equallity
+public extension Model where Self: AnyObject {
+	
+	static func == (lhs: Self, rhs: Self) -> Bool {
+		if lhs.id != rhs.id {
+			return false
+		}
+		
+		let rhsPaths = rhs.allKeyPaths
+		for (column, path) in lhs.allKeyPaths {
+			guard let pathR = rhsPaths[column] else {
+				return false
+			}
+			let lhsValue = lhs[keyPath: path] as? AnyHashable
+			let rhsValue = rhs[keyPath: pathR] as? AnyHashable
+			
+			if lhsValue != rhsValue {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+public extension Model {
 	
 	private subscript(checkedMirrorDescendant key: String) -> Any {
 		return Mirror(reflecting: self).descendant(key)!
@@ -153,9 +165,6 @@ public extension AutoModel {
 		return membersToKeyPaths
 	}
 	
-	static func == (lhs: Self, rhs: Self) -> Bool {
-		lhs.id == rhs.id
-	}
 	func hash(into hasher: inout Hasher) {
 		hasher.combine(id)
 	}
@@ -188,31 +197,17 @@ public extension AutoModel {
 	}
 	*/
 	
-	static func create(token: AutoId? = nil, _ id: AutoId? = nil) async -> Self where Self : AnyObject {
-		if let id {
-			if let item = await AutoDBManager.shared.cached(Self.self, id) {
-				return item
-			} else if let item = try? await fetchId(token: token, id) {
-				return item
-			}
+	static func create(token: AutoId? = nil, _ id: AutoId? = nil) async -> Self {
+		if let id, let item = try? await fetchId(token: token, id) {
+			return item
 		}
 		
 		// no id or not in DB, create new object
-		let item = Self()
+		var item = Self()
 		item.id = id ?? AutoId.generateId()
-		await item.setup()
 		return item
 	}
-	
-	func setup() async {
-		await AutoDBManager.shared.cacheObject(self)
-		self.awakeFromInit()
-	}
-	
-	func awakeFromInit() {
-		setOwnerOnRelations()
-	}
-	
+	/*
 	func setOwnerOnRelations() {
 		for (_, value) in self.allKeyPaths {
 			if var relation = self[keyPath: value] as? any AnyRelation {
@@ -220,7 +215,7 @@ public extension AutoModel {
 			}
 		}
 	}
-	
+	*/
 	func awakeFromFetch() {}
 	
 	/// Get this class AutoDB which allows direct SQL-access. You may setup db and override the class' settings, the first time you call this
@@ -247,23 +242,23 @@ public extension AutoModel {
 	
 	// MARK: - fetch shortcuts
 	
-	static func fetchId(token: AutoId? = nil, _ id: AutoId) async throws -> Self where Self: AnyObject {
+	static func fetchId(token: AutoId? = nil, _ id: AutoId) async throws -> Self {
 		
 		try await AutoDBManager.shared.fetchId(token: token, id)
 	}
-	static func fetchIds(token: AutoId? = nil, _ ids: [AutoId]) async throws -> [Self] where Self: AnyObject {
+	static func fetchIds(token: AutoId? = nil, _ ids: [AutoId]) async throws -> [Self] {
 		if ids.isEmpty {
 			return []
 		}
 		return try await AutoDBManager.shared.fetchIds(token: token, ids)
 	}
 	
-	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Self] where Self: AnyObject {
+	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Self] {
 		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments ?? [])
 	}
 	
 	
-	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [SQLValue]? = nil) async throws -> [Self] where Self: AnyObject {
+	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [SQLValue]? = nil) async throws -> [Self] {
 		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments ?? [])
 	}
 	
@@ -308,26 +303,6 @@ public extension AutoModel {
 		try await [self].save(token: token)
 	}
 	
-	static func saveChanges(token: AutoId? = nil) async throws {
-		try await AutoDBManager.shared.saveChanges(token: token, Self.self)
-	}
-	
-	static func saveChangesDetached(token: AutoId? = nil) {
-		Task.detached {
-			try? await AutoDBManager.shared.saveChanges(token: token, Self.self)
-		}
-	}
-	
-	static func saveAllChanges(token: AutoId? = nil) async throws {
-		try await AutoDBManager.shared.saveAllChanges(token: token)
-	}
-	
-	static func saveAllChangesDetacted(token: AutoId? = nil) {
-		Task.detached {
-			try? await AutoDBManager.shared.saveAllChanges(token: token)
-		}
-	}
-	
 	static func willSave(_ objects: [Self]) async throws {}
 	static func didSave(_ objects: [Self]) async throws {}
 	
@@ -346,10 +321,6 @@ public extension AutoModel {
 		}
 		// apply dbSemaphoreToken if we have one
 		try await encoder.commit(token)
-		
-		//remove all changed objects
-		let typeID = ObjectIdentifier(self)
-		await AutoDBManager.shared.removeFromChanged(objects, typeID)
 		
 		try await didSave(objects)
 	}
@@ -373,21 +344,6 @@ public extension AutoModel {
 		await AutoDBManager.shared.deleteLater(token: token, ids, ObjectIdentifier(self))
 	}
 	
-	/// Tell the manager to save at a later time
-	func didChange() async {
-		await AutoDBManager.shared.objectHasChanged(self)
-	}
-	
-	func didChange() {
-		Task {
-			await AutoDBManager.shared.objectHasChanged(self)
-		}
-	}
-	
-	func refresh() async throws {
-		//try await AutoDBManager.shared.fetchQuery()
-	}
-	
 	// MARK: - callbacks
 	
 	static func changeObserver() async throws -> ChangeObserver {
@@ -395,7 +351,7 @@ public extension AutoModel {
 	}
 }
 
-public extension Collection where Element: AutoModel {
+public extension Collection where Element: Model {
 	
 	/// Shorthand to saveList() - When you don't need to wait for the save procedure
 	func save(token: AutoId? = nil) where Self: Sendable {
@@ -417,5 +373,18 @@ public extension Collection where Element: AutoModel {
 	/// Convert an array with AutoModels to a dictionary
 	func dictionary() -> [AutoId: Element] {
 		Dictionary(uniqueKeysWithValues: self.map { ($0.id, $0) })
+	}
+	
+	/// Sort by ids, when you want the objects returned to be in the same order as fetched: fetchIds(idsToFetch).sortById(idsToFetch)
+	func sortById(_ ids: [AutoId]) -> [Element] {
+		dictionary().sortById(ids)
+	}
+}
+
+public extension Dictionary where Key == AutoId, Value: Model {
+	
+	/// If you need to fetch items in the order of ids, Fetch as dictionary and apply this. See fetch() in AutoRelations for an example
+	func sortById(_ ids: [AutoId]) -> [Value] {
+		ids.compactMap { self[$0] }
 	}
 }

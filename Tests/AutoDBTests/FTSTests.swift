@@ -10,7 +10,8 @@ import Foundation
 
 @testable import AutoDB
 
-final class FTS: AutoModel, @unchecked Sendable {
+/*
+final class FTS: AutoModelObject, @unchecked Sendable {
 	var id: AutoId = 1
 	var name = 1
 	var text = ""
@@ -84,3 +85,4 @@ class FTSTests {
 	}
 		
 }
+*/

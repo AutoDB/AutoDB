@@ -10,7 +10,7 @@ import Foundation
 ///Generic implementation of a table to lookup AutoModel objects that has changed, will be deleted and similar.
 struct LookupTable {
 	
-	var changedObjects = [ObjectIdentifier: [AutoId: any AutoModel]]()
+	var changedObjects = [ObjectIdentifier: [AutoId: any ModelObject]]()
 	var deleted = [ObjectIdentifier: Set<AutoId>]()
 	var deleteLater = [ObjectIdentifier: Set<AutoId>]()
 	
@@ -53,12 +53,12 @@ struct LookupTable {
 		deleteLater[identifier]?.subtract(toRemove)
 	}
 	
-	mutating func objectHasChanged<T: AutoModel>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
+	mutating func objectHasChanged<T: ModelObject>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
         
 		objectHasChanged(object.id, object, identifier)
     }
     
-	mutating func objectHasChanged<T: AutoModel>(_ id: UInt64, _ object: T, _ identifier: ObjectIdentifier?) {
+	mutating func objectHasChanged<T: ModelObject>(_ id: UInt64, _ object: T, _ identifier: ObjectIdentifier?) {
 		
 		let identifier = identifier ?? ObjectIdentifier(T.self)
 		if isDeleted(id, identifier) {

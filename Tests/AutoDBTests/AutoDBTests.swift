@@ -2,7 +2,8 @@ import XCTest
 @testable import AutoDB
 import Foundation
 
-final class ExampleInit: AutoModel, @unchecked Sendable {
+
+struct ExampleInit: Model {
 	var id: AutoId = 0
 	let something: Int
 	init() {
@@ -45,7 +46,7 @@ class Resource {
 	 We don't want to piggy-back on any other system like Combine, FMDB, GRDB etc.
 	 
 	 */
-	
+
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class AutoDBTests: XCTestCase {
 	
@@ -65,39 +66,51 @@ final class AutoDBTests: XCTestCase {
 	// generic fetching, an object should be created, inserted into the DBManager and be fetched as long as it exists there.
 	func testStoring() async throws {
 		
-		let trial = await DataAndDate.create(1)
+		var instance = await BaseClass.create(1)
+		instance.anOptInt = 99
+		try await instance.save()
 		
-		let item = try await DataAndDate.fetchId(1)
-		XCTAssertEqual(item, trial)
-		trial.dubDub = 6
-		XCTAssertEqual(item.dubDub, trial.dubDub)
+		let item = try await BaseClass.fetchId(1)
+		XCTAssertEqual(item, instance)
+		//item.anOptInt = 6
+		XCTAssertEqual(item.anOptInt, instance.anOptInt)
 	}
 	
 	func testInit() async throws {
 		
-		try await ExampleInit.create(2).save()
+		try await ExampleInit.create(12).save()
+		let some = try await ExampleInit.fetchId(12)
+		XCTAssertEqual(some.something, 2)
+	}
+	
+	func testEqualModelClasses() async throws {
+		let lhs = await DataAndDate.create(1)
+		let rhs = await DataAndDate.create(1)
+		XCTAssertEqual(lhs, rhs)
 		
-		let some = try await ExampleInit.fetchId(2)
-		print(some.something)
-		try await some.save()
+		lhs.dubDub = 2
+		rhs.dubDub = 4
+		XCTAssertNotEqual(lhs, rhs)
 		
+		lhs.dubDub = 4
+		XCTAssertEqual(lhs, rhs)
 	}
 	
 	func testDecodable() throws {
 		
 		//let expect = XCTestExpectation(description: "expect")
 		let testInt = 4
-		let base = BaseClass()
+		let base = DataAndDate()
 		base.id = UInt64(testInt)
-		base.regularIntPub = testInt
+		base.intPub = testInt
 		
 		let encoded = try JSONEncoder().encode(base)
 		let string = String(data: encoded, encoding: .utf8)!
 		print(string)
-		let decoded = try JSONDecoder().decode(BaseClass.self, from: encoded)
+		let decoded = try JSONDecoder().decode(DataAndDate.self, from: encoded)
 		
 		XCTAssertEqual(decoded.id, UInt64(testInt), "Id didn't work")
-		XCTAssertEqual(decoded.regularIntPub, testInt, "regular int")
+		XCTAssertEqual(decoded.intPub, testInt, "regular int")
 	}
 	
 	func testObservedDecodable() async throws {
@@ -216,10 +229,7 @@ final class AutoDBTests: XCTestCase {
 		
 		let first = await BaseClass.create(1)
 		let second = await BaseClass.create(2)
-		await first.didChange()
-		await second.didChange()
-		
-		try await BaseClass.saveChanges()
+		try await [first, second].save()
 		
 		let list = try await BaseClass.fetchQuery().dictionary()
 		
@@ -255,11 +265,10 @@ final class AutoDBTests: XCTestCase {
 		try await AutoDBManager.shared.truncateTable(Artist.self)
 		
 		let first = await Artist.create(1)
-		first.name = "The Cure"
-		await first.didChange()
-		try await Artist.saveAllChanges()
+		first.value.name = "The Cure"
+		try await first.save()
 		
-		let artist = try await Artist.fetchQuery("WHERE name = ?", [first.name]).first
+		let artist = try await Artist.fetchQuery("WHERE name = ?", [first.value.name]).first
 		XCTAssertEqual(artist, first)
 		XCTAssertTrue(artist === first)
 		
@@ -271,9 +280,8 @@ final class AutoDBTests: XCTestCase {
 		var first:CodeWithKeys? = await CodeWithKeys.create(1)
 		first?.name = "The Cure"
 		first?.otherNest = Nested(name: "some name")
-		await first?.didChange()
+		try await first?.save()
 		first = nil
-		try await Artist.saveAllChanges()
 		
 		let artist = try await CodeWithKeys.fetchQuery("WHERE somethingElse = ?", ["The Cure"]).first
 		XCTAssertNotNil(artist)
@@ -284,52 +292,61 @@ final class AutoDBTests: XCTestCase {
 		XCTAssertEqual(artist?.otherNest, Nested(name: "some name"))
 	}
 	
+	// We can't have relations from structs, 
 	func testRelations() async throws {
 		try await AutoDBManager.shared.truncateTable(Parent.self)
 		try await AutoDBManager.shared.truncateTable(Child.self)
 		
 		var item: Parent? = await Parent.create(1)
-		try await item?.children.fetch()
+		try await item?.value.children.fetch()
 		
-		if let item, item.children.items.isEmpty {
-			item.name = "Olof"
+		let encoder = JSONEncoder()
+		encoder.outputFormatting = [.prettyPrinted]
+		
+		if let item, item.value.children.items.isEmpty {
+			item.value.name = "Olof"
 			
-			let gunnar = await Child.create()
+			var gunnar = await Child.create()
 			gunnar.name = "Gunnar"
-			let bertil = await Child.create()
+			var bertil = await Child.create()
 			bertil.name = "Bertil"
-			await item.children.append([gunnar, bertil])
+			await item.value.children.append([gunnar, bertil])
 			
 			// we must save these separately
-			try await item.children.items.save()
+			try await item.value.children.items.save()
 			try await item.save()
 		} else {
 			XCTAssertTrue(item != nil)
-			XCTAssertTrue(item?.children.items.isEmpty == false)
-			XCTAssertEqual(item?.children.items.first?.name, "Gunnar")
-			XCTAssertEqual(item?.children.items.last?.name, "Bertil")
+			XCTAssertTrue(item?.value.children.items.isEmpty == false)
+			XCTAssertEqual(item?.value.children.items.first?.name, "Gunnar")
+			XCTAssertEqual(item?.value.children.items.last?.name, "Bertil")
 		}
 		item = nil
 		await Task.yield()
 		
-		let parent = try await Parent.fetchQuery("WHERE name = ?", ["Olof"]).first!
-		XCTAssertNotNil(parent.children.owner)
-		try await parent.children.fetch()
+		let children = try await Child.fetchQuery()
+		XCTAssertEqual(children.count, 2)
 		
-		// error here - sometimes these fail. Why?
-		if parent.children.items.isEmpty {
-			print(parent.children.hasMore)
-		}
-		XCTAssertEqual(parent.children.items.first?.name, "Gunnar")
-		XCTAssertEqual(parent.children.items.last?.name, "Bertil")
+		let parent = try await Parent.fetchQuery("WHERE name = ?", ["Olof"]).first!
+		XCTAssertNotNil(parent.value.children)
+		
+		let data = try encoder.encode(parent.value.children)
+		print(String(data: data, encoding: .utf8)!)
+		
+		try await parent.value.children.fetch()
+		
+		XCTAssertEqual(parent.value.children.items.first?.name, "Gunnar")
+		XCTAssertEqual(parent.value.children.items.last?.name, "Bertil")
+		
+		XCTAssertNotNil(parent.value.children.owner)
 	}
-	
+	 
 	func testOneRelationMultipleDBs() async throws {
 		let mainDB = try await ObserveBasic.db()
 		try await ObserveBasic.query("DROP TABLE IF EXISTS AlbumArt")
 		await ObserveBasic.queryNT("DELETE FROM Album")
 		
-		let faith = await Album.create()
+		var faith = await Album.create()
 		faith.name = "Faith"
 		try await faith.save()
 		
@@ -450,6 +467,5 @@ final class AutoDBTests: XCTestCase {
 		await fulfillment(of: [waiter, observeBasicChunk, firstIteration, lastIteration])
 	}
 }
-
 
 

@@ -10,7 +10,7 @@ import Combine
 
 // They must all implement AutoDB
 // They must all not have an init OR an empty required one: required init() {... setup }, you may use convenience inits instead.
-final class DataAndDate: AutoModel, @unchecked Sendable {
+final class DataAndDate: Model, @unchecked Sendable {
 	var anOptObject: DataAndDate? = nil
 	var hasChanges: Bool = false
     
@@ -21,41 +21,23 @@ final class DataAndDate: AutoModel, @unchecked Sendable {
     var dubDub2: Float = 1.0
     var dubDub: Double = 1.0
     @Published var timeStamp: Date = Date()
-    @Published var floating = 1.0
+	@Published var intPub: Int = 1
     @Published var optionalIntArray: [Int]? = [1, 2, 3, 4]
     var dataWith9: Data = Data([9, 9, 9, 9])
     
     var ignoreThis = 1
-    
-    class func autoDBSettings() -> AutoDBSettings? {
-        .init(ignoreProperties: Set(["ignoreThis"]))
-    }
 }
 
-final class BaseClass: AutoModel, @unchecked Sendable {
+struct BaseClass: Model {
 	var id: UInt64 = 0
 	var anOptInt: Int? = nil
-	var ignoreProperty = "don't store this"
-	
-	convenience init(_ anOptInt: Int) {
-		self.init()
-		self.id = AutoId(anOptInt)
-		self.anOptInt = anOptInt
-    }
     
     var arrayWithEncodables = [Int]()
-    @Published var arrayWithEncodablesPub = [Int]()
-    
-    @Published var anOptIntPub: Int? = nil
-    @Published var regularIntPub: Int = 1
 	
-    public static func autoDBSettings() -> AutoDBSettings? {
-        AutoDBSettings(ignoreProperties: Set(["ignoreProperty"]))
-    }
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-@Observable final class ObserveBasic: AutoModel, @unchecked Sendable {
+@Observable final class ObserveBasic: Model, @unchecked Sendable {
 	
 	var hasChanges: Bool = false
 	var id: UInt64 = 0
@@ -86,14 +68,14 @@ struct Nested: Codable, Equatable {
 	let name: String?
 }
 
-final class Mod: AutoModel, @unchecked Sendable {
+final class Mod: Model, @unchecked Sendable {
 	var id: UInt64 = 0
 	var string: String? = "some string"
 	var bigInt: UInt64 = 0
 }
 
 @available(macOS 15.0, *)
-final class IntTester: AutoModel, @unchecked Sendable {
+final class IntTester: Model, @unchecked Sendable {
 	
 	var id: UInt64 = .max
 	
@@ -110,16 +92,23 @@ final class IntTester: AutoModel, @unchecked Sendable {
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-@Observable final class Artist: AutoModel, @unchecked Sendable {
-	var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
-	var name: String = ""	// we must have default values or nil
+@Observable final class Artist: ModelObject, @unchecked Sendable {
+	
+	struct Value: Model {
+		var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
+		var name: String = ""	// we must have default values or nil
+	}
+	var value: Value
+	init(_ value: Value) {
+		self.value = value
+	}
 	
 	// note that all @Observables will show warning "Immutable property will not be decoded because ..." as long as there are no CodingKeys.
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable
-final class CodeWithKeys: AutoModel, @unchecked Sendable {
+final class CodeWithKeys: Model, @unchecked Sendable {
 	
 	var id: AutoId = 0
 	var name: String = ""
@@ -138,15 +127,21 @@ final class CodeWithKeys: AutoModel, @unchecked Sendable {
 
 // Building something to handle relations
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-@Observable
-final class Parent: AutoModel, @unchecked Sendable {
-	
-	var id: UInt64 = 0
-	var name = ""
-	var children = AutoRelation<Child>()
+//@Observable
+final class Parent: ModelObject, @unchecked Sendable {
+	var value: Value
+	struct Value: Model {
+		
+		var id: UInt64 = 0
+		var name = ""
+		var children = AutoRelation<Child>()
+	}
+	init(_ value: Value) {
+		self.value = value
+	}
 }
 
-final class Child: AutoModel, @unchecked Sendable {
+struct Child: Model, @unchecked Sendable {
 	var id: UInt64 = 0
 	var name = "fox"
 }
@@ -201,13 +196,3 @@ struct AutoQuery<AutoType: AutoDB> {
 	}
 }
  */
-
-/*
- /// If you need to fetch items in the order of ids, Always fetch a dictionary and apply this. See fetch() below for an example!
- but why would you need that?
-static func sortById<T: AutoModel>(_ items: [AutoId: T], _ ids: [UInt64]) -> [T] {
-	ids.compactMap {
-		items[$0]
-	}
-}
-*/

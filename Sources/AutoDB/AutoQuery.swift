@@ -14,7 +14,7 @@ protocol ObserverSubject {
 /// Since swift forces the use of names, we cannot have one AutoQuery that with combine and the same with Observable - and then a third one with nothing. So instead we have a plain AutoQuery that is an exact copy of AutoQueryObservable but that also sends changes to an asyncPublisher called changePublisher
 // TODO: just solve it with a protocoll!
 /// non-observable version for use in other circumstanses, just a plain copy without @Observable
-public final class AutoQuery<AutoType: AutoModel>: Codable, @unchecked Sendable, AnyRelation {
+public final class AutoQuery<AutoType: AutoModelObject>: Codable, @unchecked Sendable, AnyRelation {
 	
 	let query: String
 	var arguments: [Value]? = nil
@@ -88,7 +88,7 @@ public final class AutoQuery<AutoType: AutoModel>: Codable, @unchecked Sendable,
 		
 	}
 	
-	/// Automatically set owner if we are inside an AutoModel, which is the most common use-case.
+	/// Automatically set owner if we are inside an AutoModelObject, which is the most common use-case.
 	public typealias OwnerType = AutoType
 	public func setOwner<OwnerType>(_ owner: OwnerType) where OwnerType: Sendable & AnyObject {
 		let token = ObjectIdentifier(self)
@@ -164,7 +164,25 @@ NOTE: The query obviously cannot have limit or offset clauses of its own!
  */
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
 @Observable
-public final class AutoQuery<AutoType: AutoModel>: Codable, @unchecked Sendable, AnyRelation {
+public final class AutoQuery<AutoType: Model>: Codable, @unchecked Sendable, AnyRelation {
+	public static func == (lhs: AutoQuery<AutoType>, rhs: AutoQuery<AutoType>) -> Bool {
+		lhs.query == rhs.query && lhs.arguments == rhs.arguments
+	}
+	
+	//public typealias OwnerType = AnyObject & Sendable
+	
+//	public typealias OwnerType = AutoModelObject
+	
+	
+	
+	//public typealias OwnerType = AutoModelObject
+	/// Automatically set owner if we are inside an AutoModelObject, which is the most common use-case.
+	public func setOwner<OwnerType: AnyObject & Sendable>(_ owner: OwnerType) {
+		// when the owner deallocs, we must also dealloc.
+		Task {
+			try await startListening()
+		}
+	}
 	
 	@ObservationIgnored let query: String
 	
@@ -221,15 +239,6 @@ public final class AutoQuery<AutoType: AutoModel>: Codable, @unchecked Sendable,
 		try container.encode(self.initialFetch, forKey: CodingKeys.initialFetch)
 		try container.encode(self.limit, forKey: CodingKeys.limit)
 		
-	}
-	
-	/// Automatically set owner if we are inside an AutoModel, which is the most common use-case.
-	public typealias OwnerType = AutoType
-	public func setOwner<OwnerType>(_ owner: OwnerType) where OwnerType: Sendable & AnyObject {
-		// when the owner deallocs, we must also dealloc.
-		Task {
-			try await startListening()
-		}
 	}
 	
 	public func startListening() async throws {

@@ -10,7 +10,7 @@ import SQLite3
 #else
 import SQLCipher
 #endif
-
+/*
 // implement this protocol if you don't want textCreation to be automatically pulled from the column with the same name.
 public protocol FTSOwner: AutoModelObject {
 	
@@ -66,7 +66,7 @@ actor FTSHandler {
 		// UNINDEXED is used to prevent the id from being inserted into the FTS-index
 		let sqlStatement = "CREATE VIRTUAL TABLE IF NOT EXISTS `\(tableName)` USING FTS5(id UNINDEXED, text, tokenize='unicode61 remove_diacritics 0');"
 		do {
-			try await OwnerType.query(sqlStatement)
+			try await OwnerType.TableType.query(sqlStatement)
 		} catch {
 			throw error
 		}
@@ -112,7 +112,7 @@ class FTSColumn<AutoType: AutoModelObject>: Codable, AnyRelation, @unchecked Sen
 	private var column: String
 	
 	private var ownerName: String {
-		OwnerType.typeName
+		OwnerType.TableType.typeName
 	}
 	
 	/// set textCallback to null if you only want to import text directly from the column with the same name
@@ -120,7 +120,7 @@ class FTSColumn<AutoType: AutoModelObject>: Codable, AnyRelation, @unchecked Sen
 		self.column = column
 	}
 	
-	public func setOwner<OwnerType>(_ owner: OwnerType) where OwnerType : AutoModel {
+	public func setOwner<OwnerType>(_ owner: OwnerType) where OwnerType : AutoModelObject {
 		if let owner = owner as? AutoType {
 			self.owner = owner
 			Task {
@@ -270,3 +270,4 @@ class FTSColumn<AutoType: AutoModelObject>: Codable, AnyRelation, @unchecked Sen
 		return String(phrase.precomposedStringWithCanonicalMapping.map { regular.contains($0) ? $0 : String($0).folding(options: .diacriticInsensitive, locale: nil).first! })
 	}
 }
+*/

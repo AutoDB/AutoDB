@@ -249,6 +249,15 @@ extension UInt64: SQLColumnWrappable, SQLStorableAsUnsignedInteger {
 
 // MARK: - Enums, hacks for optionals
 
+protocol OptionalProtocol {
+	func wrappedType() -> Any.Type
+}
+extension Optional : OptionalProtocol {
+	func wrappedType() -> Any.Type {
+		return Wrapped.self
+	}
+}
+
 /// Declares an enum as compatible with SQL column storage, with a raw type of `String` or `URL`.
 public protocol SQLStringEnum: RawRepresentable, CaseIterable, SQLColumnWrappable where RawValue: SQLStorableAsText {
 	associatedtype RawValue
