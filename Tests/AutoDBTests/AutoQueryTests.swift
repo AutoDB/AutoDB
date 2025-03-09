@@ -16,27 +16,23 @@ struct Album: Model {
 	var artist = ""
 }
 
-/*
- TODO: we have forgotten about one relation! - did not work previously and needs update!
- */
- final class AlbumArt: ModelObject, @unchecked Sendable {
- 
-	 struct AlbumArtValue: Model {
-		 
-		 var id: AutoId = 0
-		 var name = ""
-		 var artist = ""
-	 }
-	 
-	 var value: AlbumArtValue
-	 init(_ value: AlbumArtValue) {
-		 self.value = value
-	 }
-	 
-	 // TODO: test this one!
-	 var album = OneRelation<Album>()
- }
-
+final class AlbumArt: ModelObject, @unchecked Sendable {
+	
+	struct AlbumArtValue: Model {
+		
+		var id: AutoId = 0
+		var name = ""
+		var artist = ""
+		
+		// in here to save to DB!
+		var album = OneRelation<Album>()
+	}
+	
+	var value: AlbumArtValue
+	init(_ value: AlbumArtValue) {
+		self.value = value
+	}
+}
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class DeallocTest: @unchecked Sendable {

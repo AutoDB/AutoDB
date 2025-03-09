@@ -343,35 +343,44 @@ final class AutoDBTests: XCTestCase {
 	 
 	func testOneRelationMultipleDBs() async throws {
 		let mainDB = try await ObserveBasic.db()
-		try await ObserveBasic.query("DROP TABLE IF EXISTS AlbumArt")
-		await ObserveBasic.queryNT("DELETE FROM Album")
+		try await mainDB.query("DROP TABLE IF EXISTS AlbumArtValue")
+		try await mainDB.query("DROP TABLE IF EXISTS Album")
+		
+		let cacheDB = try await AlbumArt.db(AutoDBSettings.cache())
+		try await AlbumArt.query("DELETE FROM AlbumArtValue")
+		await Album.queryNT("DELETE FROM Album")
 		
 		var faith = await Album.create()
 		faith.name = "Faith"
 		try await faith.save()
 		
-		let cacheDB = try await AlbumArt.db(AutoDBSettings.cache())
-		var art: AlbumArt? = await AlbumArt.create()
-		let id = art!.id
-		await art?.album.setObject(faith)
+		let id: AutoId = 4
+		var art: AlbumArt? = await AlbumArt.create(id)
+		//let id = art!.id
+		await art?.value.album.setObject(faith)
+		try await art?.save()
+		print("art: \(art!.value.album.id)")
 		art = nil
+		await Task.yield()
 		
 		let artObj = try await AlbumArt.fetchId(id)
-		if try await artObj.album.object != faith {
+		print("artObj: \(artObj.id) \(artObj.value.album.id)")
+		
+		if try await artObj.value.album.object != faith {
 			throw AutoError.missingRelation
 		}
 		
-		XCTAssertTrue(artObj.album._object == faith)
+		XCTAssertTrue(artObj.value.album._object == faith)
 		XCTAssertFalse(mainDB === cacheDB)
 		
 		// make sure we have two files with different tables:
 		let q = "SELECT name FROM sqlite_master WHERE type='table';"
 		let result = try await mainDB.query(q)
 		for rows in result {
-			XCTAssertFalse(rows.values.contains { $0.stringValue == "AlbumArt" })
+			XCTAssertFalse(rows.values.contains { $0.stringValue == "AlbumArtValue" })
 		}
 		let cacheRes = try await cacheDB.query(q).compactMap({ $0.values.first })
-		XCTAssertTrue(cacheRes.contains { $0.stringValue == "AlbumArt" })
+		XCTAssertTrue(cacheRes.contains { $0.stringValue == "AlbumArtValue" })
 	}
 	
 	/// two tables have separate actors, test that we can read and write at the same time without crashing.

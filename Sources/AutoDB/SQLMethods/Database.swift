@@ -110,10 +110,9 @@ public actor Database {
 	private let semaphore = Semaphore()
 	private var inTransaction: Bool = false
 	private var debugPrintEveryQuery = false
-	private var debugPrintQueryParameterValues = false
+	
 	func setDebug(_ enabled: Bool = true) {
 		debugPrintEveryQuery = enabled
-		debugPrintQueryParameterValues = enabled
 	}
 	
 	public init(_ path: String, ramDB: Bool = false) throws {
@@ -318,8 +317,8 @@ public actor Database {
 	}
 	
 	private func rowsByExecutingPreparedStatement(_ statement: PreparedStatement, from query: String) throws -> [Row] {
-		if true || debugPrintEveryQuery {
-			if debugPrintQueryParameterValues, let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
+		if debugPrintEveryQuery {
+			if let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
 				print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(expandedQuery)")
 			} else {
 				print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(query)")

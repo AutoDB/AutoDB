@@ -20,7 +20,6 @@ public final class OneRelation<AutoType: Model>: Codable, Relation, @unchecked S
 		lhs.id == rhs.id
 	}
 	
-	
 	public init(_ id: AutoId = 0) {
 		self.id = id
 	}
@@ -40,7 +39,10 @@ public final class OneRelation<AutoType: Model>: Codable, Relation, @unchecked S
 	
 	public var object: AutoType {
 		get async throws {
-			try await fetch()
+			if let _object {
+				return _object
+			}
+			return try await fetch()
 		}
 	}
 	
