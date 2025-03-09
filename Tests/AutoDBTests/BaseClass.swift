@@ -134,7 +134,7 @@ final class Parent: ModelObject, @unchecked Sendable {
 		
 		var id: UInt64 = 0
 		var name = ""
-		var children = AutoRelation<Child>()
+		var children = ManyRelation<Child>()
 	}
 	init(_ value: Value) {
 		self.value = value

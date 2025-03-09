@@ -164,7 +164,7 @@ NOTE: The query obviously cannot have limit or offset clauses of its own!
  */
 @available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
 @Observable
-public final class AutoQuery<AutoType: Model>: Codable, @unchecked Sendable, AnyRelation {
+public final class AutoQuery<AutoType: Model>: Codable, @unchecked Sendable, Relation {
 	public static func == (lhs: AutoQuery<AutoType>, rhs: AutoQuery<AutoType>) -> Bool {
 		lhs.query == rhs.query && lhs.arguments == rhs.arguments
 	}

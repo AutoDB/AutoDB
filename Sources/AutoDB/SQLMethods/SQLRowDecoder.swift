@@ -61,7 +61,7 @@ class SQLRowDecoder: Decoder {
 			self.values = values
 		}
 	}
-	var relations: [any AnyRelation] = []
+	var relations: [AnyRelation] = []
 	func getValue<T>(_ type: T.Type, _ key: String) -> T? where T : Decodable {
 		guard let value = values[key] ?? values[key.trimmingCharacters(in: prefixPropertyChars)] else {
 			return nil
@@ -98,7 +98,7 @@ class SQLRowDecoder: Decoder {
 			default:
 				if let data = value.dataValue {
 					let value = try? JSONDecoder().decode(T.self, from: data)
-					if let relation = value as? any AnyRelation {
+					if let relation = value as? AnyRelation {
 						relations.append(relation)
 					}
 					return value

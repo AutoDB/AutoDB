@@ -66,7 +66,7 @@ public extension ModelObject {
 	
 	func setOwnerOnRelations() {
 		for (_, path) in value.allKeyPaths {
-			if let relation = value[keyPath: path] as? any AnyRelation {
+			if let relation = value[keyPath: path] as? any Relation {
 				relation.setOwner(self)
 			}
 		}

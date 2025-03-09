@@ -273,7 +273,7 @@ import Foundation
 		try await fetchQueryRelations(token: token, whereQuery, values: values, refreshData: refreshData).map(\.0)
 	}
 	
-	func fetchQueryRelations<T: Model>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue], refreshData: Bool = false) async throws -> [(T, [any AnyRelation])] {
+	func fetchQueryRelations<T: Model>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue], refreshData: Bool = false) async throws -> [(T, [AnyRelation])] {
 		
 		let typeID = ObjectIdentifier(T.self)
 		try await setupDB(T.self, typeID)
@@ -290,7 +290,7 @@ import Foundation
 		// force objects to go here
 		//if T.self is AnyObject.Type {
 		
-		let result: [(T, [any AnyRelation])] = try rows.map { row in
+		let result: [(T, [AnyRelation])] = try rows.map { row in
 			decoder.values = row
 			return (try T(from: decoder), decoder.relations)
 		}
@@ -300,7 +300,7 @@ import Foundation
 	/// For objects containing structs, handles cache and relations
 	func fetchQuery<T: ModelObject>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue], refreshData: Bool = false) async throws -> [T] {
 		
-		let rows: [(T.TableType, [any AnyRelation])] = try await fetchQueryRelations(token: token, whereQuery, values: values)
+		let rows: [(T.TableType, [AnyRelation])] = try await fetchQueryRelations(token: token, whereQuery, values: values)
 		if rows.isEmpty {
 			return []
 		}

@@ -7,7 +7,7 @@
 
 // Note that this cannot be an actor since we need Encodable, it must be a class in order to set its owner automatically.
 /// A one-to-one relation,
-public final class OneRelation<AutoType: Model>: Codable, AnyRelation, @unchecked Sendable {
+public final class OneRelation<AutoType: Model>: Codable, Relation, @unchecked Sendable {
 	private func didChange() {
 		if let owner = owner as? RelationOwner {
 			Task {
