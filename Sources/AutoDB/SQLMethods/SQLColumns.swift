@@ -466,7 +466,7 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 	
 	private static let copyValue = unsafeBitCast(-1, to: sqlite3_destructor_type.self) // a.k.a. SQLITE_TRANSIENT
 	
-	internal func bind(database: isolated AutoDB, statement: OpaquePointer, index: Int32, for query: String) throws {
+	internal func bind(database: isolated Database, statement: OpaquePointer, index: Int32, for query: String) throws {
 		var result: Int32
 		switch self {
 			case     .null:       result = sqlite3_bind_null(statement, index)
@@ -476,12 +476,12 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 			case let .text(s):    result = sqlite3_bind_text(statement, index, s, -1, SQLValue.copyValue)
 			case let .data(d):    result = d.withUnsafeBytes { bytes in sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(bytes.count), SQLValue.copyValue) }
 		}
-		if result != SQLITE_OK { throw AutoDB.Error.queryArgumentValueError(query: query, description: database.errorDesc(database.dbHandle)) }
+		if result != SQLITE_OK { throw Database.Error.queryArgumentValueError(query: query, description: database.errorDesc(database.dbHandle)) }
 	}
 	
-	internal func bind(database: isolated AutoDB, statement: OpaquePointer, name: String, for query: String) throws {
+	internal func bind(database: isolated Database, statement: OpaquePointer, name: String, for query: String) throws {
 		let idx = sqlite3_bind_parameter_index(statement, name)
-		if idx == 0 { throw AutoDB.Error.queryArgumentNameError(query: query, name: name) }
+		if idx == 0 { throw Database.Error.queryArgumentNameError(query: query, name: name) }
 		return try bind(database: database, statement: statement, index: idx, for: query)
 	}
 }

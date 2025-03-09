@@ -20,7 +20,7 @@ extension String {
 /// From an array of objects of the same type, create an insert statement with a list of values. Start with doing only one object.
 public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	
-	let database: AutoDB
+	let database: Database
 	let tableClass: any Model.Type
 	let table: TableInfo
 	let query: String

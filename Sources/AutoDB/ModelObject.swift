@@ -79,14 +79,14 @@ public extension ModelObject {
 	
 	/// Get this class AutoDB which allows direct SQL-access. You may setup db and override the class' settings, the first time you call this
 	@discardableResult
-	static func db(_ settings: AutoDBSettings? = nil) async throws -> AutoDB {
+	static func db(_ settings: AutoDBSettings? = nil) async throws -> Database {
 		try await AutoDBManager.shared.setupDB(self.TableType, nil, settings: settings ?? autoDBSettings())
 	}
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
 	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are inside the transaction / holding the lock.
-	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated AutoDB, _ token: AutoId) async throws -> R) ) async throws -> R {
+	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
 		try await db().transaction(action)
 	}
 	

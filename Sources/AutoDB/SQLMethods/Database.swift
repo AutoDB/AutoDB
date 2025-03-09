@@ -98,7 +98,7 @@ extension [Row] {
 /**
  AutoDB is the database connection mechanism of the system.
  */
-public actor AutoDB {
+public actor Database {
 	
 	/// The maximum number of parameters (`?`) supported in database queries. (The value of `SQLITE_LIMIT_VARIABLE_NUMBER` of the backing SQLite instance.)
 	let maxQueryVariableCount: Int
@@ -167,12 +167,12 @@ public actor AutoDB {
 				  let tableName, let tableNameStr = String(cString: tableName, encoding: .utf8) else {
 				return
 			}
-			let autoDB = Unmanaged<AutoDB>.fromOpaque(ctx).takeUnretainedValue()
+			let autoDB = Unmanaged<Database>.fromOpaque(ctx).takeUnretainedValue()
 			Task {
 				await autoDB.callListeners(tableNameStr, operation, rowid)
 			}
 			
-		}, Unmanaged<AutoDB>.passUnretained(self).toOpaque())
+		}, Unmanaged<Database>.passUnretained(self).toOpaque())
 	}
 	
 	var gentleClose: Task<Void, Swift.Error>?
@@ -437,7 +437,7 @@ public actor AutoDB {
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
 	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are holding the lock. We could send around the AutoDB and only allow access when locked - but that would basically be the same thing.
-	public func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated AutoDB, _ token: AutoId) async throws -> R) ) async throws -> R {
+	public func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
 		
 		inTransaction = true	// now everyone must wait for semaphore
 		let transactionID = AutoId.generateId()

@@ -23,7 +23,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		self.userInfo = userInfo
 	}
 	
-	func setup<T: Model>(_ classType: T.Type, _ db: AutoDB) async throws -> TableInfo {
+	func setup<T: Model>(_ classType: T.Type, _ db: Database) async throws -> TableInfo {
 		let instance = classType.init()
 		let tableName = classType.typeName
 		

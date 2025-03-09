@@ -41,8 +41,8 @@ import Foundation
 	var cachedObjects = [ObjectIdentifier: WeakDictionary<AutoId, AnyObject>]()
 	
 	static var isSetup = Set<ObjectIdentifier>()
-	var databases = [ObjectIdentifier: AutoDB]()
-	var sharedDatabases = [String: AutoDB]()
+	var databases = [ObjectIdentifier: Database]()
+	var sharedDatabases = [String: Database]()
 
 	#if os(Android)
 	#else
@@ -80,11 +80,11 @@ import Foundation
 	
 	/// Setup database for this class, attach to file defined in settings - call manually for each table  to specify your own location.
 	@discardableResult
-	func setupDB<Table: Model>(_ table: Table.Type, _ typeID: ObjectIdentifier? = nil, settings: AutoDBSettings? = nil) async throws -> AutoDB {
+	func setupDB<Table: Model>(_ table: Table.Type, _ typeID: ObjectIdentifier? = nil, settings: AutoDBSettings? = nil) async throws -> Database {
 		let typeID = typeID ?? ObjectIdentifier(table)
 		if AutoDBManager.isSetup.insert(typeID).inserted {
 			
-			let database: AutoDB
+			let database: Database
 			let settings = settings ?? table.autoDBSettings() ?? AutoDBSettings()
 			if settings.shareDB {
 				let sharedKey = "\(settings.path)\(settings.inCacheFolder ? "_cache" : "")"
@@ -122,7 +122,7 @@ import Foundation
 	}
 	
 	@discardableResult
-	func initDB(_ settings: AutoDBSettings = AutoDBSettings()) async throws -> AutoDB {
+	func initDB(_ settings: AutoDBSettings = AutoDBSettings()) async throws -> Database {
 		
 		var path: String
 		if settings.inAppFolder || settings.inCacheFolder {
@@ -135,7 +135,7 @@ import Foundation
 			path = settings.path
 		}
 		print("sqlite3 \"\(path)\"")
-		let db = try AutoDB(path)
+		let db = try Database(path)
 		
 		// exclude from backup if desired
 		if settings.iCloudBackup == false {
@@ -354,7 +354,7 @@ import Foundation
 		return try await database.query(token: token, query, sqlArguments)
 	}
 	
-	public func transaction<T: Model, R: Sendable>(_ classType: T.Type, _ action: (@Sendable (_ db: isolated AutoDB, _ token: AutoId) async throws -> R) ) async throws -> R {
+	public func transaction<T: Model, R: Sendable>(_ classType: T.Type, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
 		let database = try await setupDB(classType)
 		return try await database.transaction(action)
 	}
