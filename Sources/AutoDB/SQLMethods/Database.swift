@@ -69,8 +69,8 @@ import GlibC
 public typealias ChangeObserver = AsyncObserver<RowChangeParameters>
 public struct RowChangeParameters: Sendable, Codable, Hashable, Equatable {
 	//let tableName: String
-	let operation: SQLiteOperation
-	let id: AutoId
+	public let operation: SQLiteOperation
+	public let id: AutoId
 }
 
 public enum SQLiteOperation: Int32, Sendable, Codable {
@@ -476,9 +476,9 @@ public actor Database {
 	}
 	
 	private func callListeners(_ tableName: String, _ operation: SQLiteOperation, _ rowId: sqlite_int64 ) async {
-		if changeObservers[tableName] != nil {
+		if let observer = changeObservers[tableName] {
 			let value = RowChangeParameters(operation: operation, id: UInt64(bitPattern: rowId))
-			await changeObservers[tableName]?.append(value)
+			await observer.append(value)
 		}
 	}
 }

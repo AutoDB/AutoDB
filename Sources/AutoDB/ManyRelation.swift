@@ -10,19 +10,6 @@ import Foundation
 import SwiftUI
 #endif
 
-typealias AnyRelation = (any Relation)
-
-/// something handling a relation, one-to-one, one-to-many, or similar.
-public protocol Relation: AnyObject, Equatable {
-	func setOwner<OwnerType: Owner>(_ owner: OwnerType)
-}
-/// to own a relation to one or many AutoModels we only need to be a sendable class.
-public typealias Owner = AnyObject & Sendable
-
-public protocol RelationOwner {
-	func didChange() async
-}
-
 /**
  A relation is an array of non-unique items of one single AutoDB type.
  It handles fetching and saving in one place, having a optional backing var to know if we have fetched or not.
@@ -52,7 +39,7 @@ final class Child: AutoDB, @unchecked Sendable {
 
 // Note that this cannot be an actor since we need Encodable, it can't be a struct since we then can't modify it.
 /// A one-to-many relation, defined as an ordered list of non-unique items.
-public final class ManyRelation<AutoType: Model>: Codable, Relation, @unchecked Sendable {
+public final class ManyRelation<AutoType: Table>: Codable, Relation, @unchecked Sendable {
 	public static func == (lhs: ManyRelation<AutoType>, rhs: ManyRelation<AutoType>) -> Bool {
 		lhs.ids == rhs.ids
 	}

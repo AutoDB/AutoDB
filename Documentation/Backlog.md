@@ -1,7 +1,7 @@
 # AutoDB Swift
 
 SQL
-	- update hook when having fetch-lists in AutoRelation (as in RelationQuery)
+	- update hook when having fetch-lists in ManyRelation (as in RelationQuery)
 	- remember our types for faster encoding of classes and performing queries. 
 	- test all types
 
@@ -10,11 +10,13 @@ Creating index and changing column type does not work as expected!
 Fetching
 	- design other common SQL-functions like fetch row, value, etc.
 
-Support for Structs, when you don't need/want auto collision handling but rather just want to handle a huge table of data efficiently (but still automatic in other ways).  
+# Known bugs / TODOs
 
-- remove ignoreProperties since we are using codable now.
+Find a solution for temp-objects
 
-# That is all!
+# Thoughts
+
+When fetchin a Table, we always get a new struct. So even if there is Model for this Table, there could potentially become a second one.
 
 ## Thinking
 

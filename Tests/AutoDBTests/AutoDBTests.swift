@@ -3,7 +3,7 @@ import XCTest
 import Foundation
 
 
-struct ExampleInit: Model {
+struct ExampleInit: Table {
 	var id: AutoId = 0
 	let something: Int
 	init() {

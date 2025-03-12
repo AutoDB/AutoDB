@@ -10,7 +10,7 @@ import Foundation
 
 @testable import AutoDB
 
-struct Mig: Model {
+struct Mig: Table {
 	var id: AutoId = 1
 	var name = 1
 	var plain = "plain"

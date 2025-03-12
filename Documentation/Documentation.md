@@ -4,51 +4,64 @@ The purpose is to have a automatic system for handling persistance. Objects shou
 
 ## Quick start
 
-Implement the AutoDB protocol for all your data classes, and make sure they are both Codable and Sendable. They must have the `var id: AutoId` to handle identity.
+See the [README](/README.md).
 
-```
-final class Artist: AutoDB, @unchecked Sendable {
-	var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
-	var name: String = ""	// we must have default values or nil
-}
-```
+## Separation of Tables and Models
 
-Create new objects:
-``` 
-let first = await Artist.create()
-// Specify id if you don't want the system to assign one 
-// let first = await Artist.create(1)
+A struct implementing the Table protocol becomes a database table, and is using Codable for that. It can be a struct or a class (if you really want to) and is never cached. 
+A Model must be a class and holds a Table. It is always cached which avoids the problem with merge-conflicts since you cannot have two objects in different places with the same data. You will always be writing to the one correct object, and if two views have the same data - any changes in one will immediately be visible in the other.
 
-first.name = "The Cure"
-try await first.save()
-```
+The separation seems unnecessary at first, why not just use a single object?
 
-Fetch existing objects:
-```
-let artist = try await Artist.fetchQuery("WHERE name = ?", first.name).first
-```
-Note that these are the same object, `artist === first`
+The reasons are many:
+* Auto-detect changes, and coalesce all your objects into one big write. Especially if you change your objects many times, postponing saves are magnitudes faster since unnecessary ones is simply not done. An object can detect this itself in the ´didSet´ method. Writing those for every property however, quickly becomes tedious (and it is not automatic).
+* Control. There are times when you want a copy of your data just so it *won't* be updated by changes elsewhere. E.g. when building undo/redo. Keeping it as structs solves that problem.
+* Speed. When you have a million tiny data structures, like positions on a map, you don't want to allocate an object for each one. Structs are much faster and uses less memory.
+* Refresh. When external processes change your db-file you need to refresh the data (or other refresh situations like syncing). Held references makes this problematic, while very easy just updating its internal struct. 
+* Speed. When writing to DB you just need to send the structs to handle themselves. No locking, retain/release etc, needs to be done. 
 
-That is all!
+Eating the cake and having it too!
 
-# FastTextSearch
+# Features
+
+## FastTextSearch
 
 The system supports FTS-columns, which is a powerful way to search for text. Create a FTSColumn like tihs:
 
 ```
-final class AnExample: AutoModel, @unchecked Sendable {
-	var id: AutoId = 1
-	var theText = ""
-	var fts = FTSColumn<AnExample>("theText")
+final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
+	struct PostTable: Table {
+		var id: AutoId = 1
+		var title: String = "Untitled"
+		var body: String = "Once upon a time..."
+		var createdAt: Date = Date()
+	}
+	
+	var value: PostTable
+	init(_ value: PostTable) {
+		self.value = value
+	}
+	
+	var index = FTSColumn<PostTable>("Index")
+	
+	// note that the callback is optional if set the name the FTSColumn to the name of the column you want to index (and only want to index one).
+	static func textCallback(_ ids: [AutoId]) async -> [AutoId: String] {
+		var result: [AutoId: String] = [:]
+		let list = (try? await PostTable.fetchIds(ids)) ?? []
+		for item in list {
+			result[item.id] = item.title + " " + item.body
+		}
+		return result
+	}
 }
 ```
 
-As you can see you must specify your own class as the generic type. This is because the type-system needs to know which class to index. Then the name of the column must be specified as a string. 
+As you can see you must specify your own Table as the generic type for the FTSColumn. This is because the type-system needs to know which table to index. The column will become a virtual table so it needs a name to be a unique string. 
 
 Now you can search like this, and all matching objects with that phrase will be returned:
 
 ```
-let matches = try await FTSColumn<AnExample>.search("I love My" column: "theText")
+let matches = try await FTSColumn<PostTable>.search("I love My" column: "Index")
 ```
 
 A shorthand if you have an object is available:
@@ -56,6 +69,13 @@ A shorthand if you have an object is available:
 let matches = try await anExampleObject.fts.search("I love My")
 ```
 It will not use the anExampleObject for anything but to fill in the generic info the type system needs.
+
+If contained inside a Model it will return the Table-struct:
+```
+var post: Post = await Post.create()
+[...]
+let fairyTalePosts: [PostTable] = try await post.ownerIndex.search("once upon a time")
+```
 
 # Transactions
 

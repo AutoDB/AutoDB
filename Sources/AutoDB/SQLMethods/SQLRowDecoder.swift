@@ -48,7 +48,7 @@ class SQLRowDecoder: Decoder {
 	let tableInfo: TableInfo
 	var usedKeys: [String] = []
 	
-	init<TableClass: Model>(_ classType: TableClass.Type, _ tableInfo: TableInfo, _ values: [String: SQLValue]? = nil) {
+	init<TableClass: Table>(_ classType: TableClass.Type, _ tableInfo: TableInfo, _ values: [String: SQLValue]? = nil) {
 		self.tableInfo = tableInfo
 		let base = TableClass.init()
 		for (key, path) in base.allKeyPaths {

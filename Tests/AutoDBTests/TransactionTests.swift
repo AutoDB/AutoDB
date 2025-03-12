@@ -10,7 +10,7 @@ import Foundation
 
 @testable import AutoDB
 
-final class TransClass: Model, @unchecked Sendable {
+final class TransClass: Table, @unchecked Sendable {
 	var id: AutoId = 1
 	var integer = 1
 }

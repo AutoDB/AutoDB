@@ -10,7 +10,7 @@ import Combine
 
 // They must all implement AutoDB
 // They must all not have an init OR an empty required one: required init() {... setup }, you may use convenience inits instead.
-final class DataAndDate: Model, @unchecked Sendable {
+final class DataAndDate: Table, @unchecked Sendable {
 	var anOptObject: DataAndDate? = nil
 	var hasChanges: Bool = false
     
@@ -28,7 +28,7 @@ final class DataAndDate: Model, @unchecked Sendable {
     var ignoreThis = 1
 }
 
-struct BaseClass: Model {
+struct BaseClass: Table {
 	var id: UInt64 = 0
 	var anOptInt: Int? = nil
     
@@ -37,7 +37,7 @@ struct BaseClass: Model {
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-@Observable final class ObserveBasic: Model, @unchecked Sendable {
+@Observable final class ObserveBasic: Table, @unchecked Sendable {
 	
 	var hasChanges: Bool = false
 	var id: UInt64 = 0
@@ -68,14 +68,14 @@ struct Nested: Codable, Equatable {
 	let name: String?
 }
 
-final class Mod: Model, @unchecked Sendable {
+final class Mod: Table, @unchecked Sendable {
 	var id: UInt64 = 0
 	var string: String? = "some string"
 	var bigInt: UInt64 = 0
 }
 
 @available(macOS 15.0, *)
-final class IntTester: Model, @unchecked Sendable {
+final class IntTester: Table, @unchecked Sendable {
 	
 	var id: UInt64 = .max
 	
@@ -92,9 +92,9 @@ final class IntTester: Model, @unchecked Sendable {
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-@Observable final class Artist: ModelObject, @unchecked Sendable {
+@Observable final class Artist: Model, @unchecked Sendable {
 	
-	struct Value: Model {
+	struct Value: Table {
 		var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
 		var name: String = ""	// we must have default values or nil
 	}
@@ -108,7 +108,7 @@ final class IntTester: Model, @unchecked Sendable {
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable
-final class CodeWithKeys: Model, @unchecked Sendable {
+final class CodeWithKeys: Table, @unchecked Sendable {
 	
 	var id: AutoId = 0
 	var name: String = ""
@@ -128,9 +128,9 @@ final class CodeWithKeys: Model, @unchecked Sendable {
 // Building something to handle relations
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 //@Observable
-final class Parent: ModelObject, @unchecked Sendable {
+final class Parent: Model, @unchecked Sendable {
 	var value: Value
-	struct Value: Model {
+	struct Value: Table {
 		
 		var id: UInt64 = 0
 		var name = ""
@@ -141,7 +141,7 @@ final class Parent: ModelObject, @unchecked Sendable {
 	}
 }
 
-struct Child: Model, @unchecked Sendable {
+struct Child: Table, @unchecked Sendable {
 	var id: UInt64 = 0
 	var name = "fox"
 }
