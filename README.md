@@ -31,12 +31,12 @@ final class Artist: Model, @unchecked Sendable {
 
 Create new objects:
 ``` 
-let first = await Artist.create()
+let first = Artist.create() // use await if in async context
 // Specify id if you don't want the system to assign one 
-// let first = await Artist.create(1)
+// let first = Artist.create(1)
 
 first.name = "The Cure"
-try await first.save()
+try first.save()
 ```
 
 Fetch existing objects:

@@ -4,6 +4,8 @@
 //
 //  Created by Olof Andersson-Thorén on 2025-03-07.
 //
+//import Dispatch
+import Foundation
 
 /// All table classes must implement AutoDB and be @unchecked Sendable. Regular Sendable is not meaningful (must both be decodable and owned by a global actor).
 public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwner, TableModel {
@@ -70,6 +72,10 @@ public extension Model {
 		ObjectIdentifier(TableType.self)
 	}
 	
+	static var valueIdentifier: ObjectIdentifier {
+		ObjectIdentifier(TableType.self)
+	}
+	
 	static func == (lhs: Self, rhs: Self) -> Bool {
 		lhs.id == rhs.id
 	}
@@ -77,7 +83,34 @@ public extension Model {
 		hasher.combine(id)
 	}
 	
+	/// sometimes object's inits must be sync. Force-wait in that case.
+	static func create(token: AutoId? = nil, _ id: AutoId? = nil) -> Self {
+		
+		let semaphore = DispatchSemaphore(value: 0)
+		
+		var wrapper: [Self] = []
+		Task {
+			let item = await create(token: token, id)
+			wrapper.append(item)
+			semaphore.signal()
+		}
+		semaphore.wait()
+		
+		return wrapper.first!
+	}
+	
+	/// When you are in async mode, wait regularly
 	static func create(token: AutoId? = nil, _ id: AutoId? = nil) async -> Self {
+		// get encoder or setup db if not done
+		guard let encoder = try? await AutoDBManager.shared.getEncoder(TableType.self) else {
+			fatalError("Could not setup DB")
+		}
+		
+		// don't let two threads create the same object at the same time
+		let token = token ?? AutoId.generateId()
+		await encoder.semaphore.wait(token: token)
+		defer { Task { await encoder.semaphore.signal(token: token) }}
+		
 		if let id {
 			if let item = await AutoDBManager.shared.cached(Self.self, id) {
 				return item
@@ -86,12 +119,13 @@ public extension Model {
 			}
 		}
 		
-		// no id or not in DB, create new object
+		// no id or not in db, create a new object.
 		var value = TableType()
 		value.id = id ?? AutoId.generateId()
 		let item = Self(value)
 		
 		await item.awakeFromInit()
+		
 		return item
 	}
 	

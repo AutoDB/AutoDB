@@ -14,9 +14,14 @@ Fetching
 
 Find a solution for temp-objects
 
+For Table items, usually a BIG json downloaded from sources devs do not control. Would be nice if those could be auto-splitted into separate tables with foreign-key constrains. Now the related data needs to be json-data-struct or separated manually using a OneRelation.
+
+But how? 
+- How about a special init when decoding, like SubType.init(superType). We can then decode the whole chain automatically and encode into different tables. But would require separate writes for each instance.
+
 # Thoughts
 
-When fetchin a Table, we always get a new struct. So even if there is Model for this Table, there could potentially become a second one.
+When fetchin a Table, we always get a new struct. So if there already is a Model for this Table, there could potentially become a second one.
 
 ## Thinking
 

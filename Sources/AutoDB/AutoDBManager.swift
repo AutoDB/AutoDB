@@ -7,6 +7,10 @@
 
 import Foundation
 
+extension UInt64 {
+	static var shortDelay: UInt64 { 9_000 }
+}
+
 @globalActor public actor AutoDBManager: GlobalActor {
 	
 	public static let shared = AutoDBManager()
@@ -18,6 +22,9 @@ import Foundation
 			return enc
 		}
 		try await setupDB(classType, settings: nil)
+		if let enc = encoders[ObjectIdentifier(T.self)] {
+			return enc
+		}
 		let enc = await SQLRowEncoder(T.self)
 		encoders[ObjectIdentifier(T.self)] = enc
 		return enc
@@ -108,7 +115,7 @@ import Foundation
 		
 		// if two threads try to setup at the same time the other must wait
 		while databases[typeID] == nil {
-			try await Task.sleep(nanoseconds: 9_000)
+			try await Task.sleep(nanoseconds: .shortDelay)
 		}
 		return databases[typeID]!
 	}
@@ -116,7 +123,7 @@ import Foundation
 	func tableInfo<T: Table>(token: AutoId? = nil, _ classType: T.Type) async -> TableInfo {
 		let typeID = ObjectIdentifier(classType)
 		while tables[typeID] == nil {
-			try? await Task.sleep(nanoseconds: 9_000)
+			try? await Task.sleep(nanoseconds: .shortDelay)
 		}
 		return tables[typeID]!
 	}

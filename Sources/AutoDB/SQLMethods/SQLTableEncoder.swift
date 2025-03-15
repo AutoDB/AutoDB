@@ -174,7 +174,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 	func addColumn<T: EncodableSendable>(_ column: String, _ type: ColumnType, _ valueType: Any.Type, _ nullable: Bool, _ defaultValue: T?) {
         
 		if addedColumns.contains(column) || column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
-			print("ignoring \(column)")
+			//print("ignoring \(column)")
 			return
 		}
 		addedColumns.insert(column)
@@ -185,7 +185,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 	func addColumn(_ column: String, _ type: ColumnType, _ valueType: Any.Type) {
 		
 		if addedColumns.contains(column) || column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
-			print("ignoring \(column)")
+			//print("ignoring \(column)")
 			return
 		}
 		addedColumns.insert(column)
