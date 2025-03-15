@@ -1,5 +1,5 @@
 //
-//  AutoQueryClass.swift
+//  RelationQueryClass.swift
 //  AutoDB
 //
 //  Created by Olof Andersson-Thorén on 2024-12-05.
@@ -7,69 +7,135 @@
 import Foundation
 @testable import AutoDB
 import Testing
+import Combine
 
-final class Album: AutoModel, @unchecked Sendable {
+struct Album: Table {
 	
 	var id: AutoId = 0
 	var name = ""
 	var artist = ""
 }
 
-final class AlbumArt: AutoModel, @unchecked Sendable {
+final class AlbumArt: Model, @unchecked Sendable {
 	
-	var id: AutoId = 0
-	var album = OneRelation<Album>()
+	struct AlbumArtValue: Table {
+		
+		var id: AutoId = 0
+		var name = ""
+		var artist = ""
+		
+		// in here to save to DB!
+		var album = OneRelation<Album>()
+	}
+	
+	var value: AlbumArtValue
+	init(_ value: AlbumArtValue) {
+		self.value = value
+	}
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-final class CureAlbums: AutoModel, @unchecked Sendable {
-	var id: AutoId = 0
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
-}
-
-@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-final class SaveFail: AutoModel, @unchecked Sendable {
-	var id: AutoId = 0
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
-}
-
-@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-final class DeallocTest: AutoModel, @unchecked Sendable {
-	var id: AutoId = 0
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 20000, limit: 3)
+final class DeallocTest: @unchecked Sendable {
+	
+	init() {
+		albums.setOwner(self)
+	}
+	
+	var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 20000, limit: 3)
 	var callback: (() -> Void)?
 	deinit {
 		callback?()
 	}
-	
-	enum CodingKeys: CodingKey {
-		case id
-		case albums
+}
+
+
+
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+final class CureAlbums: Model, @unchecked Sendable {
+	struct CureAlbumsTable: Table {
+		var id: AutoId = 0
+		var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
+	}
+	var value: CureAlbumsTable
+	init(_ value: CureAlbumsTable) {
+		self.value = value
 	}
 }
 
-/*
-final class CombineTest: AutoModel, @unchecked Sendable, ObservableObject {
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+struct SaveFail: Table {
 	var id: AutoId = 0
-	@Published
-	var albums = AutoQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
-	var listeners = Set<AnyCancellable>()
-	var someInt: Int = 1
+	var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
+}
+
+final class CombineAlbum: Model, @unchecked Sendable, ObservableObject {
 	
-	enum CodingKeys: CodingKey {
-		case id
-		case albums
-		case someInt
+	//var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
+	struct CombineAlbumTable: Table {
+		
+		var id: AutoId = 0
+		var name = ""
+		var artist = ""
 	}
 	
-	convenience init(type: Int) {
-		self.init()
-		albums.objectWillChange.sink { [self] _ in
+	@Published
+	var value: CombineAlbumTable
+	
+	init(_ value: CombineAlbumTable) {
+		self.value = value
+		
+		$value.sink { [self] _ in
 			self.objectWillChange.send()
 		}.store(in: &listeners)
 	}
+	var listeners = Set<AnyCancellable>()
 }
- */
+
+// auto-call objectWillChange when changed.
+final class CombineArtist: @unchecked Sendable, ObservableObject, RelationOwner {
+	
+	@Published
+	var albums = RelationQuery<CombineAlbum.CombineAlbumTable>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
+	
+	func didChange() async {
+		objectWillChange.send()
+	}
+}
+
+class CombineTester {
+	
+	var listeners = Set<AnyCancellable>()
+	var gotMessage = false
+	
+	// will models be notified when values change or Relation-changes
+	@Test func plainListener() async throws {
+		try await AutoDBManager.shared.truncateTable(CombineAlbum.self)
+		let item = await CombineAlbum.create()
+		item.objectWillChange.sink { [self] _ in
+			gotMessage = true
+		}.store(in: &listeners)
+		
+		item.value.name = "Wild mood swings"
+		
+		try await waitForCondition {
+			gotMessage
+		}
+		
+		listeners.removeAll()
+		gotMessage = false
+		
+		let artist = CombineArtist()
+		artist.albums.setOwner(artist)
+		artist.objectWillChange.sink { [self] _ in
+			gotMessage = true
+		}.store(in: &listeners)
+		try await item.save()
+	
+		try await waitForCondition {
+			gotMessage
+		}
+	}
+}
 
 class ListenerHelp: @unchecked Sendable {
 	var list: ChangeObserver
@@ -125,11 +191,8 @@ class ListenerHelp: @unchecked Sendable {
 	}
 }
 
-import Combine
-
 // experimenting with publishers
-class AutoQueryTests2: @unchecked Sendable {
-	var gotMessage = false
+class RelationQueryPublisherTests: @unchecked Sendable {
 	
 	func exampleOfAsyncObserver() async throws {
 		let observer = AsyncObserver<Int>()
@@ -163,36 +226,11 @@ class AutoQueryTests2: @unchecked Sendable {
 	}
 }
 
-class AutoQueryTests {
+class RelationQueryTests {
 	
-	var listeners = Set<AnyCancellable>()
-	var gotMessage = false
-	
-	/*
-	@Test func plainListener() async throws {
-		try await AutoDBManager.shared.truncateTable(Album.self)
-		try await AutoDBManager.shared.truncateTable(CombineTest.self)
-		let item = CombineTest(type: 1)
-		item.objectWillChange.sink { [self] _ in
-			gotMessage = true
-		}.store(in: &listeners)
-		
-		_ = try await item.albums.fetchItems()
-		
-		let album = await Album.create()
-		album.name = "Wild mood swings"
-		album.artist = "The Cure"
-		try await album.save()
-		
-		try await waitForCondition {
-			gotMessage
-		}
-	}
-	*/
-	
-	@Test func deallocAutoQuery() async throws {
-		try await AutoDBManager.shared.truncateTable(DeallocTest.self)
-		var owner: DeallocTest? = await DeallocTest.create(1)
+	@Test func deallocRelationQuery() async throws {
+		//try await AutoDBManager.shared.truncateTable(DeallocTest.self)
+		var owner: DeallocTest? = DeallocTest()
 		weak var listener = owner?.albums
 		var didDealloc = false
 		owner?.callback = {
@@ -204,7 +242,6 @@ class AutoQueryTests {
 			didDealloc
 		}
 		
-		//owner?.albums never deallocs...
 		print("Is album listener nil?")
 		try await waitForCondition {
 			return listener == nil
@@ -217,9 +254,9 @@ class AutoQueryTests {
 	}
 	
 	@Test
-	func testAutoQueryXTimes() async throws {
+	func testRelationQueryXTimes() async throws {
 		for index in 0..<300 {
-			try await testAutoQuery()
+			try await testRelationQuery()
 			if index % 100 == 0 {
 				print("autoQ completed: \(index)")
 			}
@@ -249,7 +286,7 @@ class AutoQueryTests {
 		}
 	}
 	
-	func testAutoQuery() async throws {
+	func testRelationQuery() async throws {
 		try await AutoDBManager.shared.truncateTable(CureAlbums.self)
 		try await AutoDBManager.shared.truncateTable(Album.self)
 		//try await Album.db().setDebug()
@@ -264,59 +301,36 @@ class AutoQueryTests {
 			print("no! \(count)")
 		}
 		
-		let isEmpty = try await CureAlbums.fetchId(1).albums.fetchItems().isEmpty
+		let isEmpty = try await CureAlbums.fetchId(1).value.albums.fetchItems().isEmpty
 		#expect(isEmpty)
 		for name in ["Seventeen Seconds", "Faith"] {
-			let album = await Album.create()
+			var album = await Album.create()
 			album.name = name
 			album.artist = "The Cure"
-			await album.didChange()
+			try await album.save()
 		}
-		try await Album.saveChanges()
 		
 		// newly fetched from DB should have items already populated (after a short delay).
 		let cure = try await CureAlbums.fetchId(1)
 		try await waitForCondition {
-			cure.albums.items.isEmpty == false
+			cure.value.albums.items.isEmpty == false
 		}
-		try await cure.albums.loadMore()
-		count = cure.albums.items.count
+		try await cure.value.albums.loadMore()
+		count = cure.value.albums.items.count
 		#expect(count == 2, "count is \(count)")
 		
-		#expect(cure.albums.hasMore == false)
-		let album = await Album.create()
+		#expect(cure.value.albums.hasMore == false)
+		var album = await Album.create()
 		album.name = "Pornography"
 		album.artist = "The Cure"
 		try await album.save()
 		try await waitForCondition(delay: 5) {
-			cure.albums.hasMore == true
+			cure.value.albums.hasMore == true
 		}
 		
 		// There was no problem with save - error was only with callback!
-		try await cure.albums.loadMore()
-		#expect(cure.albums.hasMore == false && cure.albums.items.count > 2)
+		try await cure.value.albums.loadMore()
+		#expect(cure.value.albums.hasMore == false && cure.value.albums.items.count > 2)
 	}
 }
 
-enum WaitError: Error {
-	case timeRanOut
-	case reason(String)
-}
-
-@available(macOS 14.0, iOS 15.0, *)
-public func waitForCondition(delay: Double = 15, _ reason: String? = nil, _ closure: (() async throws -> Bool)) async throws {
-	let endDate = Date.now.addingTimeInterval(delay)
-	while Date.now < endDate {
-		if try await closure() {
-			return
-		}
-		try await Task.sleep(for: .milliseconds(10))
-	}
-	if try await closure() {
-		return
-	}
-	if let reason = reason {
-		throw WaitError.reason(reason)
-	}
-	throw WaitError.timeRanOut
-}

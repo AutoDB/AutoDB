@@ -4,6 +4,42 @@
 //
 //  Heavily copied from Blackbird: https://github.com/marcoarment/Blackbird
 //
+//
+//
+//             _______
+//           _|       |_
+//          | |  O O  | |                         AutoDB
+//          |_|   ^   |_|
+//            \  'U' /                   https://github.com/AutoDB
+//       []    |--∞--|    []
+//        \   |   o   |   /       Copyright 2025 - ∞ Olof Andersson-Thorén
+//         \ /    o    \ /             Released under the MIT License
+//          |     o     |
+//         /______|______\               The paradise is automatic
+//            ||    ||
+//            ||    ||
+//            ~~    ~~
+//
+//  Permission is hereby granted, free of charge, to any person obtaining a copy
+//  of this software and associated documentation files (the "Software"), to deal
+//  in the Software without restriction, including without limitation the rights
+//  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//  copies of the Software, and to permit persons to whom the Software is
+//  furnished to do so, subject to the following conditions:
+//
+//  The above copyright notice and this permission notice shall be included in all
+//  copies or substantial portions of the Software.
+//
+//  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//  SOFTWARE.
+
+
+
 
 import Foundation
 #if canImport(Darwin)
@@ -33,8 +69,8 @@ import GlibC
 public typealias ChangeObserver = AsyncObserver<RowChangeParameters>
 public struct RowChangeParameters: Sendable, Codable, Hashable, Equatable {
 	//let tableName: String
-	let operation: SQLiteOperation
-	let id: AutoId
+	public let operation: SQLiteOperation
+	public let id: AutoId
 }
 
 public enum SQLiteOperation: Int32, Sendable, Codable {
@@ -62,7 +98,7 @@ extension [Row] {
 /**
  AutoDB is the database connection mechanism of the system.
  */
-public actor AutoDB {
+public actor Database {
 	
 	/// The maximum number of parameters (`?`) supported in database queries. (The value of `SQLITE_LIMIT_VARIABLE_NUMBER` of the backing SQLite instance.)
 	let maxQueryVariableCount: Int
@@ -74,10 +110,9 @@ public actor AutoDB {
 	private let semaphore = Semaphore()
 	private var inTransaction: Bool = false
 	private var debugPrintEveryQuery = false
-	private var debugPrintQueryParameterValues = false
+	
 	func setDebug(_ enabled: Bool = true) {
 		debugPrintEveryQuery = enabled
-		debugPrintQueryParameterValues = enabled
 	}
 	
 	public init(_ path: String, ramDB: Bool = false) throws {
@@ -131,17 +166,20 @@ public actor AutoDB {
 				  let tableName, let tableNameStr = String(cString: tableName, encoding: .utf8) else {
 				return
 			}
-			let autoDB = Unmanaged<AutoDB>.fromOpaque(ctx).takeUnretainedValue()
+			let autoDB = Unmanaged<Database>.fromOpaque(ctx).takeUnretainedValue()
 			Task {
 				await autoDB.callListeners(tableNameStr, operation, rowid)
 			}
 			
-		}, Unmanaged<AutoDB>.passUnretained(self).toOpaque())
+		}, Unmanaged<Database>.passUnretained(self).toOpaque())
 	}
 	
 	var gentleClose: Task<Void, Swift.Error>?
 	var harshClose: Task<Void, Swift.Error>?
 	public func close(_ token: AutoId? = nil) async {
+		gentleClose?.cancel()
+		harshClose?.cancel()
+		
 		gentleClose = Task {
 			let hasSemaphore = inTransaction || token != nil
 			if hasSemaphore {
@@ -154,18 +192,24 @@ public actor AutoDB {
 		
 		// kill after some time?
 		harshClose = Task {
-			try await Task.sleep(nanoseconds: 10_000_000_000)
+			let waitSec: Double = 10
+			let date = Date().addingTimeInterval(waitSec * 2.0)
+			try await Task.sleep(nanoseconds: 100_000_000 * UInt64(waitSec))
 			try Task.checkCancellation()
+			if Date.now > date {
+				// we have gone too long to be relevant, perhaps was backgrounded and couldn't finish until restarted.
+				return
+			}
 			isClosed = true
-			// print("killing sqlite and forcing close")
-			// sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
+			print("Interrupting sqlite to force close")
+			sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
 		}
 	}
 	
 	public func open() async {
-		isClosed = false
-		gentleClose?.cancel()
 		harshClose?.cancel()
+		gentleClose?.cancel()
+		isClosed = false
 	}
 	
 	nonisolated internal func errorDesc(_ dbHandle: OpaquePointer?, _ query: String? = nil) -> String {
@@ -274,7 +318,7 @@ public actor AutoDB {
 	
 	private func rowsByExecutingPreparedStatement(_ statement: PreparedStatement, from query: String) throws -> [Row] {
 		if debugPrintEveryQuery {
-			if debugPrintQueryParameterValues, let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
+			if let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
 				print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(expandedQuery)")
 			} else {
 				print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(query)")
@@ -392,7 +436,7 @@ public actor AutoDB {
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
 	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are holding the lock. We could send around the AutoDB and only allow access when locked - but that would basically be the same thing.
-	public func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated AutoDB, _ token: AutoId) async throws -> R) ) async throws -> R {
+	public func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
 		
 		inTransaction = true	// now everyone must wait for semaphore
 		let transactionID = AutoId.generateId()
@@ -432,9 +476,9 @@ public actor AutoDB {
 	}
 	
 	private func callListeners(_ tableName: String, _ operation: SQLiteOperation, _ rowId: sqlite_int64 ) async {
-		if changeObservers[tableName] != nil {
+		if let observer = changeObservers[tableName] {
 			let value = RowChangeParameters(operation: operation, id: UInt64(bitPattern: rowId))
-			await changeObservers[tableName]?.append(value)
+			await observer.append(value)
 		}
 	}
 }

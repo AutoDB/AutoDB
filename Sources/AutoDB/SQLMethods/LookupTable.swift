@@ -10,11 +10,12 @@ import Foundation
 ///Generic implementation of a table to lookup AutoModel objects that has changed, will be deleted and similar.
 struct LookupTable {
 	
-	var changedObjects = [ObjectIdentifier: [AutoId: any AutoModel]]()
+	var changedObjects = [ObjectIdentifier: [AutoId: any Model]]()
 	var deleted = [ObjectIdentifier: Set<AutoId>]()
+	var deleteLater = [ObjectIdentifier: Set<AutoId>]()
 	
-	/// Mark an object as deleted, we can now batch delete at a future time and prevent saves.
-	mutating func setDeleted(_ ids: [AutoId], _ isDeleted: Bool, _ typeID: ObjectIdentifier) {
+	/// Mark an object as deleted, prevent save for any lingering objects
+	mutating func setDeleted(_ ids: [AutoId], _ typeID: ObjectIdentifier) {
 		
 		if deleted[typeID] == nil {
 			deleted[typeID] = Set(ids)
@@ -37,12 +38,27 @@ struct LookupTable {
 		deleted[identifier]?.contains(id) ?? false
 	}
 	
-	mutating func objectHasChanged<T: AutoModel>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
+	/// Mark an object as deleted, but don't delete it - we can now batch delete at a future time and prevent saves.
+	mutating func setDeleteLater(_ ids: [AutoId], _ typeID: ObjectIdentifier) {
+		
+		if deleteLater[typeID] == nil {
+			deleteLater[typeID] = Set(ids)
+		} else {
+			deleteLater[typeID]?.formUnion(ids)
+		}
+		setDeleted(ids, typeID)
+	}
+	
+	mutating func removeDeleteLater(_ identifier: ObjectIdentifier, _ toRemove: Set<AutoId>) {
+		deleteLater[identifier]?.subtract(toRemove)
+	}
+	
+	mutating func objectHasChanged<T: Model>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
         
 		objectHasChanged(object.id, object, identifier)
     }
     
-	mutating func objectHasChanged<T: AutoModel>(_ id: UInt64, _ object: T, _ identifier: ObjectIdentifier?) {
+	mutating func objectHasChanged<T: Model>(_ id: UInt64, _ object: T, _ identifier: ObjectIdentifier?) {
 		
 		let identifier = identifier ?? ObjectIdentifier(T.self)
 		if isDeleted(id, identifier) {

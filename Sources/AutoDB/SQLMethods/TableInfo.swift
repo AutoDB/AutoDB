@@ -92,7 +92,7 @@ struct TableInfo: Sendable {
 		return "CREATE TABLE `\(overrideTableName ?? name)` (\(columnDefs)\(primaryKey))"
 	}
 	
-	func allIndices<T: AutoModel>(_ emptyInstance: T) -> Set<SQLIndex> {
+	func allIndices<T: Table>(_ emptyInstance: T) -> Set<SQLIndex> {
 		var indices: [SQLIndex] = T.indices.compactMap { keyPaths in
 			// get the names for each keyPath
 			SQLIndex(columnNames: keyPaths, unique: false)
@@ -106,7 +106,7 @@ struct TableInfo: Sendable {
 		return Set(indices)
 	}
 	
-	func createIndexStatements<T: AutoModel>(_ emptyInstance: T) -> [String] {
+	func createIndexStatements<T: Table>(_ emptyInstance: T) -> [String] {
 		// we want it to look like CREATE UNIQUE INDEX [IF NOT EXISTS] index_name ON table_name(column1, column2, ...)
 		var indices: [SQLIndex] = T.indices.compactMap { keyPaths in
 			// get the names for each keyPath

@@ -14,7 +14,7 @@
 //        \   |   o   |   /       Copyright 2025 - ∞ Olof Andersson-Thorén
 //         \ /    o    \ /             Released under the MIT License
 //          |     o     |
-//         /______|______\             No paradise without automation
+//         /______|______\               The paradise is automatic
 //            ||    ||
 //            ||    ||
 //            ~~    ~~
@@ -48,7 +48,7 @@ class SQLRowDecoder: Decoder {
 	let tableInfo: TableInfo
 	var usedKeys: [String] = []
 	
-	init<TableClass: AutoModel>(_ classType: TableClass.Type, _ tableInfo: TableInfo, _ values: [String: SQLValue]? = nil) {
+	init<TableClass: Table>(_ classType: TableClass.Type, _ tableInfo: TableInfo, _ values: [String: SQLValue]? = nil) {
 		self.tableInfo = tableInfo
 		let base = TableClass.init()
 		for (key, path) in base.allKeyPaths {
@@ -61,7 +61,7 @@ class SQLRowDecoder: Decoder {
 			self.values = values
 		}
 	}
-	var relations: [any AnyRelation] = []
+	var relations: [AnyRelation] = []
 	func getValue<T>(_ type: T.Type, _ key: String) -> T? where T : Decodable {
 		guard let value = values[key] ?? values[key.trimmingCharacters(in: prefixPropertyChars)] else {
 			return nil
@@ -98,7 +98,7 @@ class SQLRowDecoder: Decoder {
 			default:
 				if let data = value.dataValue {
 					let value = try? JSONDecoder().decode(T.self, from: data)
-					if let relation = value as? any AnyRelation {
+					if let relation = value as? AnyRelation {
 						relations.append(relation)
 					}
 					return value
@@ -131,7 +131,9 @@ class SQLRowDecoder: Decoder {
 	}
 	
 	func hasValue(_ key: String) -> Bool {
-		guard let _ = values[key] ?? values[key.trimmingCharacters(in: prefixPropertyChars)] else {
+		guard let value = values[key] ?? values[key.trimmingCharacters(in: prefixPropertyChars)],
+			  value != .null
+		else {
 			return false
 		}
 		return true

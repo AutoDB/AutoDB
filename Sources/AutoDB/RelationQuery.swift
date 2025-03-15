@@ -1,0 +1,244 @@
+//
+//  RelationQuery.swift
+//  AutoDB
+//
+//  Created by Olof Andersson-Thorén on 2024-12-05.
+//
+
+//TODO: Think this through, there are a solution!
+/*
+protocol ObserverSubject {
+	func willChange()
+}
+*/
+/// Since swift forces the use of names, we cannot have one RelationQuery that with combine and the same with Observable - and then a third one with nothing. So instead we have a plain RelationQuery that is an exact copy of RelationQueryObservable but that also sends changes to an asyncPublisher called changePublisher
+// TODO: just solve it with a protocoll!
+/// non-observable version for use in other circumstanses, just a plain copy without @Observable
+
+#if canImport(Combine)
+// if using combine, we can just send objectWillChange when owners are ObservableObject
+import Combine
+@available(macOS 10.15, iOS 13.0, tvOS 13.0, watchOS 6.0, *)
+extension RelationQuery: ObservableObject {	//ObserverSubject
+	func didChange() {
+		objectWillChange.send()
+		if let owner = self.owner as? any ObservableObject, let objectWillChange = owner.objectWillChange as? ObjectWillChangePublisher {
+			objectWillChange.send()
+		}
+	}
+}
+#else
+extension RelationQuery {
+	func didChange() {}
+}
+#endif
+
+// When using observation, we need a mediator to relay the changes upwards, must solve the name issue or figure out something smart.
+#if canImport(Observation)
+import Observation
+/**
+ A Relation based on a query that fetches incrementally.
+ Specify the relation and how many objects to fetch like this:
+ var cureAlbums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
+ Now this class holds a relation to all albums of The Cure, fetched when needed.
+ The TableModel must be a table in the db, Models containing a table will not work.
+ 
+ NOTE: The query obviously cannot have limit or offset clauses of its own!
+ 
+ */
+@available(macOS 14.0, iOS 17.0, watchOS 10.0, tvOS 17.0, *)
+@Observable
+public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Sendable, Relation {
+	public static func == (lhs: RelationQuery<AutoType>, rhs: RelationQuery<AutoType>) -> Bool {
+		lhs.query == rhs.query && lhs.arguments == rhs.arguments
+	}
+	
+	weak var owner: AnyObject?
+	
+	/// Automatically set owner if we are inside a Model object, which is the most common use-case.
+	public func setOwner<OwnerType: AnyObject & Sendable>(_ owner: OwnerType) {
+		
+		self.owner = owner
+		Task {
+			try? await startListening()
+			
+			// Imagine a thousend objects loaded in a list, don't fetch anything here. Fetch when needed.
+			// _ = try? await self.fetchItems()
+		}
+	}
+	
+	@ObservationIgnored let query: String
+	
+	@ObservationIgnored var arguments: [SQLValue]? = nil	// Value isn't Codable so we store arguments as strings instead.
+	
+	// backing var to detect access and trigger first fetch
+	var _items: [AutoType]?
+	public var items: [AutoType] {
+		get {
+			if let _items { return _items }
+			_items = []
+			Task {
+				_ = try? await fetchItems()
+			}
+			return []
+		}
+		set {
+			_items = newValue
+		}
+	}
+	
+	public var hasMore = true
+	
+	/// When using in a list we want to artificially limit the amount sent back to us. This way we can "fold" the list back to the initial amount.
+	var restrictToInitial = false
+	
+	@ObservationIgnored var offset = -1
+	@ObservationIgnored private var fetchedIds: Set<AutoId> = []
+	@ObservationIgnored let initialFetch: Int
+	@ObservationIgnored var limit: Int
+	@ObservationIgnored private let semaphore = Semaphore()
+	
+	private enum CodingKeys: CodingKey {
+		case query
+		case storedArguments
+		case initialFetch
+		case limit
+	}
+	
+	public init(_ query: String, arguments: [Sendable & Codable]? = nil, initial: Int = 5, limit: Int = 100) {
+		self.query = query + " LIMIT %i OFFSET %i"
+		self.initialFetch = initial
+		self.limit = limit
+		do {
+			self.arguments = try arguments?.map { try SQLValue.fromAny($0) }
+		} catch {
+			print("Error for arguments: \(error)")
+		}
+	}
+	
+	public init(from decoder: any Decoder) throws {
+		let container = try decoder.container(keyedBy: CodingKeys.self)
+		query = try container.decode(String.self, forKey: .query)
+		initialFetch = try container.decode(Int.self, forKey: .initialFetch)
+		limit = try container.decode(Int.self, forKey: .limit)
+		items = []
+		let storedArguments = try container.decodeIfPresent([String].self, forKey: .storedArguments)
+		self.arguments = storedArguments?.compactMap { SQLValue.fromSQLiteLiteral($0) }
+	}
+		
+	public func encode(to encoder: any Encoder) throws {
+		
+		var container = encoder.container(keyedBy: CodingKeys.self)
+		
+		let storedArguments = self.arguments?.map { $0.sqliteLiteral() }
+		try container.encodeIfPresent(storedArguments, forKey: CodingKeys.storedArguments)
+		try container.encode(self.query, forKey: CodingKeys.query)
+		try container.encode(self.initialFetch, forKey: CodingKeys.initialFetch)
+		try container.encode(self.limit, forKey: CodingKeys.limit)
+		
+	}
+	
+	public func startListening() async throws {
+		
+		let listener = try await AutoType.changeObserver()
+		Task { [weak self] in
+			
+			for await change in listener {
+				// must be weak inside the listener
+				try await self?.listenerCallback(change.operation, change.id)
+			}
+		}
+	}
+	
+	private func listenerCallback(_ operation: SQLiteOperation, _ rowId: AutoId) async throws {
+		
+		if operation == .insert {
+			
+			// always fetch this one if offset is 0 since then it is the first item.
+			// or if we have more we will get this one at next fetch, otherwise if we don't already have it - fetch it if not initialFetch amount is reached.
+			if offset == 0 || (hasMore == false && fetchedIds.contains(rowId) == false) {
+				hasMore = true
+				if offset == 0 {
+					// initial fetch failed
+					_ = try await fetchItems(resetOffset: true)
+				} else if offset <= initialFetch {
+					// we know the next item - just fetch with id.
+					try await fetchSpecific(rowId)
+				} else {
+					didChange()
+				}
+			}
+		} else if operation == .delete {
+			await semaphore.wait()
+			defer { Task { await semaphore.signal() }}
+			
+			guard let deletedIndex = items.firstIndex(where: { $0.id == rowId }) else { return }
+			items.remove(at: deletedIndex)
+			fetchedIds.remove(rowId)
+			didChange()
+		}
+	}
+	
+	@discardableResult
+	public func fetchItems(resetOffset: Bool = false) async throws -> [AutoType] {
+		await semaphore.wait()
+		defer { Task { await semaphore.signal() } }
+		
+		if offset == -1 || (resetOffset && offset == 0) {
+			// setup first fetch
+			let res = try await AutoType.fetchQuery(token: nil, String(format: query, initialFetch, 0), arguments)
+			offset = res.count
+			hasMore = offset == initialFetch
+			items = res
+			fetchedIds.formUnion(res.map(\.id))
+			didChange()
+		}
+		if restrictToInitial {
+			return Array(items[0..<min(items.count, initialFetch)])
+		}
+		return items
+	}
+	 
+	public func loadMore() async throws {
+		await semaphore.wait()
+		defer { Task { await semaphore.signal() } }
+		
+		var res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [limit, offset]), arguments)
+		if res.isEmpty {
+			if hasMore {
+				hasMore = false
+				didChange()
+			}
+			return
+		}
+		let newIds = Set(res.map { $0.id })
+		if newIds.isDisjoint(with: fetchedIds) == false {
+			// we have changed our table in such a way that the new fetch contains old items - this is quite likely since you typically don't order items by creation-date. Refetch from 0 to get the new item in an updated list!
+			res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [offset + res.count, 0]), arguments)
+			offset = res.count
+			items = res
+		} else {
+			offset += res.count
+			items.append(contentsOf: res)
+		}
+		fetchedIds.formUnion(res.map(\.id))
+		
+		hasMore = res.count == limit
+		didChange()
+	}
+	
+	/// When you know the id of the next item, just fetch it and increment offset.
+	private func fetchSpecific(_ id: AutoId) async throws {
+		await semaphore.wait()
+		defer { Task { await semaphore.signal() } }
+		
+		let item = try await AutoType.fetchId(token: nil, id)
+		items.append(item)
+		fetchedIds.insert(item.id)
+		offset += 1
+		hasMore = false
+		didChange()
+	}
+}
+
+#endif

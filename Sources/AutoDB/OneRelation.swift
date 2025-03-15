@@ -6,8 +6,19 @@
 //
 
 // Note that this cannot be an actor since we need Encodable, it must be a class in order to set its owner automatically.
-public final class OneRelation<AutoType: AutoModel>: Codable, AnyRelation, @unchecked Sendable {
-	public typealias OwnerType = AutoType
+/// A one-to-one relation,
+public final class OneRelation<AutoType: Table>: Codable, Relation, @unchecked Sendable {
+	private func didChange() {
+		if let owner = owner as? RelationOwner {
+			Task {
+				await owner.didChange()
+			}
+		}
+	}
+	
+	public static func == (lhs: OneRelation<AutoType>, rhs: OneRelation<AutoType>) -> Bool {
+		lhs.id == rhs.id
+	}
 	
 	public init(_ id: AutoId = 0) {
 		self.id = id
@@ -15,7 +26,7 @@ public final class OneRelation<AutoType: AutoModel>: Codable, AnyRelation, @unch
 	
 	public var id: AutoId = 0
 	public var _object: AutoType?
-	weak var owner: (any AutoModelObject)? = nil
+	weak var owner: (any Owner)? = nil
 	
 	// All mutations must be thread-safe
 	private var semaphore = Semaphore()
@@ -28,7 +39,10 @@ public final class OneRelation<AutoType: AutoModel>: Codable, AnyRelation, @unch
 	
 	public var object: AutoType {
 		get async throws {
-			try await fetch()
+			if let _object {
+				return _object
+			}
+			return try await fetch()
 		}
 	}
 	
@@ -60,19 +74,17 @@ public final class OneRelation<AutoType: AutoModel>: Codable, AnyRelation, @unch
 		
 		_object = object
 		id = object.id
-		await owner?.didChange()
+		didChange()
 	}
 	
 	/// Unsafe set - without using locks, locks does not impact performance unless congested. And then you need locks.
 	public func setObject(_ object: AutoType) {
 		_object = object
 		id = object.id
-		Task {
-			owner?.didChange()
-		}
+		didChange()
 	}
 	
-	public func setOwner<OwnerType>(_ owner: OwnerType) where OwnerType : AutoModel {
+	public func setOwner<OwnerType>(_ owner: OwnerType) where OwnerType : Owner {
 		self.owner = owner
 	}
 }

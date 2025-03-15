@@ -10,16 +10,10 @@ import Foundation
 import SwiftUI
 #endif
 
-public protocol AnyRelation {
-	associatedtype OwnerType: AutoModelObject
-	mutating func setOwner<OwnerType: AutoModelObject>(_ owner: OwnerType)
-}
-
-
 /**
- Contain fetching and saving in one place, having a optional backing var to know if we have fetched or not.
  A relation is an array of non-unique items of one single AutoDB type.
- Note that it will automatically call the owner of the relation when something is changed, this way you don't need to keep track of changes yourself.
+ It handles fetching and saving in one place, having a optional backing var to know if we have fetched or not.
+ If the owner implements RelationOwner, it will automatically call it when changed, this way you don't need to keep track of changes yourself.
  When fetching from DB this will contain no objects, you must call initFetch/Fetch first to populate the list.
  
  Usage:
@@ -43,10 +37,12 @@ final class Child: AutoDB, @unchecked Sendable {
  }
  */
 
-// Note that this cannot be an actor since we need Encodable, it can't be a struct since we then can't modify the owner's relations directly.
-public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation, @unchecked Sendable {
-	
-	public typealias OwnerType = AutoType
+// Note that this cannot be an actor since we need Encodable, it can't be a struct since we then can't modify it.
+/// A one-to-many relation, defined as an ordered list of non-unique items.
+public final class ManyRelation<AutoType: Table>: Codable, Relation, @unchecked Sendable {
+	public static func == (lhs: ManyRelation<AutoType>, rhs: ManyRelation<AutoType>) -> Bool {
+		lhs.ids == rhs.ids
+	}
 	
 	public init(initial: Int = 150, limit: Int = 50) {
 		self.initial = initial
@@ -58,7 +54,8 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 	// mutating funcs must be thread-safe, that is ensured by an actor-semaphore. With low congestion it only adds an extra increment of an int (and comparison) 2 extra clock cycles (and calling an actor whatever that may cost).
 	private let semaphore = Semaphore()
 	
-	weak var owner: (any AutoModelObject)? = nil
+	weak var owner: (any Owner)? = nil
+	
 	var limit: Int
 	let initial: Int
 	var hasMore = false
@@ -75,12 +72,20 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 		}
 		set {
 			_items = newValue
-			owner?.didChange()
+			didChange()
+		}
+	}
+	
+	private func didChange() {
+		if let owner = owner as? RelationOwner {
+			Task {
+				await owner.didChange()
+			}
 		}
 	}
 	
 	/// This is called automatically when creating an object or when fetching from DB.
-	public func setOwner<OwnerType: AutoModelObject>(_ owner: OwnerType) {
+	public func setOwner<OwnerType: Owner>(_ owner: OwnerType) {
 		self.owner = owner
 		Task {
 			try? await firstFetch()
@@ -89,9 +94,9 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 	
 	/// Only perform initial fetch, use when first loading or fetching from DB - to never fetch more than needed but always have some data
 	@discardableResult
-	public func firstFetch() async throws -> [AutoType] {
-		await semaphore.wait()
-		defer { Task { await semaphore.signal() } }
+	public func firstFetch(_ token: AutoId? = nil) async throws -> [AutoType] {
+		await semaphore.wait(token: token)
+		defer { Task { await semaphore.signal(token: token) } }
 		
 		if _items != nil {
 			return items
@@ -99,7 +104,7 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 		
 		let end = min(ids.count, initial)
 		let idsToFetch = Array(ids[0..<end])
-		_items = try await AutoType.fetchIds(idsToFetch)
+		_items = try await AutoType.fetchIds(idsToFetch).sortById(idsToFetch)
 		hasMore = _items?.count == initial
 		
 		return items
@@ -108,13 +113,14 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 	/// Continuesly fetch as long as there are more data
 	@discardableResult
 	public func fetch() async throws -> [AutoType] {
-		await semaphore.wait()
-		defer { Task { await semaphore.signal() } }
+		let token = AutoId.generateId()
+		await semaphore.wait(token: token)
+		defer { Task { await semaphore.signal(token: token) } }
 		
-		if !hasMore {
+		if _items == nil {
+			return try await firstFetch(token)
+		} else if !hasMore {
 			return items
-		} else if _items == nil {
-			return try await firstFetch()
 		}
 		
 		// this is the easiest way of doing it since we want to fetch them in order.
@@ -122,7 +128,7 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 		let start = _items?.count ?? 0
 		let end = min(ids.count, fetchStep)
 		let idsToFetch = Array(ids[start..<end])
-		let fetched = try await AutoType.fetchIds(idsToFetch)
+		let fetched = try await AutoType.fetchIds(idsToFetch).sortById(idsToFetch)
 		hasMore = fetched.count == fetchStep
 		_items?.append(contentsOf: fetched)
 		
@@ -134,7 +140,7 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 		ids = items.map { $0.id }
 		_items = items
 		hasMore = false
-		owner?.didChange()
+		didChange()
 	}
 	
 	/// Append more items to your relation, if not all are fetched they will not show up in the list until fetched
@@ -144,7 +150,7 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 		
 		if hasMore {
 			ids.append(contentsOf: items.map { $0.id })
-			await owner?.didChange()
+			didChange()
 			return
 		}
 		ids.append(contentsOf: items.map { $0.id })
@@ -153,7 +159,7 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 		} else {
 			_items?.append(contentsOf: items)
 		}
-		await owner?.didChange()
+		didChange()
 	}
 	
 	public func insert(contentsOf: any Collection<AutoType>, at: Int) async {
@@ -165,7 +171,7 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 		}
 		_items?.insert(contentsOf: contentsOf, at: at)
 		ids.insert(contentsOf: contentsOf.map { $0.id }, at: at)
-		await owner?.didChange()
+		didChange()
 	}
 	
 	@discardableResult
@@ -180,7 +186,7 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 		if let item, let index = ids.firstIndex(of: item.id) {
 			ids.remove(at: index)
 		}
-		await owner?.didChange()
+		didChange()
 		return item
 	}
 	
@@ -197,7 +203,7 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 				self.ids.remove(at: index)
 			}
 		}
-		await owner?.didChange()
+		didChange()
 	}
 
 #if canImport(SwiftUI)
@@ -208,7 +214,7 @@ public final class AutoRelation<AutoType: AutoModelObject>: Codable, AnyRelation
 		
 		_items?.move(fromOffsets: fromOffsets, toOffset: toOffset)
 		ids.move(fromOffsets: fromOffsets, toOffset: toOffset)
-		await owner?.didChange()
+		didChange()
 	}
 #endif
  

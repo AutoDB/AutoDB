@@ -10,7 +10,7 @@ import Combine
 
 // They must all implement AutoDB
 // They must all not have an init OR an empty required one: required init() {... setup }, you may use convenience inits instead.
-final class DataAndDate: AutoModel, @unchecked Sendable {
+final class DataAndDate: Table, @unchecked Sendable {
 	var anOptObject: DataAndDate? = nil
 	var hasChanges: Bool = false
     
@@ -21,41 +21,23 @@ final class DataAndDate: AutoModel, @unchecked Sendable {
     var dubDub2: Float = 1.0
     var dubDub: Double = 1.0
     @Published var timeStamp: Date = Date()
-    @Published var floating = 1.0
+	@Published var intPub: Int = 1
     @Published var optionalIntArray: [Int]? = [1, 2, 3, 4]
     var dataWith9: Data = Data([9, 9, 9, 9])
     
     var ignoreThis = 1
-    
-    class func autoDBSettings() -> AutoDBSettings? {
-        .init(ignoreProperties: Set(["ignoreThis"]))
-    }
 }
 
-final class BaseClass: AutoModel, @unchecked Sendable {
+struct BaseClass: Table {
 	var id: UInt64 = 0
 	var anOptInt: Int? = nil
-	var ignoreProperty = "don't store this"
-	
-	convenience init(_ anOptInt: Int) {
-		self.init()
-		self.id = AutoId(anOptInt)
-		self.anOptInt = anOptInt
-    }
     
     var arrayWithEncodables = [Int]()
-    @Published var arrayWithEncodablesPub = [Int]()
-    
-    @Published var anOptIntPub: Int? = nil
-    @Published var regularIntPub: Int = 1
 	
-    public static func autoDBSettings() -> AutoDBSettings? {
-        AutoDBSettings(ignoreProperties: Set(["ignoreProperty"]))
-    }
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-@Observable final class ObserveBasic: AutoModel, @unchecked Sendable {
+@Observable final class ObserveBasic: Table, @unchecked Sendable {
 	
 	var hasChanges: Bool = false
 	var id: UInt64 = 0
@@ -86,14 +68,14 @@ struct Nested: Codable, Equatable {
 	let name: String?
 }
 
-final class Mod: AutoModel, @unchecked Sendable {
+final class Mod: Table, @unchecked Sendable {
 	var id: UInt64 = 0
 	var string: String? = "some string"
 	var bigInt: UInt64 = 0
 }
 
 @available(macOS 15.0, *)
-final class IntTester: AutoModel, @unchecked Sendable {
+final class IntTester: Table, @unchecked Sendable {
 	
 	var id: UInt64 = .max
 	
@@ -110,16 +92,23 @@ final class IntTester: AutoModel, @unchecked Sendable {
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-@Observable final class Artist: AutoModel, @unchecked Sendable {
-	var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
-	var name: String = ""	// we must have default values or nil
+@Observable final class Artist: Model, @unchecked Sendable {
+	
+	struct Value: Table {
+		var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
+		var name: String = ""	// we must have default values or nil
+	}
+	var value: Value
+	init(_ value: Value) {
+		self.value = value
+	}
 	
 	// note that all @Observables will show warning "Immutable property will not be decoded because ..." as long as there are no CodingKeys.
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable
-final class CodeWithKeys: AutoModel, @unchecked Sendable {
+final class CodeWithKeys: Table, @unchecked Sendable {
 	
 	var id: AutoId = 0
 	var name: String = ""
@@ -138,76 +127,21 @@ final class CodeWithKeys: AutoModel, @unchecked Sendable {
 
 // Building something to handle relations
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-@Observable
-final class Parent: AutoModel, @unchecked Sendable {
-	
-	var id: UInt64 = 0
-	var name = ""
-	var children = AutoRelation<Child>()
+//@Observable
+final class Parent: Model, @unchecked Sendable {
+	var value: Value
+	struct Value: Table {
+		
+		var id: UInt64 = 0
+		var name = ""
+		var children = ManyRelation<Child>()
+	}
+	init(_ value: Value) {
+		self.value = value
+	}
 }
 
-final class Child: AutoModel, @unchecked Sendable {
+struct Child: Table, @unchecked Sendable {
 	var id: UInt64 = 0
 	var name = "fox"
 }
-
-/*
-/// A query that fetches incrementally. Specify how many objects to fetch like this:
-/// var lords = AutoQuery<Album>("WHERE title = ?",  arguments: ["sir"], initial: 1, limit: 20)
-///  NOTE: Query cannot have limit or offset clauses!
-///  Avoid using propertyWrappers if you can - they are not compatible with @Observable
-struct AutoQuery<AutoType: AutoDB> {
-	
-	let query: String	// must not contain limit or offset!
-	var arguments: [Any]?
-	var _items: [AutoType]
-	var hasMore = true
-	let initialFetch: Int
-	var limit: Int
-	var offset = -1
-	/// When using in a list we want to artificially limit the amount sent back to us.
-	var restrictToInitial = false
-	
-	public init(_ query: String, arguments: [Any]? = nil, initial: Int? = nil, limit: Int? = nil) {
-		self.query = query + " LIMIT %i OFFSET %i"
-		self.arguments = arguments
-		_items = []
-		initialFetch = initial ?? 5
-		self.limit = limit ?? 100
-	}
-	
-	mutating func items() -> [AutoType] {
-		if offset == -1 {
-			// setup first fetch
-			let res = AutoType.fetchQuery(String(format: query, initialFetch, 0), arguments: arguments)?.rows as? [AutoType] ?? []
-			offset = res.count
-			hasMore = offset == initialFetch
-			_items = res
-		}
-		if restrictToInitial {
-			return _items[0..<min(_items.count, initialFetch)].array()
-		}
-		return _items
-	}
-	
-	mutating func loadMore() {
-		if !hasMore {
-			return
-		}
-		let res = AutoType.fetchQuery(String(format: query, arguments: [limit, offset]), arguments: arguments)?.rows as? [AutoType] ?? []
-		offset += res.count
-		hasMore = res.count == limit
-		_items.append(contentsOf: res)
-	}
-}
- */
-
-/*
- /// If you need to fetch items in the order of ids, Always fetch a dictionary and apply this. See fetch() below for an example!
- but why would you need that?
-static func sortById<T: AutoModel>(_ items: [AutoId: T], _ ids: [UInt64]) -> [T] {
-	ids.compactMap {
-		items[$0]
-	}
-}
-*/

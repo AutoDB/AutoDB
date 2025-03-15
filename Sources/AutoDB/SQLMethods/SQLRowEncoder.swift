@@ -20,8 +20,8 @@ extension String {
 /// From an array of objects of the same type, create an insert statement with a list of values. Start with doing only one object.
 public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	
-	let database: AutoDB
-	let tableClass: any AutoModel.Type
+	let database: Database
+	let tableClass: any Table.Type
 	let table: TableInfo
 	let query: String
 	let maxQueryVariableCount: Int
@@ -35,7 +35,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	/// take this before starting to encode
 	let semaphore = Semaphore()
 	
-	init<TableClass: AutoModel>(_ classType: TableClass.Type) async {
+	init<TableClass: Table>(_ classType: TableClass.Type) async {
 		
 		tableClass = classType
 		guard let database = try? await AutoDBManager.shared.setupDB(classType) else {
@@ -115,10 +115,6 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 		values[key.deleteUnderscorePrefix()] = value
 	}
 	
-	func ignoreKey(_ column: String) -> Bool {
-		table.settings?.ignoreProperties?.contains(column) ?? false
-	}
-	
 	public func container<Key>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> where Key : CodingKey {
 		// if we have started a new object
 		try? commitRow()
@@ -146,24 +142,15 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 		
 		func encodeNil(forKey key: KeyType) throws { fatalError("All columns must have a value") }
 		func encode(_ value: String, forKey key: KeyType) throws {
-			if enc.ignoreKey(key.stringValue) {
-				return
-			}
 			enc.addColumn(key.stringValue, value)
 		}
 		
 		func encode<T>(_ value: T, forKey key: KeyType) throws where T : Encodable {
 			
-			if enc.ignoreKey(key.stringValue) {
-				return
-			}
 			enc.addColumn(key.stringValue, value)
 		}
 		
 		func encodeIfPresent<T>(_ value: T?, forKey key: KeyType) throws where T : Encodable {
-			if enc.ignoreKey(key.stringValue) {
-				return
-			}
 			if let value {
 				try encode(value, forKey: key)
 			} else {
