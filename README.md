@@ -45,7 +45,14 @@ let artist = try await Artist.fetchQuery("WHERE name = ?", first.name).first
 ```
 Note that these are the same object: `artist === first`
 
-If automatic conflict resulution, caching and uniqueness is not desired, you can of-course use only the Table types (which can be structs). The Model must be a class for those features to work or make sense.  
+If automatic conflict resulution, caching and uniqueness is not desired, you can of-course use only the Table types (which can be structs). The Model must be a class for those features to work or make sense.
+
+To have global settings for groups of instances, e.g to specify appGroup container:
+
+```
+let dbSettings = AutoDBSettings(path: "pathToDatabase.sqlite", iCloudBackup: true, inAppFolder: false)
+AutoDBManager.shared.setAppSettingsSync(dbSettings, for: .regular)  
+```
 
 That is all! (basically, more discussion in the [Documentation](Documentation/Documentation.md)
 

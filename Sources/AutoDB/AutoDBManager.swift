@@ -85,6 +85,61 @@ extension UInt64 {
 		cachedObjects[typeID] = nil
 	}
 	
+	/// Instead of asking each Table, supply defaults for any new table. If an ObjectIdentifier of a Table.Type is not within any - settings is picked from the first existing one in order: regular, cache, specific.
+	/// Bypassed if the Table has its own settings
+	/// If all is empty the default is used
+	public var appDefaults: [SettingsKey: (typeID: Set<ObjectIdentifier>, settings: AutoDBSettings)] = [:]
+	public enum SettingsKey: Sendable {
+		case regular
+		case cache
+		case specific
+		
+		static var orderedKeys: [SettingsKey] { [.regular, .cache, .specific] }
+	}
+	
+	/// insert a new global setting for the entire app, this is a good starting point for appstart
+	public nonisolated func setAppSettingsSync(_ settings: AutoDBSettings, for key: SettingsKey, typeID: ObjectIdentifier? = nil) {
+		// if this is called first at startup, semaphore is not strictly necessary. But there might be situations we don't know about where this will prevent side-effects.
+		let semaphore = DispatchSemaphore(value: 0)
+		Task(priority: .userInitiated) {
+			await setAppSettings(settings, for: key, typeID: typeID)
+			semaphore.signal()
+		}
+		semaphore.wait()
+	}
+	
+	public func setAppSettings(_ settings: AutoDBSettings, for key: SettingsKey, typeID: ObjectIdentifier? = nil) {
+		if appDefaults[key] == nil {
+			let newValue: (typeID: Set<ObjectIdentifier>, settings: AutoDBSettings) = (.init(), settings)
+			appDefaults[key] = newValue
+		}
+		
+		if let typeID {
+			appDefaults[key]?.typeID.insert(typeID)
+		}
+	}
+	
+	func appSettings(_ typeID: ObjectIdentifier) -> AutoDBSettings? {
+		if appDefaults.isEmpty {
+			return nil
+		}
+		
+		for key in SettingsKey.orderedKeys {
+			if let settings = appDefaults[key] {
+				if settings.typeID.contains(typeID) {
+					return settings.1
+				}
+			}
+		}
+		
+		for key in SettingsKey.orderedKeys {
+			if let settings = appDefaults[key]?.1 {
+				return settings
+			}
+		}
+		return nil
+	}
+	
 	/// Setup database for this class, attach to file defined in settings - call manually for each table  to specify your own location.
 	@discardableResult
 	func setupDB<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier? = nil, settings: AutoDBSettings? = nil) async throws -> Database {
@@ -92,7 +147,11 @@ extension UInt64 {
 		if AutoDBManager.isSetup.insert(typeID).inserted {
 			
 			let database: Database
-			let settings = settings ?? table.autoDBSettings() ?? AutoDBSettings()
+			let settings = if let tableSettings = settings ?? table.autoDBSettings() {
+				tableSettings
+			} else {
+				appSettings(typeID) ?? AutoDBSettings()
+			}
 			if settings.shareDB {
 				let sharedKey = "\(settings.path)\(settings.inCacheFolder ? "_cache" : "")"
 				if let db = sharedDatabases[sharedKey] {
