@@ -43,11 +43,10 @@ extension UInt64 {
 		return dec
 	}
 	
-	var tables = [ObjectIdentifier: TableInfo]()
+	private var tables = [ObjectIdentifier: TableInfo]()
     var lookupTable = LookupTable()
 	var cachedObjects = [ObjectIdentifier: WeakDictionary<AutoId, AnyObject>]()
 	
-	static var isSetup = Set<ObjectIdentifier>()
 	var databases = [ObjectIdentifier: Database]()
 	var sharedDatabases = [String: Database]()
 
@@ -144,7 +143,7 @@ extension UInt64 {
 	@discardableResult
 	func setupDB<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier? = nil, settings: AutoDBSettings? = nil) async throws -> Database {
 		let typeID = typeID ?? ObjectIdentifier(table)
-		if AutoDBManager.isSetup.insert(typeID).inserted {
+		if databases[typeID] == nil {
 			
 			let database: Database
 			let settings = if let tableSettings = settings ?? table.autoDBSettings() {
@@ -179,8 +178,13 @@ extension UInt64 {
 		return databases[typeID]!
 	}
 	
-	func tableInfo<T: Table>(token: AutoId? = nil, _ classType: T.Type) async -> TableInfo {
-		let typeID = ObjectIdentifier(classType)
+	/// tables are created after awaits and may not exist in the beginning of execution, just add a short delay to wait for them
+	func tableInfo<T: Table>(_ classType: T.Type) async -> TableInfo {
+		await tableInfo(ObjectIdentifier(classType))
+	}
+	
+	/// tables are created after awaits and may not exist in the beginning of execution, just add a short delay to wait for them
+	func tableInfo(_ typeID: ObjectIdentifier) async -> TableInfo {
 		while tables[typeID] == nil {
 			try? await Task.sleep(nanoseconds: .shortDelay)
 		}
@@ -460,9 +464,10 @@ extension UInt64 {
 	
 	public func delete(token: AutoId? = nil, _ ids: [AutoId], _ typeID: ObjectIdentifier) async throws {
 		
-		guard ids.isEmpty == false, let table = tables[typeID] else {
+		guard ids.isEmpty == false else {
 			return
 		}
+		let table = await tableInfo(typeID)
 		lookupTable.setDeleted(ids, typeID)
 		
 		let query = String(format: table.deleteQuery, Self.questionMarks(ids.count))
@@ -533,7 +538,7 @@ extension UInt64 {
 		
 		let typeID = ObjectIdentifier(classType)
 		let database = try await setupDB(T.self, typeID)
-		guard let table = tables[typeID] else { throw AutoError.missingSetup }
+		let table = await tableInfo(typeID)
 		return await database.changeObserver(table.name)
 	}
 	

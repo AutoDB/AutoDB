@@ -57,6 +57,24 @@ extension WeakArray: Collection {
     public func index(after idx: Int) -> Int {
         return items.index(after: idx)
     }
+	
+	public mutating func cleanup() {
+		items = items.filter { box in
+			box.unbox != nil
+		}
+	}
+	
+	public mutating func append(_ obj: Element) {
+		items.append(WeakBox(obj))
+	}
+	
+	public mutating func remove(_ index: Int) {
+		items.remove(at: index)
+	}
+	
+	public mutating func removeAll() {
+		items.removeAll()
+	}
 }
 
 // MARK: - WeakDictionary

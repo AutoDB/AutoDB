@@ -176,7 +176,7 @@ public actor Database {
 	
 	var gentleClose: Task<Void, Swift.Error>?
 	var harshClose: Task<Void, Swift.Error>?
-	public func close(_ token: AutoId? = nil) async {
+	public func close(_ token: AutoId? = nil, let waitSec: Double = 10) async {
 		gentleClose?.cancel()
 		harshClose?.cancel()
 		
@@ -192,7 +192,6 @@ public actor Database {
 		
 		// kill after some time?
 		harshClose = Task {
-			let waitSec: Double = 10
 			let date = Date().addingTimeInterval(waitSec * 2.0)
 			try await Task.sleep(nanoseconds: 100_000_000 * UInt64(waitSec))
 			try Task.checkCancellation()
@@ -201,7 +200,8 @@ public actor Database {
 				return
 			}
 			isClosed = true
-			print("Interrupting sqlite to force close")
+			// if there still is db-access (which it most likely isn't), we can't know that so must interrups to let go of handle.
+			//print("Interrupting sqlite to force close")
 			sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
 		}
 	}
@@ -479,6 +479,8 @@ public actor Database {
 		if let observer = changeObservers[tableName] {
 			let value = RowChangeParameters(operation: operation, id: UInt64(bitPattern: rowId))
 			await observer.append(value)
+		} else {
+			print("no observer for \(tableName)")
 		}
 	}
 }

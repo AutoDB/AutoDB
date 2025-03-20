@@ -139,20 +139,26 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 	}
 	
 	public func startListening() async throws {
-		
-		let listener = try await AutoType.changeObserver()
-		Task { [weak self] in
-			
-			for await change in listener {
-				// must be weak inside the listener
-				try await self?.listenerCallback(change.operation, change.id)
+		do {
+			let listener = try await AutoType.changeObserver()
+			Task { [weak self] in
+				
+				for await change in listener {
+					// must be weak inside the listener
+					try? await self?.listenerCallback(change.operation, change.id)
+				}
+				print("we lost our listener!")
 			}
+		} catch {
+			print("error: \(error)")
 		}
 	}
 	
 	private func listenerCallback(_ operation: SQLiteOperation, _ rowId: AutoId) async throws {
 		
 		if operation == .insert {
+			
+			print("got insert for \(rowId)")
 			
 			// always fetch this one if offset is 0 since then it is the first item.
 			// or if we have more we will get this one at next fetch, otherwise if we don't already have it - fetch it if not initialFetch amount is reached.
@@ -198,8 +204,12 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		}
 		return items
 	}
-	 
+	
 	public func loadMore() async throws {
+		try await fetchMore()
+	}
+	
+	public func fetchMore() async throws {
 		await semaphore.wait()
 		defer { Task { await semaphore.signal() } }
 		
