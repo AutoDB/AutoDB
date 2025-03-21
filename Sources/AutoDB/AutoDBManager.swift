@@ -534,12 +534,21 @@ extension UInt64 {
 	}
 	
 	// MARK: - change callbacks just subscribe to an AsyncSequence
-	public func changeObserver<T: Table>(_ classType: T.Type) async throws -> ChangeObserver {
+	
+	public func tableChangeObserver<T: Table>(_ classType: T.Type) async throws -> TableChangeObserver {
 		
 		let typeID = ObjectIdentifier(classType)
 		let database = try await setupDB(T.self, typeID)
 		let table = await tableInfo(typeID)
-		return await database.changeObserver(table.name)
+		return await database.tableChangeObserver(table.name)
+	}
+	
+	public func rowChangeObserver<T: Table>(_ classType: T.Type) async throws -> RowChangeObserver {
+		
+		let typeID = ObjectIdentifier(classType)
+		let database = try await setupDB(T.self, typeID)
+		let table = await tableInfo(typeID)
+		return await database.rowChangeObserver(table.name)
 	}
 	
 	// MARK: - DB helper functions

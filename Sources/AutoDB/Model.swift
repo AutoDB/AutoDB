@@ -319,7 +319,7 @@ public extension Model {
 	
 	var isDeleted: Bool {
 		get async {
-			await AutoDBManager.shared.isDeleted(id, ObjectIdentifier(Self.self))
+			await AutoDBManager.shared.isDeleted(id, ObjectIdentifier(TableType.self))
 		}
 	}
 	
@@ -344,11 +344,16 @@ public extension Model {
 	
 	// MARK: - callbacks
 	
-	static func changeObserver() async throws -> ChangeObserver {
-		try await AutoDBManager.shared.changeObserver(TableType.self)
+	/// get row-level changes from db with ids of changed rows
+	static func rowChangeObserver() async throws -> RowChangeObserver {
+		try await AutoDBManager.shared.rowChangeObserver(TableType.self)
+	}
+	
+	/// get notified by AutoDB after saves or deletions. You can bypass this notification by crafting your own save/delete SQL.
+	static func tableChangeObserver() async throws -> TableChangeObserver {
+		try await AutoDBManager.shared.tableChangeObserver(TableType.self)
 	}
 }
-
 
 public extension Collection where Element: Model {
 	

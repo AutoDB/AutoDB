@@ -315,7 +315,7 @@ class RelationQueryTests {
 		try await waitForCondition {
 			cure.value.albums.items.isEmpty == false
 		}
-		try await cure.value.albums.loadMore()
+		try await cure.value.albums.fetchMore()
 		count = cure.value.albums.items.count
 		#expect(count == 2, "count is \(count)")
 		
@@ -329,7 +329,7 @@ class RelationQueryTests {
 		}
 		
 		// There was no problem with save - error was only with callback!
-		try await cure.value.albums.loadMore()
+		try await cure.value.albums.fetchMore()
 		#expect(cure.value.albums.hasMore == false && cure.value.albums.items.count > 2)
 	}
 }

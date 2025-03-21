@@ -66,11 +66,17 @@ import Android
 import GlibC
 #endif
 
-public typealias ChangeObserver = AsyncObserver<RowChangeParameters>
+public typealias RowChangeObserver = AsyncObserver<RowChangeParameters>
+public typealias TableChangeObserver = AsyncObserver<SQLiteOperation>
 public struct RowChangeParameters: Sendable, Codable, Hashable, Equatable {
 	//let tableName: String
 	public let operation: SQLiteOperation
-	public let id: AutoId
+	public var ids: [AutoId]
+}
+
+private struct Debounce {
+	var parameters: RowChangeParameters
+	var debounceTask: Task<Void, Error>?
 }
 
 public enum SQLiteOperation: Int32, Sendable, Codable {
@@ -465,22 +471,61 @@ public actor Database {
 	// MARK: - change callbacks
 	
 	// allow the use of ChangeObserver elsewhere, access should not be restricted to this actor.
-	private nonisolated(unsafe) var changeObservers: [String: ChangeObserver] = [:]
-	public func changeObserver(_ tableName: String) -> ChangeObserver {
-		if let listener = changeObservers[tableName] {
+	private nonisolated(unsafe) var rowChangeObservers: [String: RowChangeObserver] = [:]
+	public func rowChangeObserver(_ tableName: String) -> RowChangeObserver {
+		if let listener = rowChangeObservers[tableName] {
 			return listener
 		}
-		let listener = ChangeObserver()
-		changeObservers[tableName] = listener
+		let listener = RowChangeObserver()
+		rowChangeObservers[tableName] = listener
 		return listener
 	}
 	
+	private var debounce = [String: [SQLiteOperation: Debounce]]()
+	private var debounceTime: UInt64 = .shortDelay
+	
+	// allow to listen to db-level changes of each row
 	private func callListeners(_ tableName: String, _ operation: SQLiteOperation, _ rowId: sqlite_int64 ) async {
-		if let observer = changeObservers[tableName] {
-			let value = RowChangeParameters(operation: operation, id: UInt64(bitPattern: rowId))
-			await observer.append(value)
-		} else {
-			print("no observer for \(tableName)")
+		
+		if let observer = rowChangeObservers[tableName] {
+			let id = UInt64(bitPattern: rowId)
+			debounce[tableName]?[operation]?.debounceTask?.cancel()
+			if debounce[tableName] == nil {
+				debounce[tableName] = [:]
+			}
+			if debounce[tableName]?[operation] == nil {
+				await tableUpdate(tableName, operation)
+				debounce[tableName]?[operation] = Debounce(parameters: RowChangeParameters(operation: operation, ids: [id]), debounceTask: nil)
+			} else {
+				debounce[tableName]?[operation]?.parameters.ids.append(id)
+			}
+			
+			debounce[tableName]?[operation]?.debounceTask = Task {
+				try await Task.sleep(nanoseconds: debounceTime)
+				if let value = debounce[tableName]?[operation]?.parameters {
+					debounce[tableName]?[operation] = nil
+					await observer.append(value)
+				}
+			}
+		}
+	}
+	
+	// allow the use of ChangeObservers elsewhere, access should not be restricted to this actor.
+	private nonisolated(unsafe) var tableChangeObservers: [String: TableChangeObserver] = [:]
+	
+	public func tableChangeObserver(_ tableName: String) -> TableChangeObserver {
+		if let listener = tableChangeObservers[tableName] {
+			return listener
+		}
+		let listener = TableChangeObserver()
+		tableChangeObservers[tableName] = listener
+		return listener
+	}
+	
+	// debounce is great when we want to know all the ids, but usually we only want to be notified by the first change - and ignore all the rest.
+	func tableUpdate(_ tableName: String, _ operation: SQLiteOperation) {
+		if let observer = tableChangeObservers[tableName] {
+			observer.append(operation)
 		}
 	}
 }

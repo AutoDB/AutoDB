@@ -245,8 +245,14 @@ public extension Table {
 	
 	// MARK: - callbacks
 	
-	static func changeObserver() async throws -> ChangeObserver {
-		try await AutoDBManager.shared.changeObserver(Self.self)
+	/// get notified by AutoDB after saves or deletions. You can bypass this notification by crafting your own save/delete SQL.
+	static func tableChangeObserver() async throws -> TableChangeObserver {
+		try await AutoDBManager.shared.tableChangeObserver(Self.self)
+	}
+	
+	/// get row-level changes from db with ids of changed rows
+	static func rowChangeObserver() async throws -> RowChangeObserver {
+		try await AutoDBManager.shared.rowChangeObserver(Self.self)
 	}
 }
 

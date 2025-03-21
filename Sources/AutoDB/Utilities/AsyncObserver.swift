@@ -77,9 +77,17 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
     }
 	
 	public init() {}
-    
-    public func append(_ element: Element) async {
-        await globalSender.sendResource(element)
+	
+	// if you want to wait while this is delivered (usually has no impact)
+	public func appendWait(_ element: Element) async {
+		await globalSender.sendResource(element)
+	}
+	
+	// if you only want scheduling, to continue with other tasks before this is delivered
+    public func append(_ element: Element) {
+		Task {
+			await globalSender.sendResource(element)
+		}
     }
 	
 	/// To cancel an AsyncObserver you must cancel its surounding Task and send it a message.

@@ -140,12 +140,12 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 	
 	public func startListening() async throws {
 		do {
-			let listener = try await AutoType.changeObserver()
+			let listener = try await AutoType.tableChangeObserver()
 			Task { [weak self] in
 				
-				for await change in listener {
+				for await operation in listener {
 					// must be weak inside the listener
-					try? await self?.listenerCallback(change.operation, change.id)
+					try? await self?.listenerCallback(operation)
 				}
 				print("we lost our listener!")
 			}
@@ -154,22 +154,36 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		}
 	}
 	
-	private func listenerCallback(_ operation: SQLiteOperation, _ rowId: AutoId) async throws {
+	var retryTasks = [SQLiteOperation: Task<Void, Error>]()
+	private func listenerCallback(_ operation: SQLiteOperation) async throws {
+		
+		retryTasks[operation]?.cancel()
+		try await dbStateChanged(operation)
+		
+		// we also cannot know if we get notified before or after db has changed. SQLite docs says this clearly. In addition, there could be bulk changes where we get the first new item but miss the x other.
+		// Either we must send the new objectIds and check against the query somehow, or have a little delay and fetch twice.
+		//TODO: There should also be a method to add newly created objects directly, if we know this query would match against them and being used. E.g. a list with all objects, whenever a new one is created should just send it directly.
+		
+		retryTasks[operation] = Task {
+			try await Task.sleep(nanoseconds: .shortDelay * 2)
+			try await dbStateChanged(operation)
+		}
+	}
+	
+	func dbStateChanged(_ operation: SQLiteOperation) async throws {
 		
 		if operation == .insert {
 			
-			print("got insert for \(rowId)")
-			
 			// always fetch this one if offset is 0 since then it is the first item.
 			// or if we have more we will get this one at next fetch, otherwise if we don't already have it - fetch it if not initialFetch amount is reached.
-			if offset == 0 || (hasMore == false && fetchedIds.contains(rowId) == false) {
+			if offset == 0 || hasMore == false {
 				hasMore = true
 				if offset == 0 {
 					// initial fetch failed
 					_ = try await fetchItems(resetOffset: true)
 				} else if offset <= initialFetch {
-					// we know the next item - just fetch with id.
-					try await fetchSpecific(rowId)
+					// we cannot know if these new items matches our query so all we can do is trigger a basic fetch. Here is room for improvement, e.g. just check if the query is empty.
+					try await fetchMore()
 				} else {
 					didChange()
 				}
@@ -178,10 +192,13 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 			await semaphore.wait()
 			defer { Task { await semaphore.signal() }}
 			
-			guard let deletedIndex = items.firstIndex(where: { $0.id == rowId }) else { return }
-			items.remove(at: deletedIndex)
-			fetchedIds.remove(rowId)
-			didChange()
+			for index in items.indices.reversed() {
+				if await items[index].isDeleted {
+					fetchedIds.remove(items[index].id)
+					items.remove(at: index)
+					didChange()
+				}
+			}
 		}
 	}
 	
@@ -203,10 +220,6 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 			return Array(items[0..<min(items.count, initialFetch)])
 		}
 		return items
-	}
-	
-	public func loadMore() async throws {
-		try await fetchMore()
 	}
 	
 	public func fetchMore() async throws {
@@ -234,19 +247,6 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		fetchedIds.formUnion(res.map(\.id))
 		
 		hasMore = res.count == limit
-		didChange()
-	}
-	
-	/// When you know the id of the next item, just fetch it and increment offset.
-	private func fetchSpecific(_ id: AutoId) async throws {
-		await semaphore.wait()
-		defer { Task { await semaphore.signal() } }
-		
-		let item = try await AutoType.fetchId(token: nil, id)
-		items.append(item)
-		fetchedIds.insert(item.id)
-		offset += 1
-		hasMore = false
 		didChange()
 	}
 }

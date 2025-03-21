@@ -10,7 +10,8 @@ public protocol TableModel {
 	
 	var id: AutoId { get }
 	
-	static func changeObserver() async throws -> ChangeObserver
+	static func rowChangeObserver() async throws -> RowChangeObserver
+	static func tableChangeObserver() async throws -> TableChangeObserver
 	
 	/// Fetch one object, throw missingId if no object was found
 	static func fetchId(token: AutoId?, _ id: AutoId) async throws -> Self
@@ -34,6 +35,18 @@ public protocol TableModel {
 	static func willSave(_ objects: [Self]) async throws
 	/// called after storing to DB, default implementation does nothing
 	static func didSave(_ objects: [Self]) async throws
+	
+	// MARK: - deletion
+	
+	var isDeleted: Bool { get async } 
+}
+
+extension TableModel {
+	var isDeleted: Bool {
+		get async {
+			false
+		}
+	}
 }
 
 /// AutoId is just a basic unsigned int, with the last 4 bits untouched for Swift-optimizations
