@@ -487,14 +487,14 @@ public actor Database {
 	// allow to listen to db-level changes of each row
 	private func callListeners(_ tableName: String, _ operation: SQLiteOperation, _ rowId: sqlite_int64 ) async {
 		
-		if let observer = rowChangeObservers[tableName] {
+		if rowChangeObservers[tableName] != nil || tableChangeObservers[tableName] != nil {
 			let id = UInt64(bitPattern: rowId)
 			debounce[tableName]?[operation]?.debounceTask?.cancel()
 			if debounce[tableName] == nil {
 				debounce[tableName] = [:]
 			}
 			if debounce[tableName]?[operation] == nil {
-				await tableUpdate(tableName, operation)
+				await tableChangeObservers[tableName]?.append(operation)
 				debounce[tableName]?[operation] = Debounce(parameters: RowChangeParameters(operation: operation, ids: [id]), debounceTask: nil)
 			} else {
 				debounce[tableName]?[operation]?.parameters.ids.append(id)
@@ -504,7 +504,7 @@ public actor Database {
 				try await Task.sleep(nanoseconds: debounceTime)
 				if let value = debounce[tableName]?[operation]?.parameters {
 					debounce[tableName]?[operation] = nil
-					await observer.append(value)
+					await rowChangeObservers[tableName]?.append(value)
 				}
 			}
 		}
@@ -520,12 +520,5 @@ public actor Database {
 		let listener = TableChangeObserver()
 		tableChangeObservers[tableName] = listener
 		return listener
-	}
-	
-	// debounce is great when we want to know all the ids, but usually we only want to be notified by the first change - and ignore all the rest.
-	func tableUpdate(_ tableName: String, _ operation: SQLiteOperation) {
-		if let observer = tableChangeObservers[tableName] {
-			observer.append(operation)
-		}
 	}
 }

@@ -71,6 +71,8 @@ class SQLRowDecoder: Decoder {
 				return value.stringValue as? T
 			case is Double.Type, is Float.Type:
 				return value.doubleValue as? T
+			case is Bool.Type:
+				return value.boolValue as? T
 			case is Int.Type:
 				return value.intValue as? T
 			case is Int8.Type:
