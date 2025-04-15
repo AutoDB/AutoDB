@@ -38,7 +38,7 @@ public protocol TableModel {
 	
 	// MARK: - deletion
 	
-	var isDeleted: Bool { get async } 
+	var isDeleted: Bool { get async }
 }
 
 extension TableModel {

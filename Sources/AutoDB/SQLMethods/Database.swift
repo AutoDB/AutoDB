@@ -117,7 +117,7 @@ public actor Database {
 	private var inTransaction: Bool = false
 	private var debugPrintEveryQuery = false
 	
-	func setDebug(_ enabled: Bool = true) {
+	public func setDebug(_ enabled: Bool = true) {
 		debugPrintEveryQuery = enabled
 	}
 	
@@ -182,7 +182,7 @@ public actor Database {
 	
 	var gentleClose: Task<Void, Swift.Error>?
 	var harshClose: Task<Void, Swift.Error>?
-	public func close(_ token: AutoId? = nil, let waitSec: Double = 10) async {
+	public func close(_ token: AutoId? = nil, waitSec: Double = 10) async {
 		gentleClose?.cancel()
 		harshClose?.cancel()
 		
@@ -325,9 +325,9 @@ public actor Database {
 	private func rowsByExecutingPreparedStatement(_ statement: PreparedStatement, from query: String) throws -> [Row] {
 		if debugPrintEveryQuery {
 			if let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
-				print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(expandedQuery)")
+				AutoLog.debug("[AutoDB \(Unmanaged.passUnretained(self).toOpaque())] \(expandedQuery)")
 			} else {
-				print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(query)")
+				AutoLog.debug("[AutoDB \(Unmanaged.passUnretained(self).toOpaque())] \(query)")
 			}
 		}
 		let statementHandle = statement.handle
@@ -419,7 +419,7 @@ public actor Database {
 		if isClosed { throw Error.databaseIsClosed }
 		
 		if debugPrintEveryQuery {
-			print("[AutoDB: \(Unmanaged.passUnretained(self).toOpaque())] \(query)")
+			AutoLog.debug("[AutoDB \(Unmanaged.passUnretained(self).toOpaque())] \(query)")
 		}
 		var result = sqlite3_exec(dbHandle, query, nil, nil, nil)
 		if result == SQLITE_BUSY || result == SQLITE_LOCKED {
@@ -494,7 +494,7 @@ public actor Database {
 				debounce[tableName] = [:]
 			}
 			if debounce[tableName]?[operation] == nil {
-				await tableChangeObservers[tableName]?.append(operation)
+				tableChangeObservers[tableName]?.append(operation)
 				debounce[tableName]?[operation] = Debounce(parameters: RowChangeParameters(operation: operation, ids: [id]), debounceTask: nil)
 			} else {
 				debounce[tableName]?[operation]?.parameters.ids.append(id)
@@ -502,9 +502,10 @@ public actor Database {
 			
 			debounce[tableName]?[operation]?.debounceTask = Task {
 				try await Task.sleep(nanoseconds: debounceTime)
+				tableChangeObservers[tableName]?.append(operation)
 				if let value = debounce[tableName]?[operation]?.parameters {
 					debounce[tableName]?[operation] = nil
-					await rowChangeObservers[tableName]?.append(value)
+					rowChangeObservers[tableName]?.append(value)
 				}
 			}
 		}

@@ -54,6 +54,13 @@ public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwne
 	 /// save changes to all changed objects and don't wait until completed, ignoring errors
 	 static func saveAllChangesDetacted(token: AutoId?)
 	 */
+	
+	
+	// MARK: - cache
+	
+	/// Refresh all objects still used when changed by other processes like widgets, etc.
+	static func refreshCache() async throws
+	func refreshCache() async throws
 }
 
 public extension Model {
@@ -223,8 +230,19 @@ public extension Model {
 		}
 	}
 	
-	func refresh() async throws {
-		value = try await AutoDBManager.shared.fetchId(id)
+	/// Refresh all objects currently in use
+	static func refreshCache() async throws {
+		let objects: [AutoId: Self] = await AutoDBManager.shared.cached(Self.self)
+		let ids: [AutoId] = Array(objects.keys)
+		let values: [TableType] = try await AutoDBManager.shared.fetchIds(ids)
+		for value in values {
+			objects[value.id]?.value = value
+		}
+	}
+	
+	/// Refresh our value
+	func refreshCache() async throws {
+		self.value = try await AutoDBManager.shared.fetchId(id)
 	}
 	
 	// MARK: - db queries

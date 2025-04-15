@@ -239,6 +239,23 @@ extension UInt64 {
 		return []
 	}
 	
+	/// Get all cached objects as a dictionary
+	public func cached<T: Model>(_ objectType: T.Type) async -> [AutoId: T] {
+		let typeID = ObjectIdentifier(T.self)
+		cachedObjects[typeID]?.cleanup()
+		if let cache = cachedObjects[typeID] {
+			
+			let keysValues = cache.compactMap {
+				if let value = $0.value.unbox as? T {
+					return (key: $0.key, value: value)
+				}
+				return nil
+			}
+			return Dictionary(uniqueKeysWithValues: keysValues)
+		}
+		return [:]
+	}
+	
 	func cacheObject<T: Model>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
 		let typeID = identifier ?? ObjectIdentifier(T.self)
 		if cachedObjects[typeID] == nil {

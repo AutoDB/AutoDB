@@ -154,29 +154,22 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		}
 	}
 	
-	var retryTasks = [SQLiteOperation: Task<Void, Error>]()
 	private func listenerCallback(_ operation: SQLiteOperation) async throws {
 		
-		retryTasks[operation]?.cancel()
+		// note that db will always call us twice
 		try await dbStateChanged(operation)
 		
-		// we also cannot know if we get notified before or after db has changed. SQLite docs says this clearly. In addition, there could be bulk changes where we get the first new item but miss the x other.
 		// Either we must send the new objectIds and check against the query somehow, or have a little delay and fetch twice.
 		//TODO: There should also be a method to add newly created objects directly, if we know this query would match against them and being used. E.g. a list with all objects, whenever a new one is created should just send it directly.
-		
-		retryTasks[operation] = Task {
-			try await Task.sleep(nanoseconds: .shortDelay * 2)
-			try await dbStateChanged(operation)
-		}
 	}
 	
 	func dbStateChanged(_ operation: SQLiteOperation) async throws {
 		
 		if operation == .insert {
-			
 			// always fetch this one if offset is 0 since then it is the first item.
 			// or if we have more we will get this one at next fetch, otherwise if we don't already have it - fetch it if not initialFetch amount is reached.
 			if offset == 0 || hasMore == false {
+				// we can't know if this query actually has more items to fetch, but this allows for the db to signal that there may be more to fetch
 				hasMore = true
 				if offset == 0 {
 					// initial fetch failed
@@ -189,6 +182,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 				}
 			}
 		} else if operation == .delete {
+			
 			await semaphore.wait()
 			defer { Task { await semaphore.signal() }}
 			
@@ -211,7 +205,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 			// setup first fetch
 			let res = try await AutoType.fetchQuery(token: nil, String(format: query, initialFetch, 0), arguments)
 			offset = res.count
-			hasMore = offset == initialFetch
+			hasMore = offset == initialFetch	// there is probably more if limit was reached
 			items = res
 			fetchedIds.formUnion(res.map(\.id))
 			didChange()
@@ -228,25 +222,26 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		
 		var res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [limit, offset]), arguments)
 		if res.isEmpty {
-			if hasMore {
+			if hasMore && items.count == offset {
 				hasMore = false
 				didChange()
 			}
 			return
 		}
+		hasMore = res.count == limit	// there is probably more if limit was reached
+		
 		let newIds = Set(res.map { $0.id })
 		if newIds.isDisjoint(with: fetchedIds) == false {
 			// we have changed our table in such a way that the new fetch contains old items - this is quite likely since you typically don't order items by creation-date. Refetch from 0 to get the new item in an updated list!
 			res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [offset + res.count, 0]), arguments)
 			offset = res.count
 			items = res
+			
 		} else {
 			offset += res.count
 			items.append(contentsOf: res)
 		}
 		fetchedIds.formUnion(res.map(\.id))
-		
-		hasMore = res.count == limit
 		didChange()
 	}
 }

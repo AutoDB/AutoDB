@@ -126,11 +126,12 @@ class CombineTester {
 		
 		let artist = CombineArtist()
 		artist.albums.setOwner(artist)
+		try await artist.albums.fetchItems()
 		artist.objectWillChange.sink { [self] _ in
 			gotMessage = true
 		}.store(in: &listeners)
+		
 		try await item.save()
-	
 		try await waitForCondition {
 			gotMessage
 		}
@@ -138,20 +139,19 @@ class CombineTester {
 }
 
 class ListenerHelp: @unchecked Sendable {
-	var list: ChangeObserver
+	var list: RowChangeObserver
 	var gotMessage = false
 	var gotIds = [AutoId]()
 	var ending = false
 	var callback: (@Sendable () -> Void)?
 	let name: String
-	init(list: ChangeObserver, _ name: String) {
+	init(list: RowChangeObserver, _ name: String) {
 		self.list = list
 		self.name = name
 	}
 	
 	func stop() {
 		startTask?.cancel()
-		list.cancel()
 	}
 	
 	var startTask: Task<Void, Error>?
@@ -194,37 +194,46 @@ class ListenerHelp: @unchecked Sendable {
 // experimenting with publishers
 class RelationQueryPublisherTests: @unchecked Sendable {
 	
+	@Test
 	func exampleOfAsyncObserver() async throws {
+		
+		var count = 0
 		let observer = AsyncObserver<Int>()
 		Task {
 			// this task will never quit - it will "leak" until the observer is cancelled.
 			for await num in observer {
 				print("none-quitter got: \(num)")
+				try await Task.sleep(for: .milliseconds(20))
 			}
 			print("This will never happen!")
 		}
 		let task = Task {
 			// this task can be cancelled without needing to cancel everyone
 			for await num in observer {
-				print("num was: \(num)")
+				print("cancellable task got: \(num)")
 			}
-			print("Finished observing")
+			print("Finished observing: \(Task.isCancelled)")
+			count += 1
 		}
 		
 		// somewhere else we are doing work:
 		for index in 0..<10 {
-			await observer.append(index)
+			await observer.appendWait(index)
 			try await Task.sleep(for: .milliseconds(10))
 		}
 		
 		// we can stop both by calling: await observer.cancelAll()
 		// but usually you only want to stop your own observer,
-		// then the task must be cancelled first and the observer get the cancel message after:
+		// then just cancell the task:
 		task.cancel()
-		await observer.cancel()
-		try await Task.sleep(for: .milliseconds(10000))
+		//try await Task.sleep(for: .milliseconds(10))
+		
+		try await waitForCondition {
+			count == 1
+		}
 	}
 }
+
 
 class RelationQueryTests {
 	
@@ -255,7 +264,7 @@ class RelationQueryTests {
 	
 	@Test
 	func testRelationQueryXTimes() async throws {
-		for index in 0..<300 {
+		for index in 0..<500 {
 			try await testRelationQuery()
 			if index % 100 == 0 {
 				print("autoQ completed: \(index)")
@@ -310,22 +319,40 @@ class RelationQueryTests {
 			try await album.save()
 		}
 		
-		// newly fetched from DB should have items already populated (after a short delay).
+		// newly fetched from DB should NOT have items already populated
 		let cure = try await CureAlbums.fetchId(1)
+		try await cure.value.albums.fetchItems()
 		try await waitForCondition {
 			cure.value.albums.items.isEmpty == false
 		}
 		try await cure.value.albums.fetchMore()
 		count = cure.value.albums.items.count
 		#expect(count == 2, "count is \(count)")
-		
+		if cure.value.albums.hasMore {
+			try await cure.value.albums.fetchMore()
+			count = cure.value.albums.items.count
+			#expect(count == 2, "count is \(count)")
+			
+			// this can happen due to the observation-delay, and is not strictly an error.
+		}
 		#expect(cure.value.albums.hasMore == false)
 		var album = await Album.create()
 		album.name = "Pornography"
 		album.artist = "The Cure"
 		try await album.save()
-		try await waitForCondition(delay: 5) {
-			cure.value.albums.hasMore == true
+		do {
+			try await waitForCondition(delay: 5) {
+				cure.value.albums.hasMore == true
+			}
+		} catch {
+			if cure.value.albums.items.count == 2 {
+				try await cure.value.albums.fetchMore()
+				if cure.value.albums.items.count > 2 {
+					print("items were saved sucessfully")
+				}
+				fatalError("Did not get message.")
+			}
+			throw error
 		}
 		
 		// There was no problem with save - error was only with callback!
