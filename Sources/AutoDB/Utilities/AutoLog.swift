@@ -29,36 +29,50 @@ public actor AutoLog {
 	private static let subsystem = Bundle.main.bundleIdentifier ?? "AutoDB-noBundle"
 	private static let autoDB = Logger(subsystem: subsystem, category: "AutoDB")
 	static let dateFormat = Date.FormatStyle().locale(Locale(identifier: "sv_SE"))	// regular standard date format for easy sorting (basically a simpler form of ISO8601).
+	
+	/// default location is the temporaryDirectory
 	var logURL: URL = FileManager.default.temporaryDirectory.appendingPathComponent("Auto.log")
 	var fileHandle: FileHandle?
 	
+	/// setup must be called before you can use it.
+	static var notUsed: Bool = true
+	
 	public static func setup(appGroup: String? = nil) {
+		notUsed = false
 		Task {
-			
+
 			await log.setup(appGroup: appGroup)
 		}
 	}
 	
-	func setup(appGroup: String? = nil, truncateLines: Int = 500) {
+	/// called in a background thread, blocks incoming writes until setup is done.
+	private func setup(appGroup: String? = nil, truncateLines: Int = 300) {
 		if let appGroup {
 			self.logURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)?.appendingPathComponent("Auto.log") ?? logURL
 		}
 		
 		if FileManager.default.fileExists(atPath: logURL.path) == false {
 			FileManager.default.createFile(atPath: logURL.path, contents: nil)
+			
+			var values = URLResourceValues()
+			values.isExcludedFromBackup = true
+			try? logURL.setResourceValues(values)
+			
 		} else {
 			// truncate after x lines
-			Task {
-				let slize = await listLogs(maxLines: truncateLines)
-				let test = slize.reversed().joined(separator: "\n")
+			do {
+				let slize = String(data: try Data(contentsOf: logURL), encoding: .utf8)?.components(separatedBy: .newlines) ?? []
+				
 				if slize.count >= truncateLines {
 					do {
-						try slize.reversed().joined(separator: "\n")
-							.write(toFile: logURL.path, atomically: true, encoding: .utf8)
+						let text = slize.suffix(truncateLines).joined(separator: "\n")
+						try text.write(toFile: logURL.path, atomically: true, encoding: .utf8)
 					} catch {
-						print(error)
+						print("AutoLog truncate error: \(error)")
 					}
 				}
+			} catch {
+				print("AutoLog read error: \(error)")
 			}
 		}
 	}
@@ -83,12 +97,15 @@ public actor AutoLog {
 	}
 	
 	var closeLogTask: Task<Void, Error>?
-	func writeToLog(_ string: String) {
+	private func writeToLog(_ string: String) async {
 		guard let data = string.data(using: .utf8) else { return }
 		
 		// open log for 10 sec if there is more
 		if fileHandle == nil {
 			fileHandle = FileHandle(forWritingAtPath: logURL.path)
+		} else {
+			// restart timer every time
+			closeLogTask?.cancel()
 		}
 		
 		try? fileHandle?.seekToEnd()
@@ -96,7 +113,9 @@ public actor AutoLog {
 		
 		closeLogTask = Task {
 			try await Task.sleep(for: .seconds(10))
-			try self.fileHandle?.close()
+			try Task.checkCancellation()
+			// this should not be necessary
+			try? self.fileHandle?.close()
 			self.fileHandle = nil
 		}
 	}
@@ -109,11 +128,13 @@ public actor AutoLog {
 	
 	// will be deleted at next app-start
 	public static func debug(_ message: String, file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {
+		if notUsed { return }
 		autoDB.info("\(function)\(line) :\(message)")
 		log("[\(Date.now.formatted(dateFormat))]: \(subsystem):\(function)\(line): \(message)\n")
 	}
 	
 	public static func error(_ message: String, file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {
+		if notUsed { return }
 		autoDB.error("\(file):\(function) \(line):\(message)")
 		log("Error [\(Date.now.formatted(dateFormat))]: \(subsystem):\(function)\(line): \(message)\n")
 	}

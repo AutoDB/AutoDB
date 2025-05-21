@@ -33,7 +33,7 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	*/
 }
 
-/// When we are using classes we must loop through every value and check equallity
+/// When using classes we must loop through every value and check equallity - Note that structs handle this automatically.
 public extension Table where Self: AnyObject {
 	
 	static func == (lhs: Self, rhs: Self) -> Bool {
@@ -90,6 +90,7 @@ public extension Table {
 		ObjectIdentifier(self)
 	}
 	
+	/// async version of create, always call this one if you can
 	static func create(token: AutoId? = nil, _ id: AutoId? = nil) async -> Self {
 		if let id, let item = try? await fetchId(token: token, id) {
 			return item
@@ -99,6 +100,21 @@ public extension Table {
 		var item = Self()
 		item.id = id ?? AutoId.generateId()
 		return item
+	}
+	
+	/// sync version of create, if you must
+	static func create(token: AutoId? = nil, _ id: AutoId? = nil) -> Self {
+		let semaphore = DispatchSemaphore(value: 0)
+		
+		var wrapper: [Self] = []
+		Task {
+			let item = await create(token: token, id)
+			wrapper.append(item)
+			semaphore.signal()
+		}
+		semaphore.wait()
+		
+		return wrapper.first!
 	}
 	
 	func awakeFromFetch() {}
@@ -194,6 +210,10 @@ public extension Table {
 	
 	/// All save functions ends up here, where we encode the objects to SQL queries, store them, remove from isChanged and call did/will save.
 	static func saveList(token: AutoId? = nil, _ objects: [Self]) async throws {
+		
+		// don't re-save deleted items
+		let deletedIds = await AutoDBManager.shared.isDeleted(ObjectIdentifier(Self.self))
+		let objects = objects.filter { deletedIds.contains($0.id) == false }
 		guard objects.isEmpty == false else { return }
 		
 		try await willSave(objects)
@@ -238,9 +258,17 @@ public extension Table {
 		try await AutoDBManager.shared.delete(token: token, ids, ObjectIdentifier(self))
 	}
 	
-	// TODO: in progress
-	static func deleteIdsLater(token: AutoId? = nil, _ ids: [AutoId]) async {
-		await AutoDBManager.shared.deleteLater(token: token, ids, ObjectIdentifier(self))
+	/// Batch delete
+	func deleteLater() {
+		let id = self.id
+		Task {
+			await Self.deleteIdsLater([id])
+		}
+	}
+	
+	/// Batch delete
+	static func deleteIdsLater(_ ids: [AutoId]) async {
+		await AutoDBManager.shared.deleteLater(ids, ObjectIdentifier(self))
 	}
 	
 	// MARK: - callbacks

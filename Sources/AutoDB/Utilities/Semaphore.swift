@@ -109,6 +109,15 @@ public actor Semaphore {
 		let waiter = updateWaiters.removeFirst()
 		waiter()
 	}
+	
+	/// A shorthand if you just want to call a closure
+	public func lock(token: AutoId? = nil, _ task: () async throws -> Void) async rethrows {
+		await wait(token: token)
+		defer {
+			Task { await signal(token: token) }
+		}
+		try await task()
+	}
 }
 
 

@@ -79,12 +79,12 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 	public init() {}
 	
 	// if you want to wait while this is delivered (usually has no impact)
-	public func appendWait(_ element: Element) async {
+	public func appendWait(_ element: Element?) async {
 		await globalSender.sendResource(element)
 	}
 	
 	// if you only want scheduling, to continue with other tasks before this is delivered
-    public func append(_ element: Element) {
+    public func append(_ element: Element?) {
 		Task {
 			await globalSender.sendResource(element)
 		}

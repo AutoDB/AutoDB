@@ -9,6 +9,7 @@ import Foundation
 
 extension UInt64 {
 	static var shortDelay: UInt64 { 9_000 }
+	static func seconds(_ seconds: Double) -> UInt64 { UInt64(seconds * 1_000_000_000) }
 }
 
 @globalActor public actor AutoDBManager: GlobalActor {
@@ -479,6 +480,10 @@ extension UInt64 {
 		lookupTable.isDeleted(id, typeID)
 	}
 	
+	public func isDeleted(_ typeID: ObjectIdentifier) -> Set<AutoId> {
+		lookupTable.deleted[typeID] ?? []
+	}
+	
 	public func delete(token: AutoId? = nil, _ ids: [AutoId], _ typeID: ObjectIdentifier) async throws {
 		
 		guard ids.isEmpty == false else {
@@ -496,13 +501,29 @@ extension UInt64 {
 		// lookupTable.removeDeleted(typeID, Set(ids))
 	}
 	
-	// TODO: in progress
-	func deleteLater(token: AutoId? = nil, _ ids: [AutoId], _ typeID: ObjectIdentifier) {
+	/// wait while the task exists, cancel if needed.
+	var deleteLaterTask: Task<Void, Never>?
+	
+	/// coalesce multiple objects to be deleted at the next saveChanges.
+	func deleteLater(_ ids: [AutoId], _ typeID: ObjectIdentifier) {
 		guard ids.isEmpty == false else {
 			return
 		}
 		
-		
+		lookupTable.setDeleteLater(ids, typeID)
+		if deleteLaterTask != nil {
+			return
+		}
+		deleteLaterTask = Task {
+			do {
+				// TODO: Think: should we leave this to the app instead and just wait for saveAllChanges to be called?
+				try await Task.sleep(nanoseconds: .seconds(10))
+				try await saveAllChanges()
+			} catch {
+				// stopped or failing.
+			}
+			deleteLaterTask = nil
+		}
 	}
 	
 	// MARK: - save
@@ -547,6 +568,22 @@ extension UInt64 {
 		}
 		if let anyError {
 			throw anyError
+		}
+	}
+	
+	// temporary storage for tasks
+	var debounceTasks: [ObjectIdentifier: Task<Void, Error>] = [:]
+	
+	/// coalesce changes for this class type and save later, typically used when multiple changes are made to the same object, and you only care that the last save is executed. Each call postpones the save for 3 seconds.
+	public func saveChangesLater<T: Model>(_ classType: T.Type) async throws {
+		
+		let typeID = ObjectIdentifier(T.self)
+		debounceTasks[typeID]?.cancel()
+		
+		debounceTasks[typeID] = Task {
+			try await Task.sleep(nanoseconds: .seconds(3))
+			debounceTasks[typeID] = nil
+			try await saveChanges(T.self)
 		}
 	}
 	

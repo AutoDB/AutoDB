@@ -71,6 +71,7 @@ public extension Model {
 	
 	/// Call this when value is changed for automatic change-tracking, like so: var value: TableType { didSet { didSet(oldValue) }}
 	func didSet(_ oldValue: TableType) {
+		// check if the value actually have changed
 		if oldValue == value { return }
 		didChange()
 	}
@@ -86,6 +87,7 @@ public extension Model {
 	static func == (lhs: Self, rhs: Self) -> Bool {
 		lhs.id == rhs.id
 	}
+	
 	func hash(into hasher: inout Hasher) {
 		hasher.combine(id)
 	}
@@ -293,6 +295,12 @@ public extension Model {
 		try await AutoDBManager.shared.saveChanges(token: token, Self.self)
 	}
 	
+	static func saveChangesLater() {
+		Task.detached {
+			try await AutoDBManager.shared.saveChangesLater(Self.self)
+		}
+	}
+	
 	static func saveChangesDetached(token: AutoId? = nil) {
 		Task.detached {
 			try? await AutoDBManager.shared.saveChanges(token: token, Self.self)
@@ -355,9 +363,9 @@ public extension Model {
 		try await AutoDBManager.shared.delete(token: token, ids, ObjectIdentifier(TableType.self))
 	}
 	
-	// TODO: in progress
-	static func deleteIdsLater(token: AutoId? = nil, _ ids: [AutoId]) async {
-		await AutoDBManager.shared.deleteLater(token: token, ids, ObjectIdentifier(TableType.self))
+	/// delete when calling saveChanges, or after x seconds
+	static func deleteIdsLater(_ ids: [AutoId]) async {
+		await AutoDBManager.shared.deleteLater(ids, ObjectIdentifier(TableType.self))
 	}
 	
 	// MARK: - callbacks
