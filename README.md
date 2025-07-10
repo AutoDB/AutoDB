@@ -17,13 +17,21 @@ Note that the containing struct must have a unique name in the app.
 ```
 final class Artist: Model, @unchecked Sendable {
 	
-	struct ArtistTable: Table {
-		var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
-		var name: String = ""	// we must have a default value (cab be nil)
+	struct Value: Table {
+		
+		// define a type name, will be the table name in the database. This makes us free to call our types whaterver we want. You must do this if migrating from an existing database.
+		public static var typeName: String { "Artist" }
+		
+		var id: AutoId = 0		 // all ids are of type UInt64, which makes it easy to handle uniqueness.
+		var name: String = ""	 // we must have a default value
+		var genre: String? = nil // another property, also with a default value
+		... (all other properties)
 	}
 	
-	var value: ArtistTable
-	init(_ value: ArtistTable) {
+	var value: Value {
+		didSet { didSet(oldValue) }	// automatic change tracking
+	}
+	init(_ value: Value) {
 		self.value = value
 	}
 }

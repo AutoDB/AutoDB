@@ -11,7 +11,7 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	static func create(token: AutoId?, _ id: AutoId?) async -> Self
 	/// The unique id that identifies this object
 	var id: AutoId { get set }
-	static func autoDBSettings() -> AutoDBSettings? //implement using "class func ..."
+	static func autoDBSettings() async -> AutoDBSettings? //implement using "class func ..."
 	
 	/// The table name to use for storage, must be unique, good when having models inside modelObjects.
 	static var typeName: String { get }
@@ -103,18 +103,19 @@ public extension Table {
 	}
 	
 	/// sync version of create, if you must
+	
+	
 	static func create(token: AutoId? = nil, _ id: AutoId? = nil) -> Self {
 		let semaphore = DispatchSemaphore(value: 0)
 		
-		var wrapper: [Self] = []
+		let store = Store<Self>()
 		Task {
-			let item = await create(token: token, id)
-			wrapper.append(item)
+			store.item = await create(token: token, id)
 			semaphore.signal()
 		}
 		semaphore.wait()
 		
-		return wrapper.first!
+		return store.item!
 	}
 	
 	func awakeFromFetch() {}
@@ -122,7 +123,12 @@ public extension Table {
 	/// Get this class AutoDB which allows direct SQL-access. You may setup db and override the class' settings, the first time you call this
 	@discardableResult
 	static func db(_ settings: AutoDBSettings? = nil) async throws -> Database {
-		try await AutoDBManager.shared.setupDB(self, nil, settings: settings ?? autoDBSettings())
+		let settings = if settings == nil {
+			await autoDBSettings()
+		} else {
+			settings
+		}
+		return try await AutoDBManager.shared.setupDB(self, nil, settings: settings)
 	}
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
@@ -132,7 +138,10 @@ public extension Table {
 		try await db().transaction(action)
 	}
 	
-	static func autoDBSettings() -> AutoDBSettings? {
+	/// Implement this to specify path to the database, or other settings.
+	/// e.g. return a common setting like this:
+	/// 	await AutoDBManager.shared.appSettings(for: .cache)
+	static func autoDBSettings() async -> AutoDBSettings? {
 		nil
 	}
 	
@@ -169,6 +178,16 @@ public extension Table {
 		try await AutoDBManager.shared.query(token: token, Self.self, query, arguments)
 	}
 	
+	/// Execute a query without returning any rows, like INSERT or UPDATE.
+	static func execute(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws {
+		try await AutoDBManager.shared.execute(token: token, Self.self, query, arguments)
+	}
+	
+	/// Execute a query without returning any rows, like INSERT or UPDATE.
+	static func execute(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws {
+		try await AutoDBManager.shared.execute(token: token, Self.self, query, sqlArguments: sqlArguments ?? [])
+	}
+	
 	// this cannot have the same signature
 	@discardableResult
 	static func query(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
@@ -192,6 +211,10 @@ public extension Table {
 		throw AutoError.fetchError
 	}
 	
+	/// return the first value of each rows of the result,
+	static func arrayValueQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
+		try await AutoDBManager.shared.arrayValueQuery(token: token, Self.self, query, arguments)
+	}
 	
 	/// When you don't need to wait for the save procedure
 	func save(token: AutoId? = nil) {
@@ -320,4 +343,10 @@ public extension Dictionary where Key == AutoId, Value: Table {
 	func sortById(_ ids: [AutoId]) -> [Value] {
 		ids.compactMap { self[$0] }
 	}
+}
+
+/// Bridge sync and unsynced code
+final class Store<T>: @unchecked Sendable {
+	init() {}
+	var item: T?
 }

@@ -143,7 +143,11 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 				return waitQueue.removeFirst()
 			}
 			do {
-				try await withCheckedThrowingContinuation { closure in
+				try await withCheckedThrowingContinuation { (closure: CheckedContinuation<Void, Error>) in
+					if isCancelled {
+						closure.resume(throwing: CancellationError())
+						return
+					}
 					continuation = closure
 				}
 				if waitQueue.isEmpty == false {
@@ -170,9 +174,11 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 		}
 		
 		func cancel() async {
+			print("ending queue")
 			isCancelled = true
 			continuation?.resume(throwing: CancellationError())
 			continuation = nil
+			print("did end queue")
 		}
 	}
 	

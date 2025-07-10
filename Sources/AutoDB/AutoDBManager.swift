@@ -99,16 +99,14 @@ extension UInt64 {
 	
 	/// insert a new global setting for the entire app, this is a good starting point for appstart
 	public nonisolated func setAppSettingsSync(_ settings: AutoDBSettings, for key: SettingsKey, typeID: ObjectIdentifier? = nil) {
-		// if this is called first at startup, semaphore is not strictly necessary. But there might be situations we don't know about where this will prevent side-effects.
-		let semaphore = DispatchSemaphore(value: 0)
+		
 		Task(priority: .userInitiated) {
 			await setAppSettings(settings, for: key, typeID: typeID)
-			semaphore.signal()
 		}
-		semaphore.wait()
 	}
 	
 	public func setAppSettings(_ settings: AutoDBSettings, for key: SettingsKey, typeID: ObjectIdentifier? = nil) {
+		// all with the same key will share the same settings
 		if appDefaults[key] == nil {
 			let newValue: (typeID: Set<ObjectIdentifier>, settings: AutoDBSettings) = (.init(), settings)
 			appDefaults[key] = newValue
@@ -117,6 +115,18 @@ extension UInt64 {
 		if let typeID {
 			appDefaults[key]?.typeID.insert(typeID)
 		}
+	}
+	
+	/**
+	 To ask for a common setting, e.g. when creating settings at startup:
+	 AutoDBManager.shared.setAppSettingsSync(backupDBSettings, for: .regular)
+	 AutoDBManager.shared.setAppSettingsSync(cacheDBSettings, for: .cache)
+	 static func autoDBSettings() -> AutoDBSettings? {
+	 nil
+	 }
+	 */
+	public func appSettings(for key: SettingsKey) -> AutoDBSettings? {
+		appDefaults[key]?.settings
 	}
 	
 	func appSettings(_ typeID: ObjectIdentifier) -> AutoDBSettings? {
@@ -147,11 +157,12 @@ extension UInt64 {
 		if databases[typeID] == nil {
 			
 			let database: Database
-			let settings = if let tableSettings = settings ?? table.autoDBSettings() {
-				tableSettings
+			let tableSettings = if settings == nil {
+				await table.autoDBSettings()
 			} else {
-				appSettings(typeID) ?? AutoDBSettings()
+				settings
 			}
+			let settings = tableSettings ?? appSettings(typeID) ?? AutoDBSettings()
 			if settings.shareDB {
 				let sharedKey = "\(settings.path)\(settings.inCacheFolder ? "_cache" : "")"
 				if let db = sharedDatabases[sharedKey] {
@@ -454,19 +465,46 @@ extension UInt64 {
 		return try await self.query(token: token, classType, query, sqlArguments: values ?? [])
 	}
 	
-	public func valueQuery<T: Table, Val: SQLColumnWrappable>(token: AutoId? = nil, _ classType: T.Type, _ query: String = "", _ arguments: [Sendable]? = nil)  async throws -> Val? {
+	public func execute<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil) async throws {
+		let values = try arguments?.map {
+			// we must cast or somehow find out which SQL-type each argument is!
+			try SQLValue.fromAny($0)
+		}
+		try await self.execute(token: token, classType, query, sqlArguments: values ?? [])
+	}
+	
+	/// Fetch a single value from the database, e.g. a count or sum.
+	public func valueQuery<T: Table, Val: SQLColumnWrappable>(token: AutoId? = nil, _ classType: T.Type, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> Val? {
 		let rows: [Row] = try await self.query(token: token, classType, query, arguments)
 		return rows.first?.values.first.flatMap {
 			Val.fromValue($0)
 		}
 	}
 	
+	/// Fetch a single column/value from the database, e.g. a list of ids or strings.
+	public func arrayValueQuery<T: Table, Val: SQLColumnWrappable>(token: AutoId? = nil, _ classType: T.Type, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
+		let rows: [Row] = try await self.query(token: token, classType, query, arguments)
+		
+		return rows.compactMap {
+			if let value = $0.first?.value {
+				Val.fromValue(value)
+			} else {
+				nil
+			}
+		}
+	}
+	
 	// MARK: - direct database access, these methods must be locked.
 	
 	@discardableResult
-	public func query<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, sqlArguments: [SQLValue] = []) async throws -> [Row] {
+	public func query<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
 		let database = try await setupDB(classType)
-		return try await database.query(token: token, query, sqlArguments)
+		return try await database.query(token: token, query, sqlArguments: sqlArguments)
+	}
+	
+	public func execute<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, sqlArguments: [SQLValue]? = nil) async throws {
+		let database = try await setupDB(classType)
+		try await database.execute(token: token, query, sqlArguments: sqlArguments ?? [])
 	}
 	
 	public func transaction<T: Table, R: Sendable>(_ classType: T.Type, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
@@ -608,7 +646,7 @@ extension UInt64 {
 	// MARK: - DB helper functions
 	
 	/// We want the format to be "INSERT OR REPLACE INTO table (column1, column2) VALUES (?,?),(?,?),(?,?)", and then add an array with four values. Here objectCount = 3, columnCount = 2
-	static func questionMarksForQueriesWithObjects(_ objectCount: Int, _ columnCount: Int) -> String
+	public static func questionMarksForQueriesWithObjects(_ objectCount: Int, _ columnCount: Int) -> String
 	{
 		if (objectCount == 0)
 		{
@@ -625,7 +663,7 @@ extension UInt64 {
 		return String(substring)
 	}
 	
-	static func questionMarks(_ count: Int) -> String
+	public static func questionMarks(_ count: Int) -> String
 	{
 		if count == 0 {
 			return "''";	//this will make your clause look like this: ... AND column IN ('') - which is always false (unless column can be the empty string), NOT IN is always true.

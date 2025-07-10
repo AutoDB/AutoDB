@@ -335,6 +335,7 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 	public init(stringLiteral value: String) { self = .text(value) }
 	public init(floatLiteral value: Double)  { self = .double(value) }
 	public init(integerLiteral value: Int64) { self = .integer(value) }
+	public init(uInteger value: UInt64) { self = .uinteger(value) }
 	public init(booleanLiteral value: Bool)  { self = .integer(value ? 1 : 0) }
 	
 	public func sqliteLiteral() -> String {

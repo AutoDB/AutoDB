@@ -35,7 +35,7 @@ public actor AutoLog {
 	var fileHandle: FileHandle?
 	
 	/// setup must be called before you can use it.
-	static var notUsed: Bool = true
+	nonisolated(unsafe) static var notUsed: Bool = true
 	
 	public static func setup(appGroup: String? = nil) {
 		notUsed = false

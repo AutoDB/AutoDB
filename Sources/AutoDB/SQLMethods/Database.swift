@@ -88,7 +88,7 @@ public enum SQLiteOperation: Int32, Sendable, Codable {
 struct PreparedStatement {
 	let handle: OpaquePointer
 	let isReadOnly: Bool
-	//var usage: Int = 0 this was a bad idea to figure out when to remove cached statements - leave it here to remember, it slows us don't and we still can't know if it has heavy use in the start of an app and then none - lingering forever.
+	//var usage: Int = 0 this was a bad idea to figure out when to remove cached statements - leave it here to remember, it slows us down, and we still can't know if it has heavy use in the start of an app and then none - lingering forever.
 }
 
 public typealias Row = Dictionary<String, SQLValue>
@@ -254,6 +254,8 @@ public actor Database {
 		}
 	}
 	
+	// MARK: - Query methods
+	
 	@discardableResult
 	public func query(token: AutoId? = nil, _ queryString: String, _ arguments: [Sendable] = []) async throws -> [Row] {
 		let values = try arguments.map {
@@ -264,7 +266,7 @@ public actor Database {
 	}
 	
 	@discardableResult
-	public func query(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue] = []) async throws -> [Row] {
+	public func query(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue]?) async throws -> [Row] {
 		// only take semaphore if in transaction - other times we can run queries in parallel (as much as being an actor allows)
 		let hasSemaphore = inTransaction || token != nil
 		if hasSemaphore {
@@ -273,6 +275,11 @@ public actor Database {
 		defer { if hasSemaphore { Task { await semaphore.signal(token: token) } } }
 		if isClosed { throw Error.databaseIsClosed }
 		
+		let statement = try preparedStatement(query, sqlArguments ?? [])
+		return try rowsByExecutingPreparedStatement(statement, from: query)
+	}
+	
+	private func preparedStatement(_ query: String, _ sqlArguments: [SQLValue]) throws -> PreparedStatement {
 		let statement = try preparedStatement(query)
 		let statementHandle = statement.handle
 		var idx = 1 // SQLite bind-parameter indices start at 1, not 0!
@@ -280,26 +287,8 @@ public actor Database {
 			try value.bind(database: self, statement: statementHandle, index: Int32(idx), for: query)
 			idx += 1
 		}
-		
-		return try rowsByExecutingPreparedStatement(statement, from: query)
+		return statement
 	}
-	
-	/*
-	@discardableResult
-	public func query(_ query: String, arguments: [String: Sendable]) throws -> [Row] {
-		if isClosed { throw Error.databaseIsClosed }
-		let statement = try preparedStatement(query)
-		let statementHandle = statement.handle
-		for (name, any) in arguments {
-			let value = try Value.fromAny(any)
-			try value.bind(database: self, statement: statementHandle, name: name, for: query)
-		}
-		
-		return try _checkForUpdateHookBypass(statement: statement) {
-			try rowsByExecutingPreparedStatement(statement, from: query)
-		}
-	}
-	*/
 	
 	private func preparedStatement(_ query: String) throws -> PreparedStatement {
 		if let cached = cachedStatements[query] {
@@ -322,7 +311,8 @@ public actor Database {
 		return statement
 	}
 	
-	private func rowsByExecutingPreparedStatement(_ statement: PreparedStatement, from query: String) throws -> [Row] {
+	/// execute a prepared statement, returning the statement handle and the result code.
+	private func executingPreparedStatement(_ statement: PreparedStatement, _ query: String) throws -> (OpaquePointer, Int32) {
 		if debugPrintEveryQuery {
 			if let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
 				AutoLog.debug("[AutoDB \(Unmanaged.passUnretained(self).toOpaque())] \(expandedQuery)")
@@ -354,7 +344,12 @@ public actor Database {
 				default: throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 			}
 		}
+		return (statementHandle, result)
+	}
+	
+	private func rowsByExecutingPreparedStatement(_ statement: PreparedStatement, from query: String) throws -> [Row] {
 		
+		let (statementHandle, resultIn) = try executingPreparedStatement(statement, query)
 		let columnCount = sqlite3_column_count(statementHandle)
 		if columnCount == 0 {
 			guard sqlite3_reset(statementHandle) == SQLITE_OK, sqlite3_clear_bindings(statementHandle) == SQLITE_OK else {
@@ -371,6 +366,7 @@ public actor Database {
 			columnNames.append(name)
 		}
 		
+		var result = resultIn
 		var rows: [Row] = []
 		while result == SQLITE_ROW {
 			var row: Row = [:]
@@ -401,12 +397,52 @@ public actor Database {
 			
 			result = sqlite3_step(statementHandle)
 		}
-		if result != SQLITE_DONE { throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle)) }
 		
+		// finalize handler
+		if result != SQLITE_DONE { throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle)) }
 		guard sqlite3_reset(statementHandle) == SQLITE_OK, sqlite3_clear_bindings(statementHandle) == SQLITE_OK else {
 			throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 		}
+		
 		return rows
+	}
+	
+	// MARK: - Execute methods, perform queries that do not return rows.
+	
+	/// Execute a query with parameters, returning nothing. Will throw an error if the query returns rows.
+	public func execute(token: AutoId? = nil, _ queryString: String, _ arguments: [Sendable]?) async throws {
+		let values = try arguments?.map {
+			// we must cast or somehow find out which SQL-type each argument is!
+			try SQLValue.fromAny($0)
+		}
+		return try await execute(token: token, queryString, sqlArguments: values ?? [])
+	}
+	
+	/// Execute a query with parameters, returning nothing. Will throw an error if the query returns rows.
+	public func execute(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue] = []) async throws {
+		
+		if sqlArguments.isEmpty {
+			// no arguments, just run the query
+			try await execute(token: token, query)
+			return
+		}
+		
+		// only take semaphore if in transaction - other times we can run queries in parallel (as much as being an actor allows)
+		let hasSemaphore = inTransaction || token != nil
+		if hasSemaphore {
+			await semaphore.wait(token: token)
+		}
+		defer { if hasSemaphore { Task { await semaphore.signal(token: token) } } }
+		if isClosed { throw Error.databaseIsClosed }
+		
+		let statement = try preparedStatement(query, sqlArguments)
+		let (statementHandle, result) = try executingPreparedStatement(statement, query)
+		
+		// finalize handler
+		if result != SQLITE_DONE { throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle)) }
+		guard sqlite3_reset(statementHandle) == SQLITE_OK, sqlite3_clear_bindings(statementHandle) == SQLITE_OK else {
+			throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
+		}
 	}
 	
 	/// Execute a query with no parameters returning nothing

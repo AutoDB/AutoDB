@@ -97,15 +97,14 @@ public extension Model {
 		
 		let semaphore = DispatchSemaphore(value: 0)
 		
-		var wrapper: [Self] = []
+		let store = Store<Self>()
 		Task {
-			let item = await create(token: token, id)
-			wrapper.append(item)
+			store.item = await create(token: token, id)
 			semaphore.signal()
 		}
 		semaphore.wait()
 		
-		return wrapper.first!
+		return store.item!
 	}
 	
 	/// When you are in async mode, wait regularly
@@ -257,7 +256,17 @@ public extension Model {
 	// this cannot have the same signature
 	@discardableResult
 	static func query(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil)  async throws -> [Row] {
-		try await AutoDBManager.shared.query(token: token, TableType.self, query, sqlArguments: sqlArguments ?? [])
+		try await AutoDBManager.shared.query(token: token, TableType.self, query, sqlArguments: sqlArguments)
+	}
+	
+	/// Execute a query without returning any rows, like INSERT or UPDATE.
+	static func execute(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws {
+		try await AutoDBManager.shared.execute(token: token, TableType.self, query, arguments)
+	}
+	
+	/// Execute a query without returning any rows, like INSERT or UPDATE.
+	static func execute(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws {
+		try await AutoDBManager.shared.execute(token: token, TableType.self, query, sqlArguments: sqlArguments)
 	}
 	
 	/// A non-throwable query, returns nil instead of throwing

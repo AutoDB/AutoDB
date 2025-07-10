@@ -27,7 +27,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		let instance = classType.init()
 		let tableName = classType.typeName
 		
-		self.settings = classType.autoDBSettings()
+		self.settings = await classType.autoDBSettings()
 		
 		//we automatically get all values, this will call container<Key>(keyedBy type: Key.Type) -> ...
 		// and then encode<T>(_ value: T, forKey key: KeyType) for each value, including optionals with a default value.
@@ -43,7 +43,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		}
 		
 		// now we have all columns and can create our table
-		let tableInfo = TableInfo(settings: classType.autoDBSettings(), tableName, columns)
+		let tableInfo = await TableInfo(settings: classType.autoDBSettings(), tableName, columns)
 		
 		var columnsInDB: [Column] = []
 		let query = "PRAGMA table_info('\(tableName)')"
