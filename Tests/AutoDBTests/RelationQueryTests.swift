@@ -20,6 +20,7 @@ final class AlbumArt: Model, @unchecked Sendable {
 	
 	struct AlbumArtValue: Table {
 		
+		static let typeName = "AlbumArt"
 		var id: AutoId = 0
 		var name = ""
 		var artist = ""
@@ -53,6 +54,8 @@ final class DeallocTest: @unchecked Sendable {
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class CureAlbums: Model, @unchecked Sendable {
 	struct CureAlbumsTable: Table {
+		static let typeName = "CureAlbums"
+		
 		var id: AutoId = 0
 		var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
 	}

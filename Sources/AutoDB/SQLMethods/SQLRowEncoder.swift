@@ -23,7 +23,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	let database: Database
 	let tableClass: any Table.Type
 	let table: TableInfo
-	let query: String
+	let insertQuery: String
 	let maxQueryVariableCount: Int
 	var values: [String: AnyEncodable] = [:]
 	var allValues: [SQLValue] = []
@@ -44,13 +44,15 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 		self.database = database
 		table = await AutoDBManager.shared.tableInfo(classType)
 		maxQueryVariableCount = database.maxQueryVariableCount
-		query = "INSERT OR REPLACE INTO `\(table.name)` (\(table.columnNameString)) VALUES "
+		insertQuery = " INTO `\(table.name)` (\(table.columnNameString)) VALUES "
 	}
 	
-	func queryString(_ objectCount: Int) -> String {
+	func queryString(_ objectCount: Int, _ update: Bool) -> String {
 		
 		let questionMarks = AutoDBManager.questionMarksForQueriesWithObjects(objectCount, table.columns.count)
-		return query + questionMarks
+		// INSERT OR REPLACE will overwrite existing rows, unique keys will force the id to be updated.
+		// INSERT will fail if the row already exists. This is useful if you want to ensure that the row is new.
+		return (update ? "INSERT OR REPLACE" : "INSERT") + insertQuery + questionMarks
 	}
 	
 	func commitRow() throws {
@@ -95,7 +97,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	}
 	
 	/// Insert encoded values into DB. The dbSemaphore re-entry token to allow us to call db-methods in a recursive manner.
-	func commit(_ dbSemaphoreToken: AutoId? = nil) async throws {
+	func commit(_ dbSemaphoreToken: AutoId? = nil, update: Bool) async throws {
 		try commitRow()
 		
 		// if we have too many objects must split.
@@ -106,7 +108,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 			let args = allValues[0..<slice]
 			allValues.removeFirst(slice)
 			let objectCount = slice / table.columns.count
-			try await database.query(token: dbSemaphoreToken, queryString(objectCount), Array(args))
+			try await database.query(token: dbSemaphoreToken, queryString(objectCount, update), Array(args))
 		}
 	}
 	

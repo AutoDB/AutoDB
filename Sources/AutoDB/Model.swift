@@ -110,7 +110,8 @@ public extension Model {
 	/// When you are in async mode, wait regularly
 	static func create(token: AutoId? = nil, _ id: AutoId? = nil) async -> Self {
 		// get encoder or setup db if not done
-		guard let encoder = try? await AutoDBManager.shared.getEncoder(TableType.self) else {
+		let typeID = ObjectIdentifier(Self.self)
+		guard let encoder = try? await AutoDBManager.shared.getEncoder(TableType.self, typeID) else {
 			fatalError("Could not setup DB")
 		}
 		
@@ -120,9 +121,9 @@ public extension Model {
 		defer { Task { await encoder.semaphore.signal(token: token) }}
 		
 		if let id {
-			if let item = await AutoDBManager.shared.cached(Self.self, id) {
+			if let item = await AutoDBManager.shared.cached(Self.self, id, typeID) {
 				return item
-			} else if let item = try? await fetchId(token: token, id) {
+			} else if let item = try? await fetchId(token: token, id, typeID) {
 				return item
 			}
 		}
@@ -131,6 +132,8 @@ public extension Model {
 		var value = TableType()
 		value.id = id ?? AutoId.generateId()
 		let item = Self(value)
+		
+		await AutoDBManager.shared.setCreated(value.id, ObjectIdentifier(TableType.self))
 		
 		await item.awakeFromInit()
 		
@@ -198,27 +201,21 @@ public extension Model {
 	
 	// MARK: - fetch shortcuts
 	
-	static func fetchId(token: AutoId? = nil, _ id: AutoId) async throws -> Self {
+	static func fetchId(token: AutoId? = nil, _ id: AutoId, _ typeID: ObjectIdentifier? = nil) async throws -> Self {
 		
-		try await AutoDBManager.shared.fetchId(token: token, id)
+		try await AutoDBManager.shared.fetchId(token: token, id, typeID)
 	}
 	
-	static func fetchIds(token: AutoId? = nil, _ ids: [AutoId]) async throws -> [Self] where Self: AnyObject {
+	static func fetchIds(token: AutoId? = nil, _ ids: [AutoId], _ identifier: ObjectIdentifier? = nil) async throws -> [Self] where Self: AnyObject {
 		if ids.isEmpty {
 			return []
 		}
-		return try await AutoDBManager.shared.fetchIds(token: token, ids)
+		return try await AutoDBManager.shared.fetchIds(token: token, ids, identifier)
 	}
 	
-	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Self] where Self: AnyObject {
-		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments ?? [])
+	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Self] where Self: AnyObject {
+		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments, sqlArguments: sqlArguments)
 	}
-	
-	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [SQLValue]? = nil) async throws -> [Self] where Self: AnyObject {
-		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments ?? [])
-	}
-	
-	//
 	
 	/// Tell the manager to save at a later time
 	func didChange() async {
@@ -336,11 +333,20 @@ public extension Model {
 		
 		try await willSave(objects)
 		
-		try await TableType.saveList(token: token, list)
+		let (created, updated) = await AutoDBManager.shared.filterCreated(TableType.identifier, list)
 		
-		//remove all changed objects
-		let typeID = ObjectIdentifier(self)
-		await AutoDBManager.shared.removeFromChanged(objects, typeID)
+		// note that we do these in two steps, since creating objects may fail, and we don't want to save the updated objects twice.
+		if updated.isEmpty == false {
+			try await TableType.saveList(token: token, updated, onlyUpdated: true)
+			//remove all changed objects
+			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(TableType.self))
+		}
+		
+		if created.isEmpty == false {
+			try await TableType.saveList(token: token, created, onlyUpdated: false)
+			//remove all changed objects
+			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(TableType.self))
+		}
 		
 		try await didSave(objects)
 	}

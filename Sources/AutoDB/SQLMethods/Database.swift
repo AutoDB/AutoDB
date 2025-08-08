@@ -119,6 +119,11 @@ public actor Database {
 	
 	public func setDebug(_ enabled: Bool = true) {
 		debugPrintEveryQuery = enabled
+		if enabled {
+			AutoLog.setup()
+		} else {
+			AutoLog.notUsed = true
+		}
 	}
 	
 	public init(_ path: String, ramDB: Bool = false) throws {
@@ -311,14 +316,18 @@ public actor Database {
 		return statement
 	}
 	
+	private func debugPrint(_ statement: PreparedStatement, _ query: String, extra: String? = nil, file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {
+		if let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
+			AutoLog.debug("[AutoDB \(Unmanaged.passUnretained(self).toOpaque())] \(extra ?? "")\(expandedQuery)", file: file, function: function, line: line)
+		} else {
+			AutoLog.debug("[AutoDB \(Unmanaged.passUnretained(self).toOpaque())] \(query)", file: file, function: function, line: line)
+		}
+	}
+	
 	/// execute a prepared statement, returning the statement handle and the result code.
 	private func executingPreparedStatement(_ statement: PreparedStatement, _ query: String) throws -> (OpaquePointer, Int32) {
 		if debugPrintEveryQuery {
-			if let cStr = sqlite3_expanded_sql(statement.handle), let expandedQuery = String(cString: cStr, encoding: .utf8) {
-				AutoLog.debug("[AutoDB \(Unmanaged.passUnretained(self).toOpaque())] \(expandedQuery)")
-			} else {
-				AutoLog.debug("[AutoDB \(Unmanaged.passUnretained(self).toOpaque())] \(query)")
-			}
+			debugPrint(statement, query)
 		}
 		let statementHandle = statement.handle
 		var result = sqlite3_step(statementHandle)
@@ -337,11 +346,16 @@ public actor Database {
 		}
 		
 		guard result == SQLITE_ROW || result == SQLITE_DONE else {
-			sqlite3_reset(statementHandle)
-			sqlite3_clear_bindings(statementHandle)
 			switch result {
-				case SQLITE_CONSTRAINT: throw Error.uniqueConstraintFailed
-				default: throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
+				case SQLITE_CONSTRAINT:
+					debugPrint(statement, query, extra: "Unique constraint failed for: ")
+					sqlite3_reset(statementHandle)
+					sqlite3_clear_bindings(statementHandle)
+					throw Error.uniqueConstraintFailed
+				default:
+					sqlite3_reset(statementHandle)
+					sqlite3_clear_bindings(statementHandle)
+					throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 			}
 		}
 		return (statementHandle, result)

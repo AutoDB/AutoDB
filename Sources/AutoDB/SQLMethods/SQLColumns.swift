@@ -80,7 +80,7 @@ internal struct Column: Equatable, Hashable, Sendable {
 	}
 	
 	public init(name: String, columnType: ColumnType, valueType: Any.Type, mayBeNull: Bool = false, defaultValue: EncodableSendable?) {
-		self.name = name.deleteUnderscorePrefix()
+		self.name = name
 		self.columnType = columnType
 		self.valueType = valueType
 		self.mayBeNull = mayBeNull

@@ -33,7 +33,34 @@ struct BaseClass: Table {
 	var anOptInt: Int? = nil
     
     var arrayWithEncodables = [Int]()
+}
+
+final class UniqueString: Model, @unchecked Sendable {
 	
+	struct Value: Table {
+		
+		static let typeName: String = "UniqueString"
+		var id: AutoId = 0
+		var string: String = ""
+		static var uniqueIndices: [[String]] {
+			[
+				["string"]
+			]
+		}
+	}
+	var value: Value
+	init(_ value: Value) {
+		self.value = value
+	}
+	
+	var string: String {
+		get {
+		value.string
+		}
+		set {
+			value.string = newValue
+		}
+	}
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)

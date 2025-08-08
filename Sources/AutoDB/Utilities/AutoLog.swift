@@ -108,7 +108,7 @@ public actor AutoLog {
 			closeLogTask?.cancel()
 		}
 		
-		try? fileHandle?.seekToEnd()
+		_ = try? fileHandle?.seekToEnd()
 		fileHandle?.write(data)
 		
 		closeLogTask = Task {
@@ -128,12 +128,14 @@ public actor AutoLog {
 	
 	// will be deleted at next app-start
 	public static func debug(_ message: String, file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {
+		//print("\(function)\(line) :\(message)")
 		if notUsed { return }
 		autoDB.info("\(function)\(line) :\(message)")
 		log("[\(Date.now.formatted(dateFormat))]: \(subsystem):\(function)\(line): \(message)\n")
 	}
 	
 	public static func error(_ message: String, file: StaticString = #file, function: StaticString = #function, line: UInt = #line) {
+		print("\(function)\(line) :\(message)")
 		if notUsed { return }
 		autoDB.error("\(file):\(function) \(line):\(message)")
 		log("Error [\(Date.now.formatted(dateFormat))]: \(subsystem):\(function)\(line): \(message)\n")

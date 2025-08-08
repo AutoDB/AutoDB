@@ -53,10 +53,10 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		
 		if columnsInDB.isEmpty {
 			// table does not exist. Create it!
-			try await db.query(tableInfo.createTableSyntax())
+			try await db.execute(tableInfo.createTableSyntax())
 			
 			for statement in tableInfo.createIndexStatements(instance) {
-				try await db.query(statement)
+				try await db.execute(statement)
 			}
 			return tableInfo
 		}
@@ -172,24 +172,26 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
     
 	/// add a column that defaults to non-nil, can still be optional
 	func addColumn<T: EncodableSendable>(_ column: String, _ type: ColumnType, _ valueType: Any.Type, _ nullable: Bool, _ defaultValue: T?) {
-        
+		let column = column.deleteUnderscorePrefix()
 		if addedColumns.contains(column) || column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
 			//print("ignoring \(column)")
 			return
 		}
-		addedColumns.insert(column)
-		columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: nullable, defaultValue: defaultValue))
+		if addedColumns.insert(column).inserted {
+			columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: nullable, defaultValue: defaultValue))
+		}
     }
 	
 	/// add an optional column that defaults to nil
 	func addColumn(_ column: String, _ type: ColumnType, _ valueType: Any.Type) {
-		
+		let column = column.deleteUnderscorePrefix()
 		if addedColumns.contains(column) || column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
 			//print("ignoring \(column)")
 			return
 		}
-		addedColumns.insert(column)
-		columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: true, defaultValue: nil))
+		if addedColumns.insert(column).inserted {
+			columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: true, defaultValue: nil))
+		}
 	}
     
     public func container<Key>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> where Key : CodingKey {

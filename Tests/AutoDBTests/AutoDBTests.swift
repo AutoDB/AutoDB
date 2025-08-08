@@ -50,6 +50,10 @@ class Resource {
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class AutoDBTests: XCTestCase {
 	
+	static override func setUp() {
+		AutoLog.setup()
+	}
+	
 	static let resourcePath: String = {
 		let path = "./Tests/Resources"
 		let manager = FileManager.default
@@ -131,6 +135,8 @@ final class AutoDBTests: XCTestCase {
 	func testEncodingToDB() async throws {
 		
 		let db = try await ObserveBasic.db()
+		try await ObserveBasic.truncateTable()
+		
 		let base = await ObserveBasic.create(2)
 		base.optString = "base 2"
 		let base3 = await ObserveBasic.create(3)
@@ -140,7 +146,7 @@ final class AutoDBTests: XCTestCase {
 		let encoder = await SQLRowEncoder(ObserveBasic.self)
 		try base.encode(to: encoder)
 		try base3.encode(to: encoder)
-		try await encoder.commit()
+		try await encoder.commit(update: false)
 		
 		var row = try await db.query("SELECT optString FROM ObserveBasic WHERE id = 2").first!
 		var value = row.first!.value.stringValue
@@ -343,11 +349,11 @@ final class AutoDBTests: XCTestCase {
 	 
 	func testOneRelationMultipleDBs() async throws {
 		let mainDB = try await ObserveBasic.db()
-		try await mainDB.query("DROP TABLE IF EXISTS AlbumArtValue")
+		try await mainDB.query("DROP TABLE IF EXISTS AlbumArt")
 		try await mainDB.query("DROP TABLE IF EXISTS Album")
 		
 		let cacheDB = try await AlbumArt.db(AutoDBSettings.cache())
-		try await AlbumArt.query("DELETE FROM AlbumArtValue")
+		try await AlbumArt.query("DELETE FROM AlbumArt")
 		await Album.queryNT("DELETE FROM Album")
 		
 		var faith = await Album.create()
@@ -377,10 +383,10 @@ final class AutoDBTests: XCTestCase {
 		let q = "SELECT name FROM sqlite_master WHERE type='table';"
 		let result = try await mainDB.query(q)
 		for rows in result {
-			XCTAssertFalse(rows.values.contains { $0.stringValue == "AlbumArtValue" })
+			XCTAssertFalse(rows.values.contains { $0.stringValue == "AlbumArt" })
 		}
 		let cacheRes = try await cacheDB.query(q).compactMap({ $0.values.first })
-		XCTAssertTrue(cacheRes.contains { $0.stringValue == "AlbumArtValue" })
+		XCTAssertTrue(cacheRes.contains { $0.stringValue == "AlbumArt" })
 	}
 	
 	/// two tables have separate actors, test that we can read and write at the same time without crashing.
@@ -474,6 +480,37 @@ final class AutoDBTests: XCTestCase {
 		}
 		
 		await fulfillment(of: [waiter, observeBasicChunk, firstIteration, lastIteration])
+	}
+	
+	func testCreateWithExistingId() async throws {
+		try await AutoDBManager.shared.truncateTable(UniqueString.self)
+		
+		let item = await UniqueString.create(1)
+		item.string = "Test"
+		try await item.save()
+		
+		let fetched = try await UniqueString.fetchId(1)
+		XCTAssertEqual(fetched.string, "Test")
+		
+		let newItem = await UniqueString.create(1)
+		newItem.string = "New Test"
+		try await newItem.save()
+		
+		let updated = try await UniqueString.fetchId(1)
+		XCTAssertEqual(updated.string, "New Test")
+		
+		XCTAssertTrue(updated === fetched) // they should be the same object
+		
+		let duplicateItem = await UniqueString.create()
+		duplicateItem.string = "New Test"
+		
+		do {
+			try await duplicateItem.save()
+			XCTFail("Expected an error when saving a duplicate id")
+		} catch AutoError.uniqueConstraintFailed(let ids) {
+			print("Caught uniqueConstraintFailed error with ids: \(ids)")
+			XCTAssertTrue(ids.contains(1), "Expected id 1 to be in the unique constraint error")
+		}
 	}
 }
 

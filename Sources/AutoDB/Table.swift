@@ -99,6 +99,9 @@ public extension Table {
 		// no id or not in DB, create new object
 		var item = Self()
 		item.id = id ?? AutoId.generateId()
+		
+		await AutoDBManager.shared.setCreated(item.id, ObjectIdentifier(self))
+		
 		return item
 	}
 	
@@ -152,24 +155,19 @@ public extension Table {
 	
 	// MARK: - fetch shortcuts
 	
-	static func fetchId(token: AutoId? = nil, _ id: AutoId) async throws -> Self {
+	static func fetchId(token: AutoId? = nil, _ id: AutoId, _ identifier: ObjectIdentifier? = nil) async throws -> Self {
 		
-		try await AutoDBManager.shared.fetchId(token: token, id)
+		try await AutoDBManager.shared.fetchId(token: token, id, identifier)
 	}
-	static func fetchIds(token: AutoId? = nil, _ ids: [AutoId]) async throws -> [Self] {
+	static func fetchIds(token: AutoId? = nil, _ ids: [AutoId], _ identifier: ObjectIdentifier? = nil) async throws -> [Self] {
 		if ids.isEmpty {
 			return []
 		}
-		return try await AutoDBManager.shared.fetchIds(token: token, ids)
+		return try await AutoDBManager.shared.fetchIds(token: token, ids, identifier)
 	}
 	
-	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Self] {
-		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments ?? [])
-	}
-	
-	
-	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [SQLValue]? = nil) async throws -> [Self] {
-		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments ?? [])
+	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Self] {
+		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments, sqlArguments: sqlArguments)
 	}
 	
 	
@@ -179,13 +177,8 @@ public extension Table {
 	}
 	
 	/// Execute a query without returning any rows, like INSERT or UPDATE.
-	static func execute(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws {
-		try await AutoDBManager.shared.execute(token: token, Self.self, query, arguments)
-	}
-	
-	/// Execute a query without returning any rows, like INSERT or UPDATE.
-	static func execute(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws {
-		try await AutoDBManager.shared.execute(token: token, Self.self, query, sqlArguments: sqlArguments ?? [])
+	static func execute(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws {
+		try await AutoDBManager.shared.execute(token: token, Self.self, query, arguments, sqlArguments: sqlArguments)
 	}
 	
 	// this cannot have the same signature
@@ -204,16 +197,16 @@ public extension Table {
 	
 	/// return the first value of the first row of the result,
 	/// throws fetchError if the value is nil 
-	static func valueQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> Val {
-		if let value: Val = try await AutoDBManager.shared.valueQuery(token: token, Self.self, query, arguments) {
+	static func valueQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Val {
+		if let value: Val = try await AutoDBManager.shared.valueQuery(token: token, Self.self, query, arguments, sqlArguments: sqlArguments) {
 			return value
 		}
 		throw AutoError.fetchError
 	}
 	
-	/// return the first value of each rows of the result,
-	static func arrayValueQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
-		try await AutoDBManager.shared.arrayValueQuery(token: token, Self.self, query, arguments)
+	///return an array with all values in the result for a (the first) column.
+	static func groupConcatQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
+		try await AutoDBManager.shared.groupConcatQuery(token: token, Self.self, query, arguments)
 	}
 	
 	/// When you don't need to wait for the save procedure
@@ -225,31 +218,87 @@ public extension Table {
 	
 	/// Tell the manager to save this object
 	func save(token: AutoId? = nil) async throws {
-		try await [self].save(token: token)
+		try await Self.saveList(token: token, [self])
 	}
 	
 	static func willSave(_ objects: [Self]) async throws {}
 	static func didSave(_ objects: [Self]) async throws {}
 	
-	/// All save functions ends up here, where we encode the objects to SQL queries, store them, remove from isChanged and call did/will save.
 	static func saveList(token: AutoId? = nil, _ objects: [Self]) async throws {
+		try await saveList(token: token, objects, onlyUpdated: nil)
+	}
+	
+	/// All save functions ends up here, where we encode the objects to SQL queries, store them, remove from isChanged and call did/will save.
+	static func saveList(token: AutoId? = nil, _ objects: [Self], onlyUpdated: Bool?) async throws {
+		
+		let typeID = ObjectIdentifier(self)
 		
 		// don't re-save deleted items
-		let deletedIds = await AutoDBManager.shared.isDeleted(ObjectIdentifier(Self.self))
+		let deletedIds = await AutoDBManager.shared.isDeleted(typeID)
 		let objects = objects.filter { deletedIds.contains($0.id) == false }
 		guard objects.isEmpty == false else { return }
 		
 		try await willSave(objects)
 		
-		let encoder = try await AutoDBManager.shared.getEncoder(Self.self)
+		let encoder = try await AutoDBManager.shared.getEncoder(Self.self, typeID)
 		await encoder.semaphore.wait()
 		defer { Task { await encoder.semaphore.signal() }}
 		
-		for object in objects {
-			try object.encode(to: encoder)
+		// separate insert and update, otherwise update will overwrite existing objects.
+		let updated: [Self]
+		let created: [Self]
+		if onlyUpdated == true {
+			// we only have updated objects, so we can skip the created check
+			updated = objects
+			created = []
 		}
-		// apply dbSemaphoreToken if we have one
-		try await encoder.commit(token)
+		else if onlyUpdated == false {
+			// we only have created objects, so we can skip the updated check
+			updated = []
+			created = objects
+		}
+		else {
+			let result = await AutoDBManager.shared.filterCreated(typeID, objects)
+			created = result.created
+			updated = result.updated
+		}
+		
+		if updated.isEmpty == false {
+			for object in updated {
+				try object.encode(to: encoder)
+			}
+			// apply dbSemaphoreToken if we have one
+			try await encoder.commit(token, update: true)
+		}
+		if created.isEmpty == false {
+			for object in created {
+				try object.encode(to: encoder)
+			}
+			do {
+				// apply dbSemaphoreToken if we have one
+				try await encoder.commit(token, update: false)
+			} catch Database.Error.uniqueConstraintFailed {
+				
+				// return an error with a list of ids that caused the failure. If the user cares, they can fetch the objects
+				var duplicates = [AutoId]()
+				for object in created {
+					
+					for uniqueIndexSet in Self.uniqueIndices {
+						let values: [Any?] = uniqueIndexSet.map { object[keyPath: object.allKeyPaths[$0]!] }
+						let arguments = try values.map {
+							// we must cast or somehow find out which SQL-type each argument is!
+							try SQLValue.fromAny($0)
+						}
+						let query = "SELECT id FROM \(Self.typeName) WHERE \(uniqueIndexSet.map { "\($0) = ?" }.joined(separator: " AND "))"
+						if let existing: AutoId = try? await Self.valueQuery(token: token, query, sqlArguments: arguments) {
+							duplicates.append(existing)
+						}
+					}
+				}
+				throw AutoError.uniqueConstraintFailed(duplicates)
+			}
+			await AutoDBManager.shared.clearCreated(typeID, created)
+		}
 		
 		try await didSave(objects)
 	}

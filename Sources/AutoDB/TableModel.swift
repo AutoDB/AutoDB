@@ -14,11 +14,11 @@ public protocol TableModel {
 	static func tableChangeObserver() async throws -> TableChangeObserver
 	
 	/// Fetch one object, throw missingId if no object was found
-	static func fetchId(token: AutoId?, _ id: AutoId) async throws -> Self
-	static func fetchIds(token: AutoId?, _ ids: [AutoId]) async throws -> [Self]
+	static func fetchId(token: AutoId?, _ id: AutoId, _ identifier: ObjectIdentifier?) async throws -> Self
+	static func fetchIds(token: AutoId?, _ ids: [AutoId], _ identifier: ObjectIdentifier?) async throws -> [Self]
 	
 	/// Fetch all objects matching this query.
-	static func fetchQuery(token: AutoId?, _ query: String, _ arguments: [Sendable]?) async throws -> [Self]
+	static func fetchQuery(token: AutoId?, _ query: String, _ arguments: [Sendable]?, sqlArguments: [SQLValue]?) async throws -> [Self]
 	
 	/// a general query with arguments of unknown type
 	@discardableResult
@@ -69,6 +69,8 @@ public enum AutoError: Error {
 	case missingRelation
 	/// if you don't have FTS5 support, you cannot use full text search
 	case noFTSSupport
+	/// unique constraint failed, you tried to insert an object that already exists, it may return a list of the conflicting ids - if trying to save new non-objects this list can be empty.
+	case uniqueConstraintFailed([AutoId])
 }
 
 public enum TableError: Error {

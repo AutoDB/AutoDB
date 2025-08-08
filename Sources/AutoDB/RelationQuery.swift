@@ -203,7 +203,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		
 		if offset == -1 || (resetOffset && offset == 0) {
 			// setup first fetch
-			let res = try await AutoType.fetchQuery(token: nil, String(format: query, initialFetch, 0), arguments)
+			let res = try await AutoType.fetchQuery(token: nil, String(format: query, initialFetch, 0), arguments, sqlArguments: nil)
 			offset = res.count
 			hasMore = offset == initialFetch	// there is probably more if limit was reached
 			items = res
@@ -220,7 +220,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		await semaphore.wait()
 		defer { Task { await semaphore.signal() } }
 		
-		var res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [limit, offset]), arguments)
+		var res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [limit, offset]), arguments, sqlArguments: nil)
 		if res.isEmpty {
 			if hasMore && items.count == offset {
 				hasMore = false
@@ -233,7 +233,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		let newIds = Set(res.map { $0.id })
 		if newIds.isDisjoint(with: fetchedIds) == false {
 			// we have changed our table in such a way that the new fetch contains old items - this is quite likely since you typically don't order items by creation-date. Refetch from 0 to get the new item in an updated list!
-			res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [offset + res.count, 0]), arguments)
+			res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [offset + res.count, 0]), arguments, sqlArguments: nil)
 			offset = res.count
 			items = res
 			

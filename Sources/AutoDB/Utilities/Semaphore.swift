@@ -114,7 +114,7 @@ public actor Semaphore {
 	public func lock(token: AutoId? = nil, _ task: () async throws -> Void) async rethrows {
 		await wait(token: token)
 		defer {
-			Task { await signal(token: token) }
+			signal(token: token)
 		}
 		try await task()
 	}

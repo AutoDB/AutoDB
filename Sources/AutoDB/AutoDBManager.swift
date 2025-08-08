@@ -18,16 +18,16 @@ extension UInt64 {
 	
 	var encoders = [ObjectIdentifier: SQLRowEncoder]()
 	/// get the cached encoder for this class, or create one
-	func getEncoder<T: Table>(_ classType: T.Type) async throws -> SQLRowEncoder {
-		if let enc = encoders[ObjectIdentifier(T.self)] {
+	func getEncoder<T: Table>(_ classType: T.Type, _ typeID: ObjectIdentifier? = nil) async throws -> SQLRowEncoder {
+		if let enc = encoders[typeID ?? ObjectIdentifier(T.self)] {
 			return enc
 		}
 		try await setupDB(classType, settings: nil)
-		if let enc = encoders[ObjectIdentifier(T.self)] {
+		if let enc = encoders[typeID ?? ObjectIdentifier(T.self)] {
 			return enc
 		}
 		let enc = await SQLRowEncoder(T.self)
-		encoders[ObjectIdentifier(T.self)] = enc
+		encoders[typeID ?? ObjectIdentifier(T.self)] = enc
 		return enc
 	}
 	
@@ -47,6 +47,7 @@ extension UInt64 {
 	private var tables = [ObjectIdentifier: TableInfo]()
     var lookupTable = LookupTable()
 	var cachedObjects = [ObjectIdentifier: WeakDictionary<AutoId, AnyObject>]()
+	private var createdObjects = [ObjectIdentifier: Set<AutoId>]()
 	
 	var databases = [ObjectIdentifier: Database]()
 	var sharedDatabases = [String: Database]()
@@ -83,6 +84,7 @@ extension UInt64 {
 		try await db.execute(token: token, "DELETE FROM \(table.typeName)")
 		let typeID = ObjectIdentifier(T.self)
 		cachedObjects[typeID] = nil
+		createdObjects[typeID] = nil
 	}
 	
 	/// Instead of asking each Table, supply defaults for any new table. If an ObjectIdentifier of a Table.Type is not within any - settings is picked from the first existing one in order: regular, cache, specific.
@@ -233,9 +235,59 @@ extension UInt64 {
 		lookupTable.changedObjects[typeName]?.count ?? 0
 	}
 	
+	
+	// Mark this object as changed by placing it in the array - we avoid storage variables on the objects themselves.
+	func objectHasChanged<T: Model>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
+		lookupTable.objectHasChanged(object, identifier)
+	}
+	
+	// MARK: created objects
+	
+	/// Mark an object as created.
+	func setCreated(_ id: AutoId, _ typeID: ObjectIdentifier) {
+		
+		if createdObjects[typeID] == nil {
+			createdObjects[typeID] = Set([id])
+		} else {
+			createdObjects[typeID]?.insert(id)
+		}
+	}
+	
+	/// Check if an object is created, this is used to make sure we use the plain insert statement instead of INSERT OR REPLACE. This allows failure on unique constraints.
+	///  return one array with created objects and one with all other objects.
+	func filterCreated<T: Table>(_ typeID: ObjectIdentifier, _ items: [T]) -> (created: [T], updated: [T]) {
+		//let typeID = ObjectIdentifier(T.self)
+		guard let created = createdObjects[typeID] else {
+			return ([], items)
+		}
+		return items.reduce(into: (created: [T](), updated: [T]())) { result, item in
+			if created.contains(item.id) {
+				result.created.append(item)
+			} else {
+				result.updated.append(item)
+			}
+		}
+	}
+	
+	/// Clear all created objects for this typeID, used after a save.
+	func clearCreated<T: Table>(_ typeID: ObjectIdentifier, _ items: [T]) {
+		//let typeID = ObjectIdentifier(T.self)
+		if createdObjects[typeID] != nil {
+			for item in items {
+				createdObjects[typeID]?.remove(item.id)
+			}
+			if createdObjects[typeID]?.isEmpty == true {
+				createdObjects[typeID] = nil
+			}
+		}
+	}
+	
+	
+	// MARK: cached objects
+	
 	/// Get a cached object - to check if init has run, or if this is a temp-object etc
-	public func cached<T: Model>(_ objectType: T.Type, _ id: AutoId) -> T? {
-		let typeID = ObjectIdentifier(T.self)
+	public func cached<T: Model>(_ objectType: T.Type, _ id: AutoId, _ identifier: ObjectIdentifier? = nil) -> T? {
+		let typeID = identifier ?? ObjectIdentifier(T.self)
 		return cachedObjects[typeID]?[id] as? T
 	}
 	
@@ -277,16 +329,11 @@ extension UInt64 {
 		}
 	}
 	
-	func removeFromChanged<T: Model>(_ objects: [T], _ identifier: ObjectIdentifier? = nil) async {
-		let typeID = identifier ?? ObjectIdentifier(T.self)
-		for object in objects {
-			lookupTable.changedObjects[typeID]?.removeValue(forKey: object.id)
+	func removeFromChanged(_ ids: [AutoId], _ typeID: ObjectIdentifier) {
+		
+		for id in ids {
+			lookupTable.changedObjects[typeID]?.removeValue(forKey: id)
 		}
-	}
-	
-	// Mark this object as changed by placing it in the array - we avoid storage variables on the objects themselves. 
-	func objectHasChanged<T: Model>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
-		lookupTable.objectHasChanged(object, identifier)
 	}
 	
 	/// A shorthand to return the Model for a Table, if it still exists.
@@ -303,13 +350,13 @@ extension UInt64 {
 	
 	// MARK: - fetching
 	
-	static func fetchId<T: Table>(token: AutoId? = nil, _ id: UInt64) async throws -> T? {
+	static func fetchId<T: Table>(token: AutoId? = nil, _ id: UInt64, _ identifier: ObjectIdentifier? = nil) async throws -> T? {
 		try await shared.fetchId(token: token, id)
     }
 	
 	/// Fetch an object with known id, throw missingId if no object was found.
-	func fetchId<T: Model>(token: AutoId? = nil, _ id: UInt64) async throws -> T {
-		let typeID = ObjectIdentifier(T.self)
+	func fetchId<T: Model>(token: AutoId? = nil, _ id: UInt64, _ typeIDIn: ObjectIdentifier? = nil) async throws -> T {
+		let typeID = typeIDIn ?? ObjectIdentifier(T.self)
 		if let obj = cachedObjects[typeID]?[id] as? T {
 			return obj
 		}
@@ -321,7 +368,7 @@ extension UInt64 {
 	}
 	
 	/// Fetch an object with known id, throw missingId if no object was found.
-	func fetchId<T: Table>(token: AutoId? = nil, _ id: UInt64) async throws -> T {
+	func fetchId<T: Table>(token: AutoId? = nil, _ id: UInt64, _ identifier: ObjectIdentifier? = nil) async throws -> T {
 		
 		let items: [T] = try await fetchQuery(token: token, "WHERE id = ?", id)
 		// type system requires us to first fetch the array!
@@ -332,11 +379,11 @@ extension UInt64 {
 	}
 	
 	/// Fetch objects for these ids, missing objects will not be returned and no error thrown for missing objects.
-	func fetchIds<T: Model>(token: AutoId? = nil, _ ids: [UInt64]) async throws -> [T] {
+	func fetchIds<T: Model>(token: AutoId? = nil, _ ids: [UInt64], _ identifier: ObjectIdentifier?) async throws -> [T] {
 		if ids.isEmpty {
 			return []
 		}
-		let typeID = ObjectIdentifier(T.self)
+		let typeID = identifier ?? ObjectIdentifier(T.self)
 		var cache = [AutoId: T]()
 		
 		for id in ids {
@@ -368,7 +415,7 @@ extension UInt64 {
 	}
 	
 	/// Fetch objects for these ids, missing objects will not be returned and no error thrown for missing objects.
-	func fetchIds<T: Table>(token: AutoId? = nil, _ ids: [UInt64]) async throws -> [T] {
+	func fetchIds<T: Table>(token: AutoId? = nil, _ ids: [UInt64], _ identifier: ObjectIdentifier? = nil) async throws -> [T] {
 		if ids.isEmpty {
 			return []
 		}
@@ -384,18 +431,11 @@ extension UInt64 {
 		try await fetchQuery(token: token, query, arguments: arguments)
 	}
 	
-	func fetchQuery<T: Table>(token: AutoId? = nil, _ whereQuery: String, arguments: [Sendable]) async throws -> [T] {
-		try await fetchQuery(token: token, whereQuery, values: try arguments.map({ try SQLValue.fromAny($0) }))
-	}
-	
-	/// fetchQuery for objects, handles cache and relations
-	func fetchQuery<T: Model>(token: AutoId? = nil, _ whereQuery: String, arguments: [Sendable]) async throws -> [T] {
-		try await fetchQuery(token: token, whereQuery, values: try arguments.map({ try SQLValue.fromAny($0) }))
-	}
-	
 	/// Fetch an AutoModel struct from the DB.
-	func fetchQuery<T: Table>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue], refreshData: Bool = false) async throws -> [T] {
-		try await fetchQueryRelations(token: token, whereQuery, values: values, refreshData: refreshData).map(\.0)
+	func fetchQuery<T: Table>(token: AutoId? = nil, _ whereQuery: String, arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil, refreshData: Bool = false) async throws -> [T] {
+		let values = try sqlArguments ?? arguments?.map { try SQLValue.fromAny($0) }
+		
+		return try await fetchQueryRelations(token: token, whereQuery, values: values ?? [], refreshData: refreshData).map(\.0)
 	}
 	
 	func fetchQueryRelations<T: Table>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue], refreshData: Bool = false) async throws -> [(T, [AnyRelation])] {
@@ -422,9 +462,9 @@ extension UInt64 {
 		return result
 	}
 	
-	/// For objects containing structs, handles cache and relations
-	func fetchQuery<T: Model>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue], refreshData: Bool = false) async throws -> [T] {
-		
+	/// fetchQuery for objects containing structs, handles cache and relations
+	func fetchQuery<T: Model>(token: AutoId? = nil, _ whereQuery: String, arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil, refreshData: Bool = false) async throws -> [T] {
+		let values = try sqlArguments ?? arguments?.map({ try SQLValue.fromAny($0) }) ?? []
 		let rows: [(T.TableType, [AnyRelation])] = try await fetchQueryRelations(token: token, whereQuery, values: values)
 		if rows.isEmpty {
 			return []
@@ -456,33 +496,40 @@ extension UInt64 {
 		return result
 	}
 	
+	/// Execute a regular query that may return results. Will use converted sqlArguments if provided, otherwise it will convert the arguments.
 	@discardableResult
-	public func query<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil) async throws -> [Row] {
-		let values = try arguments?.map {
+	public func query<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
+		let database = try await setupDB(classType)
+		
+		let values = try sqlArguments ?? arguments?.map {
 			// we must cast or somehow find out which SQL-type each argument is!
 			try SQLValue.fromAny($0)
 		}
-		return try await self.query(token: token, classType, query, sqlArguments: values ?? [])
+		return try await database.query(token: token, query, sqlArguments: values ?? [])
 	}
 	
-	public func execute<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil) async throws {
-		let values = try arguments?.map {
+	/// Execute a query, e.g. an INSERT or UPDATE statement. Will use converted sqlArguments if provided, otherwise it will convert the arguments.
+	public func execute<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws {
+		
+		let database = try await setupDB(classType)
+		let values = try sqlArguments ?? arguments?.map {
 			// we must cast or somehow find out which SQL-type each argument is!
 			try SQLValue.fromAny($0)
 		}
-		try await self.execute(token: token, classType, query, sqlArguments: values ?? [])
+		try await database.execute(token: token, query, sqlArguments: values ?? [])
 	}
 	
 	/// Fetch a single value from the database, e.g. a count or sum.
-	public func valueQuery<T: Table, Val: SQLColumnWrappable>(token: AutoId? = nil, _ classType: T.Type, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> Val? {
-		let rows: [Row] = try await self.query(token: token, classType, query, arguments)
+	public func valueQuery<T: Table, Val: SQLColumnWrappable>(token: AutoId? = nil, _ classType: T.Type, _ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Val? {
+		let rows: [Row] = try await self.query(token: token, classType, query, arguments, sqlArguments: sqlArguments)
 		return rows.first?.values.first.flatMap {
 			Val.fromValue($0)
 		}
 	}
 	
 	/// Fetch a single column/value from the database, e.g. a list of ids or strings.
-	public func arrayValueQuery<T: Table, Val: SQLColumnWrappable>(token: AutoId? = nil, _ classType: T.Type, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
+	///return an array with all values in the result for a (the first) column.
+	public func groupConcatQuery<T: Table, Val: SQLColumnWrappable>(token: AutoId? = nil, _ classType: T.Type, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
 		let rows: [Row] = try await self.query(token: token, classType, query, arguments)
 		
 		return rows.compactMap {
@@ -495,17 +542,6 @@ extension UInt64 {
 	}
 	
 	// MARK: - direct database access, these methods must be locked.
-	
-	@discardableResult
-	public func query<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
-		let database = try await setupDB(classType)
-		return try await database.query(token: token, query, sqlArguments: sqlArguments)
-	}
-	
-	public func execute<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, sqlArguments: [SQLValue]? = nil) async throws {
-		let database = try await setupDB(classType)
-		try await database.execute(token: token, query, sqlArguments: sqlArguments ?? [])
-	}
 	
 	public func transaction<T: Table, R: Sendable>(_ classType: T.Type, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
 		let database = try await setupDB(classType)
