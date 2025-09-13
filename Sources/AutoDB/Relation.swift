@@ -17,6 +17,6 @@ public protocol Relation: AnyObject, Equatable {
 	func setOwner<OwnerType: Owner>(_ owner: OwnerType)
 }
 
-public protocol RelationOwner {
+public protocol RelationOwner: Sendable {	
 	func didChange() async
 }
