@@ -43,7 +43,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 		}
 		self.database = database
 		table = await AutoDBManager.shared.tableInfo(classType)
-		maxQueryVariableCount = database.maxQueryVariableCount
+		maxQueryVariableCount = await database.maxQueryVariableCount
 		insertQuery = " INTO `\(table.name)` (\(table.columnNameString)) VALUES "
 	}
 	

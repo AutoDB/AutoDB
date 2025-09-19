@@ -22,7 +22,7 @@ extension UInt64 {
 		if let enc = encoders[typeID ?? ObjectIdentifier(T.self)] {
 			return enc
 		}
-		try await setupDB(classType, settings: nil)
+		try await setupDB(classType)
 		if let enc = encoders[typeID ?? ObjectIdentifier(T.self)] {
 			return enc
 		}
@@ -50,7 +50,7 @@ extension UInt64 {
 	private var createdObjects = [ObjectIdentifier: Set<AutoId>]()
 	
 	var databases = [ObjectIdentifier: Database]()
-	var sharedDatabases = [String: Database]()
+	var sharedDatabases = [SettingsKey: Database]()
 
 	#if os(Android)
 	#else
@@ -75,10 +75,7 @@ extension UInt64 {
 	}
 	#endif
 	
-	func truncateTable<Table: Model>(token: AutoId? = nil, _ table: Table.Type) async throws {
-		try await truncateTable(token: token, table.TableType.self)
-	}
-	
+	/// Only use this when testing, may create dublicate objects when live objects are saved.
 	func truncateTable<T: Table>(token: AutoId? = nil, _ table: T.Type) async throws {
 		let db = try await setupDB(table)
 		try await db.execute(token: token, "DELETE FROM \(table.typeName)")
@@ -90,97 +87,56 @@ extension UInt64 {
 	/// Instead of asking each Table, supply defaults for any new table. If an ObjectIdentifier of a Table.Type is not within any - settings is picked from the first existing one in order: regular, cache, specific.
 	/// Bypassed if the Table has its own settings
 	/// If all is empty the default is used
-	public var appDefaults: [SettingsKey: (typeID: Set<ObjectIdentifier>, settings: AutoDBSettings)] = [:]
-	public enum SettingsKey: Sendable {
-		case regular
-		case cache
-		case specific
-		
-		static var orderedKeys: [SettingsKey] { [.regular, .cache, .specific] }
-	}
+	public var appDefaults: [SettingsKey: AutoDBSettings] = [:]
 	
 	/// insert a new global setting for the entire app, this is a good starting point for appstart
-	public nonisolated func setAppSettingsSync(_ settings: AutoDBSettings, for key: SettingsKey, typeID: ObjectIdentifier? = nil) {
-		
-		Task(priority: .userInitiated) {
-			await setAppSettings(settings, for: key, typeID: typeID)
-		}
-	}
-	
-	public func setAppSettings(_ settings: AutoDBSettings, for key: SettingsKey, typeID: ObjectIdentifier? = nil) {
+	/// Define app settings e.g. path
+	public func setAppSettings(_ settings: AutoDBSettings, for key: SettingsKey) async {
 		// all with the same key will share the same settings
-		if appDefaults[key] == nil {
-			let newValue: (typeID: Set<ObjectIdentifier>, settings: AutoDBSettings) = (.init(), settings)
-			appDefaults[key] = newValue
-		}
-		
-		if let typeID {
-			appDefaults[key]?.typeID.insert(typeID)
-		}
+		appDefaults[key] = settings
 	}
 	
-	/**
-	 To ask for a common setting, e.g. when creating settings at startup:
-	 AutoDBManager.shared.setAppSettingsSync(backupDBSettings, for: .regular)
-	 AutoDBManager.shared.setAppSettingsSync(cacheDBSettings, for: .cache)
-	 static func autoDBSettings() -> AutoDBSettings? {
-	 nil
-	 }
-	 */
-	public func appSettings(for key: SettingsKey) -> AutoDBSettings? {
-		appDefaults[key]?.settings
-	}
-	
-	func appSettings(_ typeID: ObjectIdentifier) -> AutoDBSettings? {
-		if appDefaults.isEmpty {
-			return nil
-		}
+	 /// To ask for a common setting, e.g. when creating settings at startup:
+	 /// AutoDBManager.shared.setAppSettingsSync(backupDBSettings, for: .regular)
+	 /// AutoDBManager.shared.setAppSettingsSync(cacheDBSettings, for: .cache)
+	public func appSettings(for key: SettingsKey) -> AutoDBSettings {
 		
-		for key in SettingsKey.orderedKeys {
-			if let settings = appDefaults[key] {
-				if settings.typeID.contains(typeID) {
-					return settings.1
-				}
+		if let settings = appDefaults[key] {
+			return settings
+		} else {
+			switch key {
+				case .cache:
+					AutoDBSettings.cache()
+				default:
+					appDefaults[key] = AutoDBSettings()
 			}
 		}
 		
-		for key in SettingsKey.orderedKeys {
-			if let settings = appDefaults[key]?.1 {
-				return settings
-			}
-		}
-		return nil
+		return appDefaults[key]!
 	}
 	
-	/// Setup database for this class, attach to file defined in settings - call manually for each table  to specify your own location.
+	/// Setup database for this class, attach to file defined in settings. Settings defaults to .main, implement autoDBSettings in each Table to specify location or use the cache.
 	@discardableResult
-	func setupDB<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier? = nil, settings: AutoDBSettings? = nil) async throws -> Database {
+	func setupDB<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier? = nil) async throws -> Database {
 		let typeID = typeID ?? ObjectIdentifier(table)
 		if databases[typeID] == nil {
 			
 			let database: Database
-			let tableSettings = if settings == nil {
-				await table.autoDBSettings()
+			let settingsKey = table.autoDBSettings ?? .regular
+			let tableSettings = appSettings(for: settingsKey)
+			let sharedKey = tableSettings
+			//let sharedKey = "\(settings.path)\(settings.inCacheFolder ? "_cache" : "")"
+			// in theory you could have multiple actors for the same file, but that is always a bad idea.
+			if let db = sharedDatabases[settingsKey] {
+				database = db
 			} else {
-				settings
-			}
-			let settings = tableSettings ?? appSettings(typeID) ?? AutoDBSettings()
-			if settings.shareDB {
-				let sharedKey = "\(settings.path)\(settings.inCacheFolder ? "_cache" : "")"
-				if let db = sharedDatabases[sharedKey] {
-					database = db
-				} else {
-					database = try await initDB(settings)
-					sharedDatabases[sharedKey] = database
-				}
-			} else {
-				database = try await initDB(settings)
+				database = try await initDB(tableSettings)
+				sharedDatabases[settingsKey] = database
 			}
 			
 			// setup table and perform migrations
+			tables[typeID] = try await SQLTableEncoder().setup(table, database, tableSettings)
 			databases[typeID] = database
-			let table = try await SQLTableEncoder().setup(table, database)
-			tables[typeID] = table
 			
 			return database
 		}
@@ -206,7 +162,7 @@ extension UInt64 {
 	}
 	
 	@discardableResult
-	func initDB(_ settings: AutoDBSettings = AutoDBSettings()) async throws -> Database {
+	func initDB(_ settings: AutoDBSettings) async throws -> Database {
 		
 		var path: String
 		if settings.inAppFolder || settings.inCacheFolder {
@@ -291,27 +247,43 @@ extension UInt64 {
 		return cachedObjects[typeID]?[id] as? T
 	}
 	
-	/// Get all cached objects
-	public func cached<T: Model>(_ objectType: T.Type) async -> [T] {
+	/// Get all cached objects, filter by ids or general
+	public func cached<T: Model>(_ objectType: T.Type, filterIds: [AutoId]? = nil, filter: ((T) -> Bool)? = nil) async -> [T] {
 		let typeID = ObjectIdentifier(T.self)
 		cachedObjects[typeID]?.cleanup()
 		if let cache = cachedObjects[typeID] {
 			return cache.compactMap {
-				$0.value.unbox as? T
+				if let filterIds, !filterIds.contains($0.key) {
+					return nil
+				}
+				let item = $0.value.unbox as? T
+				if let filter, let item, !filter(item) {
+					return nil
+				}
+				
+				return item
 			}
 		}
 		return []
 	}
 	
 	/// Get all cached objects as a dictionary
-	public func cached<T: Model>(_ objectType: T.Type) async -> [AutoId: T] {
+	public func cached<T: Model>(_ objectType: T.Type, filterIds: [AutoId]? = nil, filter: ((T) -> Bool)? = nil) async -> [AutoId: T] {
 		let typeID = ObjectIdentifier(T.self)
 		cachedObjects[typeID]?.cleanup()
 		if let cache = cachedObjects[typeID] {
 			
-			let keysValues = cache.compactMap {
-				if let value = $0.value.unbox as? T {
-					return (key: $0.key, value: value)
+			let keysValues: [(key: AutoId, value: T)] = cache.compactMap {
+				if let filterIds, !filterIds.contains($0.key) {
+					return nil
+				}
+				if let item = $0.value.unbox as? T {
+				
+					if let filter, !filter(item) {
+						return nil
+					} else {
+						return (key: $0.key, value: item)
+					}
 				}
 				return nil
 			}
@@ -327,6 +299,21 @@ extension UInt64 {
 		} else {
 			cachedObjects[typeID]?[object.id] = object
 		}
+	}
+	
+	/// Refresh all objects currently in use - NOTE: this can't be done in Swift? And do you want to? You only need to refresh objects changed outside this process, not all of them!
+	private func refreshCache() async throws {
+		/* TODO:
+		 fetchIds is generic, we must call each type one by one...
+		for (typeID, cache) in cachedObjects {
+			let allIds = cache.map { $0.key }
+			let fetched = try await AutoDBManager.shared.fetchIds(allIds, typeID)
+			for (id, fetchedValue) in fetched {
+				cache[id]?.value = fetchedValue
+			}
+			
+		}
+		 */
 	}
 	
 	func removeFromChanged(_ ids: [AutoId], _ typeID: ObjectIdentifier) {
@@ -457,7 +444,9 @@ extension UInt64 {
 		
 		let result: [(T, [AnyRelation])] = try rows.map { row in
 			decoder.values = row
-			return (try T(from: decoder), decoder.relations)
+			let value = try T(from: decoder)
+			//value.awakeFromFetch()
+			return (value, decoder.relations)
 		}
 		return result
 	}
@@ -490,6 +479,8 @@ extension UInt64 {
 			}
 			cacheObject(object, typeID)
 			object.setOwnerOnInnerRelations()
+			
+			object.awakeFromFetch()
 			
 			return object
 		}
@@ -526,6 +517,16 @@ extension UInt64 {
 			Val.fromValue($0)
 		}
 	}
+	
+	/*
+	/// Decode into a special result struct - useful for select id, name ... etc.
+	public func decodeQuery<T: Table, Val: SQLColumnWrappable>(token: AutoId? = nil, _ classType: T.Type, _ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Val? {
+		let rows: [Row] = try await self.query(token: token, classType, query, arguments, sqlArguments: sqlArguments)
+		return rows.first?.values.first.flatMap {
+			Val.fromValue($0)
+		}
+	}
+	*/
 	
 	/// Fetch a single column/value from the database, e.g. a list of ids or strings.
 	///return an array with all values in the result for a (the first) column.
@@ -679,19 +680,57 @@ extension UInt64 {
 		return await database.rowChangeObserver(table.name)
 	}
 	
+	// MARK: - open and close db
+	
+	/// Close all databases within waitSec
+	public func close(waitSec: Double = 10) async {
+		for db in sharedDatabases {
+			await db.value.close(waitSec: waitSec)
+		}
+	}
+	
+	/// Open after close
+	public func open() async {
+		for db in sharedDatabases {
+			try? await db.value.open()
+		}
+	}
+	
+	/// Change database file in the middle of operations, this is good for testing. No dbURL means memory.
+	public func switchDB(_ newPositions: [SettingsKey: URL]) async throws {
+		for db in sharedDatabases {
+			await db.value.closeNow()
+		}
+		tables.removeAll()
+		databases.removeAll()
+		for db in sharedDatabases {
+			let url = newPositions[db.key]
+			try await db.value.switchDB(url)
+		}
+	}
+	
 	// MARK: - DB helper functions
 	
 	/// We want the format to be "INSERT OR REPLACE INTO table (column1, column2) VALUES (?,?),(?,?),(?,?)", and then add an array with four values. Here objectCount = 3, columnCount = 2
-	public static func questionMarksForQueriesWithObjects(_ objectCount: Int, _ columnCount: Int) -> String
-	{
-		if (objectCount == 0)
-		{
-			//NSLog(@"AutoDB ERROR, asking for 0 objects (%@) questionMarksForQueriesWithObjects:", self);
-			return "()"
-		}
+	nonisolated public static func questionMarksForQueriesWithObjects(_ objectCount: Int, _ columnCount: Int) -> String {
 		
-		let questionObject = "(\(questionMarks(columnCount))),"
-		let questionMarks = "".padding(toLength: questionObject.count * objectCount, withPad: questionObject, startingAt: 0)
+		objectCount.questionMarksForQueriesWithColumns(columnCount)
+	}
+	
+	nonisolated
+	public static func questionMarks(_ count: Int) -> String {
+		
+		count.questionMarks
+	}
+}
+
+public extension Int {
+	var questionMarks: String
+	{
+		if self == 0 {
+			return "''";	//this will make your clause look like this: ... AND column IN ('') - which is always false (unless column can be the empty string), NOT IN is always true.
+		}
+		let questionMarks = "".padding(toLength: self*2, withPad: "?,", startingAt: 0)
 		
 		let indexRange = questionMarks.startIndex ..< questionMarks.index(questionMarks.endIndex, offsetBy: -1)
 		let substring = questionMarks[indexRange]
@@ -699,12 +738,18 @@ extension UInt64 {
 		return String(substring)
 	}
 	
-	public static func questionMarks(_ count: Int) -> String
+	/// How many groups of questions marks for a multi-insert, then specify columnCount.
+	/// We want the format to be "INSERT OR REPLACE INTO table (column1, column2) VALUES (?,?),(?,?),(?,?)", and then add an array with four values. Here self = 3, columnCount = 2
+	func questionMarksForQueriesWithColumns(_ columnCount: Int) -> String
 	{
-		if count == 0 {
-			return "''";	//this will make your clause look like this: ... AND column IN ('') - which is always false (unless column can be the empty string), NOT IN is always true.
+		if (self == 0)
+		{
+			//NSLog(@"AutoDB ERROR, asking for 0 objects (%@) questionMarksForQueriesWithObjects:", self);
+			return "()"
 		}
-		let questionMarks = "".padding(toLength: count*2, withPad: "?,", startingAt: 0)
+		
+		let questionObject = "(\(columnCount.questionMarks)),"
+		let questionMarks = "".padding(toLength: questionObject.count * self, withPad: questionObject, startingAt: 0)
 		
 		let indexRange = questionMarks.startIndex ..< questionMarks.index(questionMarks.endIndex, offsetBy: -1)
 		let substring = questionMarks[indexRange]

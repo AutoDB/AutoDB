@@ -130,7 +130,7 @@ public extension Model {
 		
 		// no id or not in db, create a new object.
 		var value = TableType()
-		value.id = id ?? AutoId.generateId()
+		value.id = id ?? token
 		let item = Self(value)
 		
 		await AutoDBManager.shared.setCreated(value.id, ObjectIdentifier(TableType.self))
@@ -175,6 +175,9 @@ public extension Model {
 		}
 	}
 	
+	/// called when created from DB
+	func awakeFromFetch() {}
+	
 	func awakeFromInit() {
 		Task {
 			await awakeFromInit()
@@ -188,8 +191,8 @@ public extension Model {
 	
 	/// Get this class AutoDB which allows direct SQL-access. You may setup db and override the class' settings, the first time you call this
 	@discardableResult
-	static func db(_ settings: AutoDBSettings? = nil) async throws -> Database {
-		try await TableType.db(settings)
+	static func db() async throws -> Database {
+		try await TableType.db()
 	}
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
@@ -228,7 +231,7 @@ public extension Model {
 		}
 	}
 	
-	/// Refresh all objects currently in use
+	/// Refresh all objects currently in use, note that you can only remove objects from cache by stop referencing them. Otherwise there will be duplicate objects.
 	static func refreshCache() async throws {
 		let objects: [AutoId: Self] = await AutoDBManager.shared.cached(Self.self)
 		let ids: [AutoId] = Array(objects.keys)
@@ -281,6 +284,11 @@ public extension Model {
 			return value
 		}
 		throw AutoError.fetchError
+	}
+	
+	///return an array with all values in the result for a (the first) column.
+	static func groupConcatQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
+		try await AutoDBManager.shared.groupConcatQuery(token: token, TableType.self, query, arguments)
 	}
 	
 	// MARK: - saving
@@ -355,7 +363,7 @@ public extension Model {
 	
 	static func truncateTable() async throws {
 		
-		try await AutoDBManager.shared.truncateTable(Self.self)
+		try await AutoDBManager.shared.truncateTable(Self.self.TableType)
 	}
 	
 	var isDeleted: Bool {
@@ -413,6 +421,11 @@ public extension Collection where Element: Model {
 		} else {
 			throw AutoError.missingSetup
 		}
+	}
+	
+	func delete(token: AutoId? = nil) async throws {
+		let ids = self.map(\.id)
+		try await Element.deleteIds(token: token, ids)
 	}
 	
 	/// Convert an array with AutoModels to a dictionary

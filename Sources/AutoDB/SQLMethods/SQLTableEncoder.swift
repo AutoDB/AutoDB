@@ -23,11 +23,11 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		self.userInfo = userInfo
 	}
 	
-	func setup<T: Table>(_ classType: T.Type, _ db: Database) async throws -> TableInfo {
+	func setup<T: Table>(_ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> TableInfo {
 		let instance = classType.init()
 		let tableName = classType.typeName
 		
-		self.settings = await classType.autoDBSettings()
+		self.settings = settings
 		
 		//we automatically get all values, this will call container<Key>(keyedBy type: Key.Type) -> ...
 		// and then encode<T>(_ value: T, forKey key: KeyType) for each value, including optionals with a default value.
@@ -43,7 +43,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		}
 		
 		// now we have all columns and can create our table
-		let tableInfo = await TableInfo(settings: classType.autoDBSettings(), tableName, columns)
+		let tableInfo = await TableInfo(settings: settings, tableName, columns)
 		
 		var columnsInDB: [Column] = []
 		let query = "PRAGMA table_info('\(tableName)')"
@@ -105,7 +105,11 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			var addedIndices = addedIndices
 			// drop indices if needed
 			for indexToDrop in changedIndices {
-				try await db.query(token: token, "DROP INDEX `\(tableName)+index+\(indexToDrop.name)`")
+				do {
+					try await db.query(token: token, "DROP INDEX `\(indexToDrop.name)`")
+				} catch {
+					print("ERROR: could not drop index: \(error)")
+				}
 			}
 			
 			// add new columns
@@ -163,7 +167,11 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			
 			// add new indices if needed
 			for indexToAdd in addedIndices {
-				try await db.query(token: token, indexToAdd.definition(tableName: tableName))
+				do {
+					try await db.query(token: token, indexToAdd.definition(tableName: tableName))
+				} catch {
+					print("ERROR: could not create index: \(error)")
+				}
 			}
 		}
 		

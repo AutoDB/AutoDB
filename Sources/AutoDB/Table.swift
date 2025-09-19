@@ -11,7 +11,7 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	static func create(token: AutoId?, _ id: AutoId?) async -> Self
 	/// The unique id that identifies this object
 	var id: AutoId { get set }
-	static func autoDBSettings() async -> AutoDBSettings? //implement using "class func ..."
+	static var autoDBSettings: SettingsKey { get }
 	
 	/// The table name to use for storage, must be unique, good when having models inside modelObjects.
 	static var typeName: String { get }
@@ -121,17 +121,12 @@ public extension Table {
 		return store.item!
 	}
 	
-	func awakeFromFetch() {}
+	// this isn't a good idea... func awakeFromFetch() {}
 	
 	/// Get this class AutoDB which allows direct SQL-access. You may setup db and override the class' settings, the first time you call this
 	@discardableResult
-	static func db(_ settings: AutoDBSettings? = nil) async throws -> Database {
-		let settings = if settings == nil {
-			await autoDBSettings()
-		} else {
-			settings
-		}
-		return try await AutoDBManager.shared.setupDB(self, nil, settings: settings)
+	static func db() async throws -> Database {
+		return try await AutoDBManager.shared.setupDB(self, nil)
 	}
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
@@ -142,10 +137,9 @@ public extension Table {
 	}
 	
 	/// Implement this to specify path to the database, or other settings.
-	/// e.g. return a common setting like this:
-	/// 	await AutoDBManager.shared.appSettings(for: .cache)
-	static func autoDBSettings() async -> AutoDBSettings? {
-		nil
+	/// You need to specify settings for each key before use, by calling AutoDBManager.shared.setAppSettings(...)
+	public static var autoDBSettings: SettingsKey {
+		.regular
 	}
 	
 	/// return a list of variable names that have index, group together to make multi-column index
@@ -208,6 +202,8 @@ public extension Table {
 	static func groupConcatQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
 		try await AutoDBManager.shared.groupConcatQuery(token: token, Self.self, query, arguments)
 	}
+	
+	// MARK: - saving
 	
 	/// When you don't need to wait for the save procedure
 	func save(token: AutoId? = nil) {

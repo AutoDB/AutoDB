@@ -107,9 +107,12 @@ extension [Row] {
 public actor Database {
 	
 	/// The maximum number of parameters (`?`) supported in database queries. (The value of `SQLITE_LIMIT_VARIABLE_NUMBER` of the backing SQLite instance.)
-	let maxQueryVariableCount: Int
+	public var maxQueryVariableCount: Int = 900_000_000
 	
-	let dbHandle: OpaquePointer
+	var dbHandle: OpaquePointer
+	
+	/// the file url for the DB
+	private var dbURL: URL?
 	
 	public var isClosed: Bool = false
 	private var cachedStatements: [String: PreparedStatement] = [:]
@@ -126,22 +129,80 @@ public actor Database {
 		}
 	}
 	
-	public init(_ path: String, ramDB: Bool = false) throws {
+	public init(_ path: String?) throws {
 		
-		let url = URL(fileURLWithPath: path)
-		let folder = url.deletingLastPathComponent()
-		try FileManager.default.createDirectory(atPath: folder.path, withIntermediateDirectories: true)
-		
-		var flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
-		if ramDB {
-			flags |= SQLITE_OPEN_MEMORY
+		let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
+		let url: URL? = path.flatMap { URL(fileURLWithPath: $0) }
+		if let url {
+			let folder = url.deletingLastPathComponent()
+			try FileManager.default.createDirectory(atPath: folder.path, withIntermediateDirectories: true)
 		}
+		let path = path ?? ":memory:"
+		// this is pointless: flags |= SQLITE_OPEN_MEMORY
+		dbURL = url
+		
 		var handle: OpaquePointer? = nil
 		var result: Int32 = SQLITE_ERROR
-		if #available(iOS 5.0, macOS 10.7, tvOS 9.0, visionOS 1, watchOS 2, *) {
-			
+		if let dbURL {
 			var coordinatorError: NSError?
-			NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: .forMerging, error: &coordinatorError) { _ in
+			NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: dbURL, options: .forMerging, error: &coordinatorError) { _ in
+				result = sqlite3_open_v2(path, &handle, flags, nil)
+			}
+			if let coordinatorError {
+				throw coordinatorError
+			}
+		} else {
+			result = sqlite3_open_v2(":memory:", &handle, flags, nil)
+		}
+		guard let handle else {
+			throw Error.cannotOpenDatabaseAtPath(path: path, description: "SQLite cannot allocate memory")
+		}
+		guard result == SQLITE_OK else {
+			let code = sqlite3_errcode(handle)
+			let msg = String(cString: sqlite3_errmsg(handle), encoding: .utf8) ?? "(unknown)"
+			sqlite3_close(handle)
+			throw Error.cannotOpenDatabaseAtPath(path: path, description: "SQLite error code \(code): \(msg)")
+		}
+		self.dbHandle = handle
+		self.maxQueryVariableCount = Int(sqlite3_limit(dbHandle, SQLITE_LIMIT_VARIABLE_NUMBER, -1))
+		try setup(dbHandle)
+	}
+	
+	nonisolated
+	private func setup(_ dbHandle: OpaquePointer) throws {
+		
+		// this allows us to do simultaneous writes, by waiting whenever the DB is busy. It is by design to retry.
+		sqlite3_busy_timeout(dbHandle, 80)
+		
+		// turn on Write Ahead Logging, may not be able to but that is ok - then we use the older slower method instead.
+		if SQLITE_OK != sqlite3_exec(dbHandle, "PRAGMA journal_mode = WAL", nil, nil, nil) {
+			print("AutoDB: Cannot enable Write Ahead Logging (upgrade SQLite")
+		}
+		
+		// we don't need to assign a pointer to this function since we can only have one update_hook per handle.
+		sqlite3_update_hook(dbHandle, { ctx, operation, dbName, tableName, rowid in
+			
+			guard let ctx, let operation = SQLiteOperation(rawValue: operation),
+				  let tableName, let tableNameStr = String(cString: tableName, encoding: .utf8) else {
+				return
+			}
+			let autoDB = Unmanaged<Database>.fromOpaque(ctx).takeUnretainedValue()
+			Task {
+				await autoDB.callListeners(tableNameStr, operation, rowid)
+			}
+			
+		}, Unmanaged<Database>.passUnretained(self).toOpaque())
+	}
+	
+	func reopen() throws {
+		let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
+		var handle: OpaquePointer? = nil
+		var result: Int32 = SQLITE_ERROR
+		var coordinatorError: NSError?
+		let path = dbURL?.path() ?? ":memory:"
+		
+		if let dbURL {
+			NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: dbURL, options: .forMerging, error: &coordinatorError) { _ in
 				result = sqlite3_open_v2(path, &handle, flags, nil)
 			}
 			if let coordinatorError {
@@ -161,28 +222,8 @@ public actor Database {
 			throw Error.cannotOpenDatabaseAtPath(path: path, description: "SQLite error code \(code): \(msg)")
 		}
 		self.dbHandle = handle
-		self.maxQueryVariableCount = Int(sqlite3_limit(handle, SQLITE_LIMIT_VARIABLE_NUMBER, -1))
-		// this allows us to do simultaneous writes, by waiting whenever the DB is busy. It is by design to retry.
-		sqlite3_busy_timeout(handle, 80)
-		
-		// turn on Write Ahead Logging, may not be able to but that is ok - then we use the older slower method instead.
-		if SQLITE_OK != sqlite3_exec(handle, "PRAGMA journal_mode = WAL", nil, nil, nil) {
-			print("AutoDB: Cannot enable Write Ahead Logging (upgrade SQLite")
-		}
-		
-		// we don't need to assign a pointer to this function since we can only have one update_hook per handle.
-		sqlite3_update_hook(dbHandle, { ctx, operation, dbName, tableName, rowid in
-			
-			guard let ctx, let operation = SQLiteOperation(rawValue: operation),
-				  let tableName, let tableNameStr = String(cString: tableName, encoding: .utf8) else {
-				return
-			}
-			let autoDB = Unmanaged<Database>.fromOpaque(ctx).takeUnretainedValue()
-			Task {
-				await autoDB.callListeners(tableNameStr, operation, rowid)
-			}
-			
-		}, Unmanaged<Database>.passUnretained(self).toOpaque())
+		self.maxQueryVariableCount = Int(sqlite3_limit(dbHandle, SQLITE_LIMIT_VARIABLE_NUMBER, -1))
+		try setup(dbHandle)
 	}
 	
 	var gentleClose: Task<Void, Swift.Error>?
@@ -199,6 +240,7 @@ public actor Database {
 			defer { if hasSemaphore { Task { await semaphore.signal(token: token) } } }
 			try Task.checkCancellation()
 			isClosed = true
+			sqlite3_close(dbHandle)
 		}
 		
 		// kill after some time?
@@ -210,17 +252,53 @@ public actor Database {
 				// we have gone too long to be relevant, perhaps was backgrounded and couldn't finish until restarted.
 				return
 			}
+			if isClosed {
+				return
+			}
 			isClosed = true
 			// if there still is db-access (which it most likely isn't), we can't know that so must interrups to let go of handle.
 			//print("Interrupting sqlite to force close")
 			sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
+			sqlite3_close(dbHandle)
 		}
 	}
 	
-	public func open() async {
+	public func closeNow() async {
+		gentleClose?.cancel()
+		harshClose?.cancel()
+		if isClosed {
+			return
+		}
+		isClosed = true
+		
+		//print("Interrupting sqlite to force close")
+		sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
+		sqlite3_close(dbHandle)
+	}
+	
+	public func open() async throws {
 		harshClose?.cancel()
 		gentleClose?.cancel()
+		if isClosed {
+			do {
+				try await reopen()
+			} catch {
+				print("Cannot reopen database: \(error)")
+				throw error
+			}
+		}
 		isClosed = false
+	}
+	
+	public func switchDB(_ dbURL: URL?) async throws {
+		self.dbURL = dbURL
+		
+		for (_, statement) in cachedStatements {
+			sqlite3_finalize(statement.handle)
+		}
+		cachedStatements.removeAll()
+		
+		try await open()
 	}
 	
 	nonisolated internal func errorDesc(_ dbHandle: OpaquePointer?, _ query: String? = nil) -> String {

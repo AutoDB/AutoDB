@@ -507,14 +507,14 @@ internal struct SQLIndex: Equatable, Hashable, Sendable {
 	
 	internal func definition(tableName: String) -> String {
 		if columnNames.isEmpty { fatalError("Indexes require at least one column") }
-		return "CREATE \(unique ? "UNIQUE " : "")INDEX `\(tableName)+index+\(name)` ON \(tableName) (\(columnNames.joined(separator: ",")))"
+		return "CREATE \(unique ? "UNIQUE " : "")INDEX `\(name)` ON \(tableName) (\(columnNames.joined(separator: ",")))"
 	}
 	
 	public init(columnNames: [String], unique: Bool = false) {
 		guard !columnNames.isEmpty else { fatalError("No columns specified") }
 		self.columnNames = columnNames
 		self.unique = unique
-		self.name = columnNames.joined(separator: "+")
+		self.name = columnNames.joined(separator: "_") + "_index"
 	}
 	
 	internal init(definition: String) throws {
@@ -529,13 +529,9 @@ internal struct SQLIndex: Equatable, Hashable, Sendable {
 			throw Error.cannotParseIndexDefinition(definition: definition, description: "Expected index name")
 		}
 		
-		let nameScanner = Scanner(string: indexName)
-		_ = nameScanner.scanUpToString("+index+")
-		if nameScanner.scanString("+index+") == "+index+" {
-			self.name = String(indexName.suffix(from: nameScanner.currentIndex))
-		} else {
-			throw Error.cannotParseIndexDefinition(definition: definition, description: "Index name does not match expected format")
-		}
+		// use the name defined in DB:
+		self.name = indexName
+		
 		
 		guard scanner.scanString("ON") != nil else { throw Error.cannotParseIndexDefinition(definition: definition, description: "Expected 'ON'") }
 		

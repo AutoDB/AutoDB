@@ -41,7 +41,7 @@ public protocol TableModel {
 	var isDeleted: Bool { get async }
 }
 
-extension TableModel {
+public extension TableModel {
 	var isDeleted: Bool {
 		get async {
 			false
@@ -79,20 +79,19 @@ public enum TableError: Error {
 }
 
 ///Class specific settings to generate SQL information that can't be known automatically, each DB needs to define its path and cache settings. Then every table may subscribe to one of these settings, if none is chosen the default will be used
-public struct AutoDBSettings: Sendable {
+public struct AutoDBSettings: Sendable, Hashable {
 	
 	// Cache settings-shorthand for all tables to be stored in the cache
-	static func cache(path: String = "AutoDB/AutoDB.db", ignoreProperties: Set<String>? = nil, shareDB: Bool = true) -> AutoDBSettings {
-		AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: true, shareDB: shareDB)
+	static func cache(path: String = "AutoDB/AutoDB.db", ignoreProperties: Set<String>? = nil) -> AutoDBSettings {
+		AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: true)
 	}
 	
 	// Common settings for all tables to be stored in the app-folder and allow for being backed up.
-	public init(path: String = "AutoDB/AutoDB.db", iCloudBackup: Bool = true, inAppFolder: Bool = true, inCacheFolder: Bool = false, shareDB: Bool = true) {
+	public init(path: String = "AutoDB/AutoDB.db", iCloudBackup: Bool = true, inAppFolder: Bool = true, inCacheFolder: Bool = false) {
 		self.path = path
 		self.iCloudBackup = iCloudBackup
 		self.inAppFolder = inAppFolder
 		self.inCacheFolder = inCacheFolder
-		self.shareDB = shareDB
 	}
 	
 	/// the path or fileName inside your app's supportDirectory or cachesDirectory
@@ -105,7 +104,7 @@ public struct AutoDBSettings: Sendable {
 	let inCacheFolder: Bool
 	
 	/// Should this get its own unique actor to issue queries from, or share with other tables with the same DB-file? If you have a lot of writes it is usually FASTER to share (one actor are better at scheduling than many SQLite connectors who uses locks with busy/retries). In normal usage you won't see any difference so there is typically no need to split them up. It may improve performance in some esotheric situations, so the option is available. Measure!
-	let shareDB: Bool
+	// let shareDB: Bool // this was a bad idea and is always worse. Don't do it.
 }
 
 public typealias AnyTable = (any Table)
