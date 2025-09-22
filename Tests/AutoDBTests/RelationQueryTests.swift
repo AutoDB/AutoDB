@@ -27,6 +27,10 @@ final class AlbumArt: Model, @unchecked Sendable {
 		
 		// in here to save to DB!
 		var album = OneRelation<Album>()
+		
+		static var autoDBSettings: SettingsKey {
+			.cache
+		}
 	}
 	
 	var value: AlbumArtValue
@@ -112,7 +116,7 @@ class CombineTester {
 	
 	// will models be notified when values change or Relation-changes
 	@Test func plainListener() async throws {
-		try await AutoDBManager.shared.truncateTable(CombineAlbum.self)
+		try await AutoDBManager.shared.truncateTable(CombineAlbum.CombineAlbumTable.self)
 		let item = await CombineAlbum.create()
 		item.objectWillChange.sink { [self] _ in
 			gotMessage = true
@@ -299,7 +303,7 @@ class RelationQueryTests {
 	}
 	
 	func testRelationQuery() async throws {
-		try await AutoDBManager.shared.truncateTable(CureAlbums.self)
+		try await AutoDBManager.shared.truncateTable(CureAlbums.CureAlbumsTable.self)
 		try await AutoDBManager.shared.truncateTable(Album.self)
 		//try await Album.db().setDebug()
 		let db = try await CureAlbums.db()

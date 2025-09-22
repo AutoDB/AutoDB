@@ -31,6 +31,9 @@ public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwne
 	/// Call this method if you create objects in other ways.
 	func awakeFromInit() async
 	
+	/// called when created from DB
+	func awakeFromFetch()
+	
 	/// Find relationship-variables and set the owner
 	func setOwnerOnRelations()
 	

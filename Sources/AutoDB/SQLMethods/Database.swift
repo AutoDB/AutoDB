@@ -116,7 +116,7 @@ public actor Database {
 	
 	public var isClosed: Bool = false
 	private var cachedStatements: [String: PreparedStatement] = [:]
-	private let semaphore = Semaphore()
+	private let semaphore = Semaphore() 
 	private var inTransaction: Bool = false
 	private var debugPrintEveryQuery = false
 	
@@ -127,6 +127,12 @@ public actor Database {
 		} else {
 			AutoLog.notUsed = true
 		}
+	}
+	
+	/// If you never have long queries but afraid of getting deadlocks, set the watchdog to detect those. Will kill the app if transactions takes too long, so it shows up in Crashlytics or Apple's "crash" pane - then you will know.
+	/// Deadlocks can happen if you create a new transaction inside another, or call a Database's queries without the transaction's token.
+	public func semaphoreWatchdog(_ timeInterval: TimeInterval) async {
+		await semaphore.setWatchDogTimeout(timeInterval)
 	}
 	
 	public init(_ path: String?) throws {
@@ -281,7 +287,7 @@ public actor Database {
 		gentleClose?.cancel()
 		if isClosed {
 			do {
-				try await reopen()
+				try reopen()
 			} catch {
 				print("Cannot reopen database: \(error)")
 				throw error
@@ -522,6 +528,9 @@ public actor Database {
 		// only take semaphore if in transaction - other times we can run queries in parallel (as much as being an actor allows)
 		let hasSemaphore = inTransaction || token != nil
 		if hasSemaphore {
+			if debugPrintEveryQuery && token != nil {
+				print("DB in transaction, will wait for semaphore before executing query: \(query)")
+			}
 			await semaphore.wait(token: token)
 		}
 		defer { if hasSemaphore { Task { await semaphore.signal(token: token) } } }
@@ -531,7 +540,9 @@ public actor Database {
 		let (statementHandle, result) = try executingPreparedStatement(statement, query)
 		
 		// finalize handler
-		if result != SQLITE_DONE { throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle)) }
+		if result != SQLITE_DONE {
+			throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
+		}
 		guard sqlite3_reset(statementHandle) == SQLITE_OK, sqlite3_clear_bindings(statementHandle) == SQLITE_OK else {
 			throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 		}
@@ -572,15 +583,17 @@ public actor Database {
 	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are holding the lock. We could send around the AutoDB and only allow access when locked - but that would basically be the same thing.
 	public func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
 		
-		inTransaction = true	// now everyone must wait for semaphore
 		let transactionID = AutoId.generateId()
 		await semaphore.wait(token: transactionID)
+		inTransaction = true	// now everyone must wait for semaphore
 		defer {
 			Task {
-				await semaphore.signal(token: transactionID)
 				// Set a token to wait for semaphores, this way we can call DB simultaneous with regular queries but wait when there are transactions.
 				// also closing the DB will wait for a whole transaction.
 				inTransaction = false
+				
+				// must be done in this order, waiting transactions may start un-ordered. Does that matter?
+				await semaphore.signal(token: transactionID)
 			}
 		}
 		if isClosed { throw Error.databaseIsClosed }

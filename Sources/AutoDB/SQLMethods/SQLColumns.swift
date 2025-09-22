@@ -2,7 +2,7 @@
 //  SQLColumns.swift
 //  AutoDB
 //
-// Copied from Blackbird, some bugfixes and changes but mostly 100% copied.
+// Copied from Blackbird, some bugfixes and changes but mostly just copied.
 
 //
 //           /\
@@ -44,10 +44,10 @@ import SQLite3
 import SQLCipher
 #endif
 
-typealias EncodableSendable = Encodable & Sendable
+public typealias EncodableSendable = Encodable & Sendable
 
 // Convert Pragma table statemnts into columns
-internal struct Column: Equatable, Hashable, Sendable {
+public struct Column: Equatable, Hashable, Sendable {
 	enum Error: Swift.Error {
 		case cannotParseColumnDefinition(table: String, description: String)
 	}
@@ -64,16 +64,16 @@ internal struct Column: Equatable, Hashable, Sendable {
 		// Should we care about the default value? No, they are always created by AutoDB - you can't store an object lacking their default values.
 	}
 	
-	internal let name: String
-	internal let columnType: ColumnType
-	internal let valueType: Any.Type?
-	internal let mayBeNull: Bool
+	public let name: String
+	public let columnType: ColumnType
+	public let valueType: Any.Type?
+	public let mayBeNull: Bool
 	// data is created like this: "X'\(data.map { String(format: "%02hhX", $0) }.joined())'"
-	internal let defaultValueString: String?
+	public let defaultValueString: String?
 	
-	internal let primaryKeyIndex: Int // Only used for sorting, not considered for equality
+	public let primaryKeyIndex: Int // Only used for sorting, not considered for equality
 	
-	internal func definition() -> String {
+	public func definition() -> String {
 		let defValue = mayBeNull ? SQLValue.null.sqliteLiteral() : defaultValueString ?? SQLValue.null.sqliteLiteral()
 		let str = "`\(name)` \(columnType.definition()) \(mayBeNull ? "NULL" : "NOT NULL") DEFAULT \(defValue)"
 		return str
@@ -487,7 +487,7 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 	}
 }
 
-internal struct SQLIndex: Equatable, Hashable, Sendable {
+public struct SQLIndex: Equatable, Hashable, Sendable {
 	public enum Error: Swift.Error {
 		case cannotParseIndexDefinition(definition: String, description: String)
 	}
@@ -501,13 +501,13 @@ internal struct SQLIndex: Equatable, Hashable, Sendable {
 	
 	private static let parserIgnoredCharacters: CharacterSet = .whitespacesAndNewlines.union(CharacterSet(charactersIn: "`'\""))
 	
-	internal let name: String
-	internal let unique: Bool
-	internal let columnNames: [String]
+	public let name: String
+	public let unique: Bool
+	public let columnNames: [String]
 	
 	internal func definition(tableName: String) -> String {
 		if columnNames.isEmpty { fatalError("Indexes require at least one column") }
-		return "CREATE \(unique ? "UNIQUE " : "")INDEX `\(name)` ON \(tableName) (\(columnNames.joined(separator: ",")))"
+		return "CREATE \(unique ? "UNIQUE " : "")INDEX IF NOT EXISTS `\(name)` ON \(tableName) (\(columnNames.joined(separator: ",")))"
 	}
 	
 	public init(columnNames: [String], unique: Bool = false) {

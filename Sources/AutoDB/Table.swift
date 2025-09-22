@@ -22,6 +22,11 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	/// return a list of keypaths to the variables that have unique index, grouped together to make multi-column index
 	static var uniqueIndices: [[String]] { get }
 	
+	/// Migration delegate-function called when migrating, you *must* use token for all queries inside (otherwise will ⚠️ deadlock). If you are happy with auto-migrations (please double-check), you don't need to implement this function.
+	/// warning ⚠️: You can use any raw SQL query, but if you access/query a Table or Model from the same db-file, that is not setup yet -> it will deadlock. So either make sure you create Tables in order, or use raw queries.
+	/// See documentation for full set of rules when auto-migrating.
+	static func migration(_ token: AutoId?, _ db: isolated Database, _ state: MigrationState) async -> Void
+	
 	/*
 	 Note that the save functions are not exposed, since no need to implement them.
 	 Understand that if your Table has a Model, you must call save or saveChanges (etc) on the model.
@@ -121,7 +126,7 @@ public extension Table {
 		return store.item!
 	}
 	
-	// this isn't a good idea... func awakeFromFetch() {}
+	// awakeFromFetch isn't a good idea for structs... func awakeFromFetch() {}
 	
 	/// Get this class AutoDB which allows direct SQL-access. You may setup db and override the class' settings, the first time you call this
 	@discardableResult
@@ -138,7 +143,7 @@ public extension Table {
 	
 	/// Implement this to specify path to the database, or other settings.
 	/// You need to specify settings for each key before use, by calling AutoDBManager.shared.setAppSettings(...)
-	public static var autoDBSettings: SettingsKey {
+	static var autoDBSettings: SettingsKey {
 		.regular
 	}
 	
@@ -146,6 +151,8 @@ public extension Table {
 	static var indices: [[String]] { [] }
 	/// return a list of variable names that have unique index, group together to make multi-column index
 	static var uniqueIndices: [[String]] { [] }
+	
+	static func migration(_ token: AutoId?, _ db: isolated Database, _ state: MigrationState) async {}
 	
 	// MARK: - fetch shortcuts
 	

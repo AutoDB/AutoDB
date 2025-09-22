@@ -195,7 +195,7 @@ final class AutoDBTests: XCTestCase {
 	func testTableGeneration() async throws {
 		
 		// test that values get copied correctly when changing column types
-		let db = try await AutoDBManager.shared.initDB()
+		let db = try await AutoDBManager.shared.initDB(AutoDBSettings())
 		try await AutoDBManager.shared.truncateTable(Mod.self)
 		try await db.query("CREATE TABLE IF NOT EXISTS Mod (`id` INTEGER NOT NULL DEFAULT 0,`removeColumn` INTEGER NOT NULL DEFAULT 0,`bigInt` TEXT NOT NULL DEFAULT 0, `string` INTEGER NOT NULL DEFAULT 0,PRIMARY KEY (`id`));")
 		try await db.query("INSERT INTO Mod (id, string, bigInt) VALUES (1, 2, -1)")
@@ -268,7 +268,7 @@ final class AutoDBTests: XCTestCase {
 	
 	@available(macOS 15.0, *)
 	func testObserveWithoutCodingKeys() async throws {
-		try await AutoDBManager.shared.truncateTable(Artist.self)
+		try await AutoDBManager.shared.truncateTable(Artist.Value.self)
 		
 		let first = await Artist.create(1)
 		first.value.name = "The Cure"
@@ -300,7 +300,7 @@ final class AutoDBTests: XCTestCase {
 	
 	// We can't have relations from structs, 
 	func testRelations() async throws {
-		try await AutoDBManager.shared.truncateTable(Parent.self)
+		try await AutoDBManager.shared.truncateTable(Parent.Value.self)
 		try await AutoDBManager.shared.truncateTable(Child.self)
 		
 		var item: Parent? = await Parent.create(1)
@@ -352,7 +352,7 @@ final class AutoDBTests: XCTestCase {
 		try await mainDB.query("DROP TABLE IF EXISTS AlbumArt")
 		try await mainDB.query("DROP TABLE IF EXISTS Album")
 		
-		let cacheDB = try await AlbumArt.db(AutoDBSettings.cache())
+		let cacheDB = try await AlbumArt.db()
 		try await AlbumArt.query("DELETE FROM AlbumArt")
 		await Album.queryNT("DELETE FROM Album")
 		
@@ -483,7 +483,7 @@ final class AutoDBTests: XCTestCase {
 	}
 	
 	func testCreateWithExistingId() async throws {
-		try await AutoDBManager.shared.truncateTable(UniqueString.self)
+		try await AutoDBManager.shared.truncateTable(UniqueString.Value.self)
 		
 		let item = await UniqueString.create(1)
 		item.string = "Test"

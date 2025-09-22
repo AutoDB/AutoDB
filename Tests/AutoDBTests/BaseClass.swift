@@ -114,7 +114,7 @@ final class IntTester: Table, @unchecked Sendable {
 	var time: Date? = nil
 	
 	static func autoDBSettings() -> AutoDBSettings? {
-		AutoDBSettings(shareDB: false)
+		AutoDBSettings()
 	}
 }
 

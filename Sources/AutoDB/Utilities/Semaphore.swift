@@ -53,20 +53,59 @@ class Example {
  ```
  */
 
+import Foundation
+
 public actor Semaphore {
 	private var updateWaiters = [() -> ()]()
 	private var counter: Int = 0
 	private var allowedWorkers: Int
 	private var reEntryTokens: [AutoId: Int] = [:]
 	
-	public init(allowedWorkers: Int = 1) {
+	// instead of deadlock, kill app after a max-time, killing app keeps data safe and allows programmer errors to be known.
+	private var lastEntry = Date.distantPast
+	private var watchdogTimeout: TimeInterval?
+	private var isWatchDogRunning = false
+	
+	public init(allowedWorkers: Int = 1, watchdogTimeout: TimeInterval? = nil) {
 		self.allowedWorkers = allowedWorkers
+		self.watchdogTimeout = watchdogTimeout
+	}
+	
+	public func setWatchDogTimeout(_ timeout: TimeInterval?) {
+		self.watchdogTimeout = timeout
+		Task.detached {
+			await self.checkWatchdog()
+		}
+	}
+	
+	private func checkWatchdog() async {
+		if let watchdogTimeout, isWatchDogRunning == false {
+			if updateWaiters.isEmpty || counter > allowedWorkers {
+				// no need to watch anymore
+				isWatchDogRunning = false
+				return
+			}
+			isWatchDogRunning = true
+			if Date().timeIntervalSince(lastEntry) > watchdogTimeout {
+				fatalError("Semaphore timed out, we have a deadlock")
+			} else {
+				try? await Task.sleep(nanoseconds: UInt64(watchdogTimeout * 1_000_000_000))
+				isWatchDogRunning = false
+				await checkWatchdog()
+			}
+		}
 	}
 	
 	/// prevent entering the same function before previous execution has exited it, unless using the same token that acquired the semaphore. You still must call signal() every time.
 	/// This will suspend work until someone wakes it by calling signal()
 	public func wait(token: AutoId? = nil) async {
 		
+		if watchdogTimeout != nil {
+			lastEntry = .now
+			Task.detached {
+				await self.checkWatchdog()
+			}
+		}
 		if let token, let myCount = reEntryTokens[token], myCount > 0 {
 			// if we have the token we ignore the global count
 			reEntryTokens[token] = myCount + 1
@@ -92,6 +131,8 @@ public actor Semaphore {
 	
 	/// wake one waiter
 	public func signal(token: AutoId? = nil) {
+		
+		lastEntry = .now
 		if let token, let myCount = reEntryTokens[token] {
 			// if there is a token, decreace its count first.
 			if myCount > 1 {

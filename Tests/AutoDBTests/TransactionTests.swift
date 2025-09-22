@@ -75,6 +75,24 @@ class TransactionTests: @unchecked Sendable {
 			try await act.increment()
 		}
 	}
+	
+	// This is an example of how the watchdog works, it can kill the app if there is a deadlock - but can only know that based on time. So be certain you have no tasks running longer than this!
+	//@Test
+	func deadlockSemaphore() async throws {
+		let db = try await TransClass.db()
+		await db.semaphoreWatchdog(1)
+		do {
+			try await db.transaction { db, token in
+				print("will deadlock now:")
+				try await db.transaction { db, token in
+					print("this will never happen")
+				}
+			}
+		} catch {
+			print("caught error: \(error)")
+			
+		}
+	}
 }
 
 enum TestError: Error {

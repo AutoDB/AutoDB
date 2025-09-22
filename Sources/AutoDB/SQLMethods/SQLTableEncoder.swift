@@ -23,7 +23,8 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		self.userInfo = userInfo
 	}
 	
-	func setup<T: Table>(_ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> TableInfo {
+	/// We return a list of migrations that has been done, if the auto-conversions are not suitable, just supply your own functions.
+	func setup<T: Table>(_ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> (TableInfo, [MigrationState]?) {
 		let instance = classType.init()
 		let tableName = classType.typeName
 		
@@ -43,7 +44,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		}
 		
 		// now we have all columns and can create our table
-		let tableInfo = await TableInfo(settings: settings, tableName, columns)
+		let tableInfo = TableInfo(settings: settings, tableName, columns)
 		
 		var columnsInDB: [Column] = []
 		let query = "PRAGMA table_info('\(tableName)')"
@@ -58,124 +59,104 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			for statement in tableInfo.createIndexStatements(instance) {
 				try await db.execute(statement)
 			}
-			return tableInfo
+			return (tableInfo, [.createdTable])
 		}
 		
-		//self.fullTextIndex = nil
 		let indicesInDB: [SQLIndex] = try await db.query("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?", [tableName]).compactMap { row in
 			guard let sql = row["sql"]?.stringValue else { return nil }
+			
 			return try SQLIndex(definition: sql)
 		}
 		
-		// MARK: now compare tables to see what's needed
+		// MARK: compare tables to see what's needed
 		
 		// comparing as Sets to ignore differences in column/index order
 		let targetColumns = Set(tableInfo.columns)
 		let targetIndices = tableInfo.allIndices(instance)
 		
-		let changedIndices = Set(indicesInDB).subtracting(targetIndices)
+		// change == modified or dropped
 		let changedColumns = Set(columnsInDB).subtracting(targetColumns)	// remove similar == non-changed
+		let changedIndices = Set(indicesInDB).subtracting(targetIndices)
 		let addedIndices = targetIndices.subtracting(indicesInDB)
+		
 		let addedColumns = targetColumns.filter { column in
 			columnsInDB.contains { $0.name == column.name } == false
 		}
 		
-		let needsSchemaChanges = !changedColumns.isEmpty || !changedIndices.isEmpty || !addedColumns.isEmpty || !addedIndices.isEmpty
+		let needsSchemaChanges = !changedColumns.isEmpty
 		
 		let changedTypes = changedColumns.filter { column in
 			targetColumns.contains { $0.name == column.name }
 		}
-		/*
-		 TODO: For testing/debugging - we have not completed all migration tests yet!
-		for typeInDB in changedTypes {
-			for target in targetColumns where target.name == typeInDB.name {
-				print("equals? \(typeInDB == target)")
-			}
-		}
-		*/
 		
-		// wait with FTS until the rest is up and running!
-		//let needsFTSRebuild = try fullTextIndex?.needsRebuild(core: core) ?? false
-		//let needsFTSDelete = try fullTextIndex == nil && FullTextIndexSchema.ftsTableExists(core: core, contentTableName: name)
-		let needsFTSRebuild = false
-		let needsFTSDelete = false
+		nonisolated(unsafe) var migrations: [MigrationState] = []
 		
+		// Don't do FTS directly in tables, better to have more fine-grained controls to have joined columns etc, we solve that by having a dedicated type.
 		try await db.transaction { db, token in
 			
 			var addedIndices = addedIndices
+			var changeIndiciesFail = false
 			// drop indices if needed
 			for indexToDrop in changedIndices {
 				do {
 					try await db.query(token: token, "DROP INDEX `\(indexToDrop.name)`")
 				} catch {
 					print("ERROR: could not drop index: \(error)")
+					changeIndiciesFail = true
 				}
 			}
 			
 			// add new columns
 			for columnToAdd in addedColumns {
-				if !columnToAdd.mayBeNull, let valueType = columnToAdd.valueType, valueType is URL.Type {
+				if !columnToAdd.mayBeNull, let valueType = columnToAdd.valueType, valueType is URL.Type {	// TODO: I don't think this is true anymore
 					print("Cannot add non-NULL URL column `\(columnToAdd.name)` yet! Need to specify a valid default URL")
 					throw TableError.impossibleUrlMigration
 				}
 				
 				try await db.query(token: token, "ALTER TABLE `\(tableName)` ADD COLUMN \(columnToAdd.definition())")
+				migrations.append(.newColumn(columnToAdd))
 			}
 			
-			if changedTypes.isEmpty == false {
-				// This looks completely pointless since SQLite is dynamic and can return whatever for types, but this is a convinient way to update the table info.
+			if changeIndiciesFail || needsSchemaChanges || changedTypes.isEmpty == false {
+				// SQLite may fail renaming and dropping columns. Not clear why or when this happens (it is not due to SQLite versions), so we make a copy whenever you modify or drop a column to be on the safe side.
+				// Also if nullability have changed we need a new table - we can't insert null in a non-null column.
 				
-				// nullability may have changed if so we need a new table - we can't insert null in a non-null column.
-				let tempTableName = "_\(tableName)+temp+\(Int32.random(in: 0..<Int32.max))"
+				let tempTableName = "_\(tableName)Temp\(Int32.random(in: 0..<Int32.max))"
 				try await db.query(token: token, tableInfo.createTableSyntax(tempTableName))
 				
 				let columnNames = tableInfo.columns.map { $0.name }
 				let fieldList = "`\(columnNames.joined(separator: "`,`"))`"
 				try await db.query(token: token, "INSERT OR REPLACE INTO `\(tempTableName)` (\(fieldList)) SELECT \(fieldList) FROM `\(tableName)`")
-				try await db.query(token: token, "DROP TABLE `\(tableName)`")
-				try await db.query(token: token, "ALTER TABLE `\(tempTableName)` RENAME TO `\(tableName)`")
+				
+				if changedColumns.isEmpty {
+					try await db.query(token: token, "DROP TABLE `\(tableName)`")
+					try await db.query(token: token, "ALTER TABLE `\(tempTableName)` RENAME TO `\(tableName)`")
+				}
+				else {
+					
+					// let the old db use the temp-name
+					try await db.query(token: token, "ALTER TABLE `\(tempTableName)` RENAME TO `\(tempTableName)2`")
+					try await db.query(token: token, "ALTER TABLE `\(tableName)` RENAME TO `\(tempTableName)`")
+					try await db.query(token: token, "ALTER TABLE `\(tempTableName)2` RENAME TO `\(tableName)`")
+					
+					// Now we can convert all values that need special handling (e.g. converting dates to strings)
+					migrations.append(.changes(oldTableName: tempTableName, columns: changedColumns))
+				}
 				
 				// re-add all indices
 				for indexToAdd in targetIndices {
 					try await db.query(token: token, indexToAdd.definition(tableName: tableName))
 				}
 				addedIndices.removeAll()
-				
-				// TODO: Now you'd want to convert all values if they need special handling (e.g. converting dates to strings)
-			}
-			else if needsSchemaChanges || needsFTSRebuild || needsFTSDelete {
-				
-				// drop columns
-				for columnNameToDrop in changedColumns.map({ $0.name }) {
-					try await db.query(token: token, "ALTER TABLE `\(tableName)` DROP COLUMN `\(columnNameToDrop)`")
-				}
-				
-			/*
-			 // TODO: drop fts or delete its data.
-				if needsFTSRebuild { try fullTextIndex?.rebuild(core: core) }
-				
-				if needsFTSDelete {
-					try core.query("DROP TRIGGER IF EXISTS `\(FullTextIndexSchema.insertTriggerName(name))`")
-					try core.query("DROP TRIGGER IF EXISTS `\(FullTextIndexSchema.updateTriggerName(name))`")
-					try core.query("DROP TRIGGER IF EXISTS `\(FullTextIndexSchema.deleteTriggerName(name))`")
-					try core.query("DROP TABLE IF EXISTS `\(FullTextIndexSchema.ftsTableName(name))`")
-				}
-			}
-			*/
-			
 			}
 			
 			// add new indices if needed
 			for indexToAdd in addedIndices {
-				do {
-					try await db.query(token: token, indexToAdd.definition(tableName: tableName))
-				} catch {
-					print("ERROR: could not create index: \(error)")
-				}
+				try await db.query(token: token, indexToAdd.definition(tableName: tableName))
 			}
 		}
 		
-		return tableInfo
+		return (tableInfo, migrations)
 	}
     
 	/// add a column that defaults to non-nil, can still be optional

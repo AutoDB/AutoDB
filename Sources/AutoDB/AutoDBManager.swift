@@ -106,7 +106,7 @@ extension UInt64 {
 		} else {
 			switch key {
 				case .cache:
-					AutoDBSettings.cache()
+					appDefaults[key] = AutoDBSettings.cache()
 				default:
 					appDefaults[key] = AutoDBSettings()
 			}
@@ -115,37 +115,65 @@ extension UInt64 {
 		return appDefaults[key]!
 	}
 	
+	private let setupSemaphore = Semaphore()
+	
 	/// Setup database for this class, attach to file defined in settings. Settings defaults to .main, implement autoDBSettings in each Table to specify location or use the cache.
 	@discardableResult
 	func setupDB<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier? = nil) async throws -> Database {
 		let typeID = typeID ?? ObjectIdentifier(table)
-		if databases[typeID] == nil {
-			
-			let database: Database
-			let settingsKey = table.autoDBSettings ?? .regular
-			let tableSettings = appSettings(for: settingsKey)
-			let sharedKey = tableSettings
-			//let sharedKey = "\(settings.path)\(settings.inCacheFolder ? "_cache" : "")"
-			// in theory you could have multiple actors for the same file, but that is always a bad idea.
-			if let db = sharedDatabases[settingsKey] {
-				database = db
-			} else {
-				database = try await initDB(tableSettings)
-				sharedDatabases[settingsKey] = database
-			}
-			
-			// setup table and perform migrations
-			tables[typeID] = try await SQLTableEncoder().setup(table, database, tableSettings)
-			databases[typeID] = database
-			
-			return database
+		if let db = databases[typeID] {
+			return db
 		}
 		
-		// if two threads try to setup at the same time the other must wait
-		while databases[typeID] == nil {
-			try await Task.sleep(nanoseconds: .shortDelay)
+		// many threads will go here at the same time at startup, they need to wait.
+		await setupSemaphore.wait()
+		if let db = databases[typeID] {
+			await setupSemaphore.signal()
+			return db
 		}
-		return databases[typeID]!
+		let database: Database
+		let settingsKey = table.autoDBSettings
+		let tableSettings = appSettings(for: settingsKey)
+		
+		// in theory you could have multiple actors for the same file, but that is always a bad idea.
+		if let db = sharedDatabases[settingsKey] {
+			database = db
+		} else {
+			database = try await initDB(tableSettings)
+			sharedDatabases[settingsKey] = database
+		}
+		
+		// setup table and perform migrations
+		let (encoder, migrations) = try await SQLTableEncoder().setup(table, database, tableSettings)
+		tables[typeID] = encoder
+		
+		if let migrations, migrations.isEmpty == false {
+			// NOTE! This will deadlock if other tables are not setup.
+			
+			// we must wait until migrations take place, we do that using a transaction. All queries will wait until the transaction is done.
+			try? await database.transaction { db, token in
+				
+				await setDatabase(db, typeID)
+				// release the setupSemaphore so other tables can be created, this will allow other's to queue onto the db, but the transaction-semaphore will force them to wait until we are done.
+				await setupSemaphore.signal()
+				
+				for migration in migrations {
+					await TableType.migration(token, database, migration)
+					
+					if case MigrationState.changes(let tempTableName, _) = migration {
+						try await database.query(token: token, "DROP TABLE `\(tempTableName)`")
+					}
+				}
+			}
+		} else {
+			databases[typeID] = database
+			await setupSemaphore.signal()
+		}
+		return database
+	}
+	
+	func setDatabase(_ db: Database, _ typeID: ObjectIdentifier) {
+		databases[typeID] = db
 	}
 	
 	/// tables are created after awaits and may not exist in the beginning of execution, just add a short delay to wait for them

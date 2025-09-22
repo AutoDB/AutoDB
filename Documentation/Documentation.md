@@ -117,7 +117,11 @@ try? await TransClass.transaction { _, token in
 // All other calls to db will await until this point where the transaction is done.
 ```
 
-Note that the use of "token" was required until Swift 6.3, and will be removed in a future update. 
+Note that the use of "token" is required until Swift 6.3, but will be removed in a future update. At least until 6.3 has been out for a while and time to implement this has conjoured itself into existence. 
+
+## Deadlocks with transactions
+
+Transactions can deadlock since they are guarded by semaphores. See `TransactionTests.deadlockSemaphore()` for detailed info and how to discover these. 
 
 ## Write to DB in bulk
 
