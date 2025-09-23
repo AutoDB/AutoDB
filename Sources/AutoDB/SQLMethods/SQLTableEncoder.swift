@@ -23,6 +23,12 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		self.userInfo = userInfo
 	}
 	
+	static let jsEncoder: JSONEncoder = {
+		let encoder = JSONEncoder()
+		encoder.outputFormatting = .sortedKeys	//sort keys so the data will always look the same for the same values.
+		return encoder
+	}()
+	
 	/// We return a list of migrations that has been done, if the auto-conversions are not suitable, just supply your own functions.
 	func setup<T: Table>(_ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> (TableInfo, [MigrationState]?) {
 		let instance = classType.init()
@@ -83,10 +89,13 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			columnsInDB.contains { $0.name == column.name } == false
 		}
 		
-		let needsSchemaChanges = !changedColumns.isEmpty
-		
 		let changedTypes = changedColumns.filter { column in
 			targetColumns.contains { $0.name == column.name }
+		}
+		
+		if changedIndices.isEmpty && changedColumns.isEmpty && changedTypes.isEmpty && addedColumns.isEmpty && addedIndices.isEmpty {
+			print("No schema changes needed for \(tableName)")
+			return (tableInfo, nil)
 		}
 		
 		nonisolated(unsafe) var migrations: [MigrationState] = []
@@ -117,7 +126,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				migrations.append(.newColumn(columnToAdd))
 			}
 			
-			if changeIndiciesFail || needsSchemaChanges || changedTypes.isEmpty == false {
+			if changeIndiciesFail || changedColumns.isEmpty == false || changedTypes.isEmpty == false {
 				// SQLite may fail renaming and dropping columns. Not clear why or when this happens (it is not due to SQLite versions), so we make a copy whenever you modify or drop a column to be on the safe side.
 				// Also if nullability have changed we need a new table - we can't insert null in a non-null column.
 				
@@ -290,9 +299,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
             }
             else {
 				//If not of basic type, we can still encode it as blob.
-				let encoder = JSONEncoder()
-				encoder.outputFormatting = .sortedKeys	//sort keys so the data will look the same for the same values.
-				let data = (try? encoder.encode(value)) ?? Data()
+				let data = (try? SQLTableEncoder.jsEncoder.encode(value)) ?? Data()
 				//print("encoding: \(type(of: value)) for: \(key.stringValue)")
 				//print("result: " + String(data: data, encoding: .utf8)!)
 				enc.addColumn(key.stringValue, .blob, Data.self, false, data)

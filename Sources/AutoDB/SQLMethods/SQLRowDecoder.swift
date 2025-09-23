@@ -99,6 +99,11 @@ class SQLRowDecoder: Decoder {
 				}
 			default:
 				if let data = value.dataValue {
+					
+					if let value = data as? T {
+						return value
+					}
+					
 					let value = try? JSONDecoder().decode(T.self, from: data)
 					if let relation = value as? AnyRelation {
 						relations.append(relation)

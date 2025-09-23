@@ -467,13 +467,10 @@ extension UInt64 {
 			return []
 		}
 		
-		// force objects to go here
-		//if T.self is AnyObject.Type {
-		
+		// decode all fetched values
 		let result: [(T, [AnyRelation])] = try rows.map { row in
 			decoder.values = row
 			let value = try T(from: decoder)
-			//value.awakeFromFetch()
 			return (value, decoder.relations)
 		}
 		return result

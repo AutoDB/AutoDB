@@ -281,6 +281,18 @@ extension SQLIntegerEnum {
 	internal static func defaultPlaceholderValue() -> Self { allCases.first! }
 }
 
+/// Declares an enum as compatible with SQL column storage, with a SQL-compatible raw integer type such as `Int`.
+public protocol SQLUIntegerEnum: RawRepresentable, CaseIterable, SQLColumnWrappable where RawValue: SQLStorableAsUnsignedInteger {
+	associatedtype RawValue
+	static func unifiedRawValue(from unifiedRepresentation: UInt64) -> RawValue
+}
+
+extension SQLUIntegerEnum {
+	public static func unifiedRawValue(from unifiedRepresentation: UInt64) -> RawValue { RawValue.from(unifiedRepresentation: unifiedRepresentation) }
+	public static func fromValue(_ value: SQLValue) -> Self? { if let i = value.uint64Value { return Self(rawValue: Self.unifiedRawValue(from: i)) } else { return nil } }
+	internal static func defaultPlaceholderValue() -> Self { allCases.first! }
+}
+
 /// A wrapper for SQLite's column data types.
 public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLiteral, ExpressibleByBooleanLiteral, ExpressibleByIntegerLiteral, Hashable, Comparable {
 	public static func < (lhs: SQLValue, rhs: SQLValue) -> Bool {
@@ -328,6 +340,7 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 			case let v as any SQLStorableAsData: return .data(v.unifiedRepresentation())
 			case let v as any SQLIntegerEnum: return .integer(v.rawValue.unifiedRepresentation())
 			case let v as any SQLStringEnum: return .text(v.rawValue.unifiedRepresentation())
+			case let v as any SQLUIntegerEnum: return .uinteger(v.rawValue.unifiedRepresentation())
 			default: throw Error.cannotConvertToValue
 		}
 	}

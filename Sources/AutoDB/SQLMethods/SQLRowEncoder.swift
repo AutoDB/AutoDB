@@ -63,7 +63,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 			
 			if let item = values[column.name] {
 				
-				/* TODO: remember the inverse of
+				/* TODO: remember the inverse of each column for faster commits.
 				var wrappend: Value?
 				switch column.columnType {
 					case .integer:
