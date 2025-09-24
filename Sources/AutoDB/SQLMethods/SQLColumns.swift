@@ -523,11 +523,12 @@ public struct SQLIndex: Equatable, Hashable, Sendable {
 		return "CREATE \(unique ? "UNIQUE " : "")INDEX IF NOT EXISTS `\(name)` ON \(tableName) (\(columnNames.joined(separator: ",")))"
 	}
 	
-	public init(columnNames: [String], unique: Bool = false) {
+	public init(columnNames: [String], unique: Bool = false, table: String) {
 		guard !columnNames.isEmpty else { fatalError("No columns specified") }
 		self.columnNames = columnNames
 		self.unique = unique
-		self.name = columnNames.joined(separator: "_") + "_index"
+		// note that an index must have a unique name across the entire DB, so we add the table name as a safe-guard.
+		self.name = table + "_" + columnNames.joined(separator: "_") + "_index"
 	}
 	
 	internal init(definition: String) throws {

@@ -94,7 +94,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		}
 		
 		if changedIndices.isEmpty && changedColumns.isEmpty && changedTypes.isEmpty && addedColumns.isEmpty && addedIndices.isEmpty {
-			print("No schema changes needed for \(tableName)")
+			//print("No schema changes needed for \(tableName)")
 			return (tableInfo, nil)
 		}
 		
@@ -130,7 +130,9 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				// SQLite may fail renaming and dropping columns. Not clear why or when this happens (it is not due to SQLite versions), so we make a copy whenever you modify or drop a column to be on the safe side.
 				// Also if nullability have changed we need a new table - we can't insert null in a non-null column.
 				
-				let tempTableName = "_\(tableName)Temp\(Int32.random(in: 0..<Int32.max))"
+				let tempTableName = "_\(tableName)TempAuto"
+				// if previous run was failing, drop that table
+				try? await db.query(token: token, "DROP TABLE IF EXISTS `\(tempTableName)`")
 				try await db.query(token: token, tableInfo.createTableSyntax(tempTableName))
 				
 				let columnNames = tableInfo.columns.map { $0.name }

@@ -95,12 +95,12 @@ struct TableInfo: Sendable {
 	func allIndices<T: Table>(_ emptyInstance: T) -> Set<SQLIndex> {
 		var indices: [SQLIndex] = T.indices.compactMap { keyPaths in
 			// get the names for each keyPath
-			SQLIndex(columnNames: keyPaths, unique: false)
+			SQLIndex(columnNames: keyPaths, unique: false, table: name)
 		}
 		
 		let uniqueIndicies: [SQLIndex] = T.uniqueIndices.compactMap { keyPaths in
 			// get the names for each keyPath
-			SQLIndex(columnNames: keyPaths, unique: true)
+			SQLIndex(columnNames: keyPaths, unique: true, table: name)
 		}
 		indices.append(contentsOf: uniqueIndicies)
 		return Set(indices)
@@ -110,14 +110,15 @@ struct TableInfo: Sendable {
 		// we want it to look like CREATE UNIQUE INDEX [IF NOT EXISTS] index_name ON table_name(column1, column2, ...)
 		var indices: [SQLIndex] = T.indices.compactMap { keyPaths in
 			// get the names for each keyPath
-			SQLIndex(columnNames: keyPaths, unique: false)
+			SQLIndex(columnNames: keyPaths, unique: false, table: name)
 		}
 		
 		let uniqueIndicies: [SQLIndex] = T.uniqueIndices.compactMap { keyPaths in
 			// get the names for each keyPath
-			SQLIndex(columnNames: keyPaths, unique: true)
+			SQLIndex(columnNames: keyPaths, unique: true, table: name)
 		}
 		indices.append(contentsOf: uniqueIndicies)
+		
 		return indices.map { $0.definition(tableName: name) }
 	}
 }

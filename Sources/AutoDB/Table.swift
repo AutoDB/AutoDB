@@ -270,8 +270,15 @@ public extension Table {
 			for object in updated {
 				try object.encode(to: encoder)
 			}
-			// apply dbSemaphoreToken if we have one
-			try await encoder.commit(token, update: true)
+			do {
+				// apply dbSemaphoreToken if we have one
+				try await encoder.commit(token, update: true)
+			} catch Database.Error.uniqueConstraintFailed {
+				
+				// return an error with a list of ids that caused the failure. Not the ids IN the db, but the new ones.
+				let duplicates = await generateUniqueConstraintFailers(token, created)
+				throw AutoError.uniqueConstraintFailed(duplicates)
+			}
 		}
 		if created.isEmpty == false {
 			for object in created {
@@ -282,28 +289,35 @@ public extension Table {
 				try await encoder.commit(token, update: false)
 			} catch Database.Error.uniqueConstraintFailed {
 				
-				// return an error with a list of ids that caused the failure. If the user cares, they can fetch the objects
-				var duplicates = [AutoId]()
-				for object in created {
-					
-					for uniqueIndexSet in Self.uniqueIndices {
-						let values: [Any?] = uniqueIndexSet.map { object[keyPath: object.allKeyPaths[$0]!] }
-						let arguments = try values.map {
-							// we must cast or somehow find out which SQL-type each argument is!
-							try SQLValue.fromAny($0)
-						}
-						let query = "SELECT id FROM \(Self.typeName) WHERE \(uniqueIndexSet.map { "\($0) = ?" }.joined(separator: " AND "))"
-						if let existing: AutoId = try? await Self.valueQuery(token: token, query, sqlArguments: arguments) {
-							duplicates.append(existing)
-						}
-					}
-				}
+				// return an error with a list of ids that caused the failure. Not the ids IN the db, but the new ones.
+				let duplicates = await generateUniqueConstraintFailers(token, created)
 				throw AutoError.uniqueConstraintFailed(duplicates)
 			}
 			await AutoDBManager.shared.clearCreated(typeID, created)
 		}
 		
 		try await didSave(objects)
+	}
+	
+	static func generateUniqueConstraintFailers(_ token: AutoId?, _ objects: [Self]) async -> [AutoId] {
+		var duplicates = [AutoId]()
+		
+		for object in objects {
+			for uniqueIndexSet in Self.uniqueIndices {
+				let values: [Any?] = uniqueIndexSet.map { object[keyPath: object.allKeyPaths[$0]!] }
+				let arguments = values.compactMap {
+					// we must cast or somehow find out which SQL-type each argument is!
+					try? SQLValue.fromAny($0)
+				}
+				
+				let query = "SELECT id FROM `\(Self.typeName)` WHERE \(uniqueIndexSet.map { "\($0) = ?" }.joined(separator: " AND "))"
+				if let existing: AutoId = try? await Self.valueQuery(token: token, query, sqlArguments: arguments) {
+					duplicates.append(object.id)
+				}
+			}
+		}
+		
+		return duplicates
 	}
 	
 	// MARK: - deletions

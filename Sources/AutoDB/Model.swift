@@ -136,6 +136,8 @@ public extension Model {
 		value.id = id ?? token
 		let item = Self(value)
 		
+		// set in cache so it won't be created twice
+		await AutoDBManager.shared.cacheObject(item, typeID)
 		await AutoDBManager.shared.setCreated(value.id, ObjectIdentifier(TableType.self))
 		
 		await item.awakeFromInit()
