@@ -5,6 +5,11 @@
 //  Created by Olof Andersson-Thorén on 2025-09-22.
 //
 
+public enum MigrationTableState: Sendable, Hashable {
+	case done
+	case isMigrating
+}
+
 public enum MigrationState: Sendable, Hashable {
 	/// Called when table was created (or renamed)
 	case createdTable

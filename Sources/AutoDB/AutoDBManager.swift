@@ -87,13 +87,13 @@ extension UInt64 {
 	/// Instead of asking each Table, supply defaults for any new table. If an ObjectIdentifier of a Table.Type is not within any - settings is picked from the first existing one in order: regular, cache, specific.
 	/// Bypassed if the Table has its own settings
 	/// If all is empty the default is used
-	public var appDefaults: [SettingsKey: AutoDBSettings] = [:]
+	public static var appDefaults: [SettingsKey: AutoDBSettings] = [:]
 	
 	/// insert a new global setting for the entire app, this is a good starting point for appstart
 	/// Define app settings e.g. path
-	public func setAppSettings(_ settings: AutoDBSettings, for key: SettingsKey) async {
+	public nonisolated func setAppSettings(_ settings: AutoDBSettings, for key: SettingsKey) {
 		// all with the same key will share the same settings
-		appDefaults[key] = settings
+		Self.appDefaults[key] = settings
 	}
 	
 	 /// To ask for a common setting, e.g. when creating settings at startup:
@@ -101,21 +101,30 @@ extension UInt64 {
 	 /// AutoDBManager.shared.setAppSettingsSync(cacheDBSettings, for: .cache)
 	public func appSettings(for key: SettingsKey) -> AutoDBSettings {
 		
-		if let settings = appDefaults[key] {
+		if let settings = Self.appDefaults[key] {
 			return settings
 		} else {
 			switch key {
 				case .cache:
-					appDefaults[key] = AutoDBSettings.cache()
+					Self.appDefaults[key] = AutoDBSettings.cache()
 				default:
-					appDefaults[key] = AutoDBSettings()
+					Self.appDefaults[key] = AutoDBSettings()
 			}
 		}
 		
-		return appDefaults[key]!
+		return Self.appDefaults[key]!
 	}
 	
 	private let setupSemaphore = Semaphore()
+	
+	/// migration info, to get a callback when migration is done simply call: `_ = try await table.db()` which will wait until migration is complete.
+	func migrationState<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier? = nil) async -> MigrationTableState {
+		let typeID = typeID ?? ObjectIdentifier(table)
+		if let db = databases[typeID] {
+			return .done
+		}
+		return .isMigrating
+	}
 	
 	/// Setup database for this class, attach to file defined in settings. Settings defaults to .main, implement autoDBSettings in each Table to specify location or use the cache.
 	@discardableResult
@@ -127,49 +136,55 @@ extension UInt64 {
 		
 		// many threads will go here at the same time at startup, they need to wait.
 		await setupSemaphore.wait()
-		if let db = databases[typeID] {
-			await setupSemaphore.signal()
-			return db
-		}
-		let database: Database
-		let settingsKey = table.autoDBSettings
-		let tableSettings = appSettings(for: settingsKey)
-		
-		// in theory you could have multiple actors for the same file, but that is always a bad idea.
-		if let db = sharedDatabases[settingsKey] {
-			database = db
-		} else {
-			database = try await initDB(tableSettings)
-			sharedDatabases[settingsKey] = database
-		}
-		
-		// setup table and perform migrations
-		let (encoder, migrations) = try await SQLTableEncoder().setup(table, database, tableSettings)
-		tables[typeID] = encoder
-		
-		if let migrations, migrations.isEmpty == false {
-			// NOTE! This will deadlock if other tables are not setup.
-			
-			// we must wait until migrations take place, we do that using a transaction. All queries will wait until the transaction is done.
-			try? await database.transaction { db, token in
-				
-				await setDatabase(db, typeID)
-				// release the setupSemaphore so other tables can be created, this will allow other's to queue onto the db, but the transaction-semaphore will force them to wait until we are done.
+		do {
+			if let db = databases[typeID] {
 				await setupSemaphore.signal()
+				return db
+			}
+			let database: Database
+			let settingsKey = table.autoDBSettings
+			let tableSettings = appSettings(for: settingsKey)
+			
+			// in theory you could have multiple actors for the same file, but that is always a bad idea.
+			if let db = sharedDatabases[settingsKey] {
+				database = db
+			} else {
+				database = try await initDB(tableSettings)
+				sharedDatabases[settingsKey] = database
+			}
+			
+			// setup table and perform migrations
+			let (encoder, migrations) = try await SQLTableEncoder().setup(table, database, tableSettings)
+			tables[typeID] = encoder
+			
+			if let migrations, migrations.isEmpty == false {
+				// NOTE! This will deadlock if other tables are not setup.
 				
-				for migration in migrations {
-					await TableType.migration(token, database, migration)
+				// we must wait until migrations take place, we do that using a transaction. All queries will wait until the transaction is done.
+				try? await database.transaction { db, token in
 					
-					if case MigrationState.changes(let tempTableName, _) = migration {
-						try await database.query(token: token, "DROP TABLE `\(tempTableName)`")
+					await setDatabase(db, typeID)
+					// release the setupSemaphore so other tables can be created, this will allow other's to queue onto the db, but the transaction-semaphore will force them to wait until we are done.
+					await setupSemaphore.signal()
+					
+					for migration in migrations {
+						await TableType.migration(token, database, migration)
+						
+						if case MigrationState.changes(let tempTableName, _) = migration {
+							try await database.query(token: token, "DROP TABLE `\(tempTableName)`")
+						}
 					}
 				}
+			} else {
+				databases[typeID] = database
+				await setupSemaphore.signal()
 			}
-		} else {
-			databases[typeID] = database
+			return database
+		} catch {
 			await setupSemaphore.signal()
+			print("error setting up database: \(error) probably uncaught migration error, check your migrations!")
+			throw error
 		}
-		return database
 	}
 	
 	func setDatabase(_ db: Database, _ typeID: ObjectIdentifier) {

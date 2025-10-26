@@ -101,7 +101,7 @@ public extension Model {
 		let semaphore = DispatchSemaphore(value: 0)
 		
 		let store = Store<Self>()
-		Task {
+		Task(priority: .userInitiated) {
 			store.item = await create(token: token, id)
 			semaphore.signal()
 		}
@@ -236,7 +236,8 @@ public extension Model {
 		}
 	}
 	
-	/// Refresh all objects currently in use, note that you can only remove objects from cache by stop referencing them. Otherwise there will be duplicate objects.
+	/// Refresh all objects currently in use, if changed by external process - this will bring in fresh values from DB.
+	/// note that you can only remove objects from cache by stop referencing them. Otherwise there will be duplicate objects.
 	static func refreshCache() async throws {
 		let objects: [AutoId: Self] = await AutoDBManager.shared.cached(Self.self)
 		let ids: [AutoId] = Array(objects.keys)

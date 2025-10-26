@@ -134,6 +134,11 @@ public extension Table {
 		return try await AutoDBManager.shared.setupDB(self, nil)
 	}
 	
+	/// migration info, to get a callback when migration is done simply call: `_ = try await table.db()` which will wait until migration is complete.
+	static func migrationState() async -> MigrationTableState {
+		return try await AutoDBManager.shared.migrationState(self, nil)
+	}
+	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
 	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are inside the transaction / holding the lock.
