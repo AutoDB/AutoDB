@@ -152,7 +152,7 @@ public actor Semaphore {
 	}
 	
 	/// A shorthand if you just want to call a closure
-	public func lock(token: AutoId? = nil, _ task: () async throws -> Void) async rethrows {
+	public func lock(token: AutoId? = nil, _ task: @Sendable() async throws -> Void) async rethrows {
 		await wait(token: token)
 		defer {
 			signal(token: token)

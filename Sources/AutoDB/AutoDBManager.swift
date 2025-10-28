@@ -87,7 +87,7 @@ extension UInt64 {
 	/// Instead of asking each Table, supply defaults for any new table. If an ObjectIdentifier of a Table.Type is not within any - settings is picked from the first existing one in order: regular, cache, specific.
 	/// Bypassed if the Table has its own settings
 	/// If all is empty the default is used
-	public static var appDefaults: [SettingsKey: AutoDBSettings] = [:]
+	nonisolated(unsafe) public static var appDefaults: [SettingsKey: AutoDBSettings] = [:]
 	
 	/// insert a new global setting for the entire app, this is a good starting point for appstart
 	/// Define app settings e.g. path
