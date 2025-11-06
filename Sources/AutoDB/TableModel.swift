@@ -82,7 +82,7 @@ public enum TableError: Error {
 public struct AutoDBSettings: Sendable, Hashable {
 	
 	// Cache settings-shorthand for all tables to be stored in the cache
-	static func cache(path: String = "AutoDB/AutoDB.db", ignoreProperties: Set<String>? = nil) -> AutoDBSettings {
+	static func cache(path: String = "AutoDB/AutoDB.db") -> AutoDBSettings {
 		AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: true)
 	}
 	

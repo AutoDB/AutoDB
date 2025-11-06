@@ -485,8 +485,14 @@ extension UInt64 {
 		// decode all fetched values
 		let result: [(T, [AnyRelation])] = try rows.map { row in
 			decoder.values = row
-			let value = try T(from: decoder)
-			return (value, decoder.relations)
+			do {
+				let value = try T(from: decoder)
+				return (value, decoder.relations)
+			} catch {
+				// this only happens if we have a type that we can't decode, which shouldn't happen...
+				print("decode error: \(error)")
+				throw error
+			}
 		}
 		return result
 	}

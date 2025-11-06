@@ -126,8 +126,12 @@ public extension Model {
 		if let id {
 			if let item = await AutoDBManager.shared.cached(Self.self, id, typeID) {
 				return item
-			} else if let item = try? await fetchId(token: token, id, typeID) {
-				return item
+			} else {
+				do {
+					return try await fetchId(token: token, id, typeID)
+				} catch {
+					//print("error fetching id: \(error)")
+				}
 			}
 		}
 		
@@ -436,6 +440,7 @@ public extension Collection where Element: Model {
 	
 	/// Convert an array with AutoModels to a dictionary
 	func dictionary() -> [AutoId: Element] {
-		Dictionary(uniqueKeysWithValues: self.map { ($0.id, $0) })
+		let uniqueSet = Set(self)
+		return Dictionary(uniqueKeysWithValues: uniqueSet.map { ($0.id, $0) })
 	}
 }

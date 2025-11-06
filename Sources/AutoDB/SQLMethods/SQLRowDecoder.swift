@@ -69,8 +69,10 @@ class SQLRowDecoder: Decoder {
 		switch type {
 			case is String.Type:
 				return value.stringValue as? T
-			case is Double.Type, is Float.Type:
+			case is Double.Type:
 				return value.doubleValue as? T
+			case is Float.Type:
+				return value.doubleValue.flatMap { Float($0) } as? T
 			case is Bool.Type:
 				return value.boolValue as? T
 			case is Int.Type:
@@ -209,7 +211,7 @@ class SQLRowDecoder: Decoder {
 				return value
 			}
 			// couldn't guess on default value, and if struct or other complex type we can't create one
-			throw DecodedError.cannotGuessVariable
+			throw DecodedError.cannotGuessVariable(key.stringValue)
 		}
 		
 		func decodeIfPresent<T>(_ type: T.Type, forKey key: KeyType) throws -> T? where T : Decodable {
@@ -231,5 +233,5 @@ class SQLRowDecoder: Decoder {
 }
 
 enum DecodedError: Error {
-	case cannotGuessVariable
+	case cannotGuessVariable(String)
 }
