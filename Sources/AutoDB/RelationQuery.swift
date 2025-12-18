@@ -39,7 +39,7 @@ import Observation
 /**
  A Relation based on a query that fetches incrementally.
  Specify the relation and how many objects to fetch like this:
- var cureAlbums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
+ var cureAlbums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 4, limit: 20)
  Now this class holds a relation to all albums of The Cure, fetched when needed.
  The TableModel must be a table in the db, Models containing a table will not work.
  
@@ -61,9 +61,10 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		self.owner = owner
 		Task {
 			try? await startListening()
-			
-			// Imagine a thousend objects loaded in a list, don't fetch anything here. Fetch when needed.
-			// _ = try? await self.fetchItems()
+			if performInitialFetch {
+				// Imagine a thousend objects loaded in a list, don't fetch anything here unless you know what you are doing.
+				_ = try? await self.fetchItems()
+			}
 		}
 	}
 	
@@ -97,18 +98,22 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 	@ObservationIgnored let initialFetch: Int
 	@ObservationIgnored var limit: Int
 	@ObservationIgnored private let semaphore = Semaphore()
+	@ObservationIgnored private var performInitialFetch: Bool
 	
 	private enum CodingKeys: CodingKey {
 		case query
 		case storedArguments
 		case initialFetch
 		case limit
+		case performInitialFetch
 	}
 	
-	public init(_ query: String, arguments: [Sendable & Codable]? = nil, initial: Int = 5, limit: Int = 100) {
+	public init(_ query: String, arguments: [Sendable & Codable]? = nil, initial: Int = 5, limit: Int = 100, initFetch: Bool = false) {
 		self.query = query + " LIMIT %i OFFSET %i"
 		self.initialFetch = initial
 		self.limit = limit
+		performInitialFetch = initFetch
+		
 		do {
 			self.arguments = try arguments?.map { try SQLValue.fromAny($0) }
 		} catch {
@@ -121,6 +126,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		query = try container.decode(String.self, forKey: .query)
 		initialFetch = try container.decode(Int.self, forKey: .initialFetch)
 		limit = try container.decode(Int.self, forKey: .limit)
+		performInitialFetch = (try? container.decodeIfPresent(Bool.self, forKey: .performInitialFetch)) ?? false
 		items = []
 		let storedArguments = try container.decodeIfPresent([String].self, forKey: .storedArguments)
 		self.arguments = storedArguments?.compactMap { SQLValue.fromSQLiteLiteral($0) }
@@ -135,6 +141,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		try container.encode(self.query, forKey: CodingKeys.query)
 		try container.encode(self.initialFetch, forKey: CodingKeys.initialFetch)
 		try container.encode(self.limit, forKey: CodingKeys.limit)
+		try container.encode(self.performInitialFetch, forKey: CodingKeys.performInitialFetch)
 		
 	}
 	
@@ -196,6 +203,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		}
 	}
 	
+	// get the current
 	@discardableResult
 	public func fetchItems(resetOffset: Bool = false) async throws -> [AutoType] {
 		await semaphore.wait()

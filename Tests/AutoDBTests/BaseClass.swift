@@ -154,14 +154,13 @@ final class CodeWithKeys: Table, @unchecked Sendable {
 }
 
 // Building something to handle relations
-//@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *) @Observable
 final class Parent: Model, @unchecked Sendable {
 	var value: Value
 	struct Value: Table {
 		
 		var id: UInt64 = 0
 		var name = ""
-		var children = ManyRelation<Child>()
+		var children = ManyRelation<Child>(initFetch: true)
 		static let tableName: String = "Parent"
 	}
 	

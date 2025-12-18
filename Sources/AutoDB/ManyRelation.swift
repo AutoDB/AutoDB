@@ -14,7 +14,7 @@ import SwiftUI
  A relation is an array of non-unique items of one single AutoDB type.
  It handles fetching and saving in one place, having an optional backing var to know if we have fetched or not.
  If the owner implements RelationOwner, it will automatically call it when changed, this way you don't need to keep track of changes yourself.
- When fetching from DB this will contain no objects, you must call initFetch/Fetch first to populate the list.
+ If it has an Owner, it cam call `initFetch()` when fetched from DB to populate the list. Set `initFetch` to true to enable this.
  
  Usage:
 final class Parent: Model, @unchecked Sendable {
@@ -49,7 +49,7 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 	}
 	
 	/// specify how many to fetch at the initial fetch, the limit for all subsequent fetches and if we should fetch relations on first load.
-	public init(initial: Int = 150, limit: Int = 50, initFetch: Bool = true) {
+	public init(initial: Int = 150, limit: Int = 50, initFetch: Bool = false) {
 		self.initial = initial
 		self.limit = limit
 		self.initFetch = initFetch

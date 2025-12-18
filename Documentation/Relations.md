@@ -1,7 +1,23 @@
 # Relations
 
-AutoDB supports the most common types of relations, one-to-one, one-to-many, and query. You model this by creating a relation-property in your Model class (it is possible to use Structs/Tables too but they have drawbacks you will see later).
+AutoDB supports the most common types of relations, one-to-one, one-to-many, and query. You model this by creating a relation-property in your Model class (it is possible to use Structs/Tables too but they have drawbacks you will see later). We also have a FTSColumn, but more on that in [FTSColumn.md](FTSColumn.md).
 
+## Query
+
+The most complex and interesting of them all. We want an API that looks like this:
+
+```
+var cureAlbums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 4, limit: 20)
+try await cureAlbums.fetchItems()	// we never fetch when created since there could be a lot of objects
+
+// modifying DB should update the list
+cureAlbums.hasMore // false
+await Album.createWith(artist: "The Cure", name: "Faith")
+cureAlbums.hasMore // true
+
+```
+The class is using Observation (PRs are welcome), so you need iOS >= 17.0 for now.
+Note that dynamic arguments is not available yet (coming in the future), so you can't ask for any of the owner's properties etc.			
 
 ## OneToMany
 
@@ -15,8 +31,13 @@ try await parent.children.fetch()
 for child in parent.children.items {
 	// do work
 }
-// normally, a list will change. E.g. If using SwiftUI keep fetching a
 
+// normally, a list will change. It will then call the owners didChange() method. In reality it is just a list of ids, so this enables the owner to save it.
+print(parent.children.hasMore) //false
+parent.children.append([someChild])
+print(parent.children.hasMore) //true
+parent.saveChangesLater()	// save the new list
+```
 
 ## OneToOne
 

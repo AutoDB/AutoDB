@@ -8,6 +8,11 @@ SQL
 
 Creating index and changing column type does not work as expected!
 
+Relations:
+	- RelationQuery is only supported from iOS 17, build/finish the combine version
+	- When fetching relations, hasMore is sometimes set too late. Tests fail randomly.
+	- Finish FTSColumn
+	
 # Known bugs / TODOs
 
 Find a solution for temp-objects:
