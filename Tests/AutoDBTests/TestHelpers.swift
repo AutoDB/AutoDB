@@ -12,7 +12,7 @@ enum WaitError: Error {
 }
 
 @available(macOS 14.0, iOS 15.0, *)
-public func waitForCondition(delay: Double = 15, _ reason: String? = nil, _ closure: (() async throws -> Bool)) async throws {
+public func waitForCondition(delay: Double = 15, _ reason: String? = nil, _ closure: ( @Sendable () async throws -> Bool)) async throws {
 	let endDate = Date.now.addingTimeInterval(delay)
 	while Date.now < endDate {
 		if try await closure() {

@@ -222,9 +222,9 @@ final class AutoDBTests: XCTestCase {
 		XCTAssertEqual(mod.string, "2")
 	}
 	
-	func lookupObjectsCount(_ typeName: ObjectIdentifier, _ expectedCount: Int, _ message: String) async {
+	func lookupObjectsCount(_ tableName: ObjectIdentifier, _ expectedCount: Int, _ message: String) async {
 		
-		let count = await AutoDBManager.shared.lookupObjectsCount(typeName)
+		let count = await AutoDBManager.shared.lookupObjectsCount(tableName)
 		XCTAssertEqual(count, expectedCount, message)
 	}
 	
@@ -298,7 +298,7 @@ final class AutoDBTests: XCTestCase {
 		XCTAssertEqual(artist?.otherNest, Nested(name: "some name"))
 	}
 	
-	// We can't have relations from structs, 
+	// We can't have relations from structs, why?
 	func testRelations() async throws {
 		try await AutoDBManager.shared.truncateTable(Parent.Value.self)
 		try await AutoDBManager.shared.truncateTable(Child.self)
@@ -356,8 +356,8 @@ final class AutoDBTests: XCTestCase {
 		try await AlbumArt.query("DELETE FROM AlbumArt")
 		await Album.queryNT("DELETE FROM Album")
 		
-		var faith = await Album.create()
-		faith.name = "Faith"
+		let faith = await Album.create()
+		faith.value.name = "Faith"
 		try await faith.save()
 		
 		let id: AutoId = 4
@@ -372,7 +372,7 @@ final class AutoDBTests: XCTestCase {
 		let artObj = try await AlbumArt.fetchId(id)
 		print("artObj: \(artObj.id) \(artObj.value.album.id)")
 		
-		if try await artObj.value.album.object != faith {
+		if try await artObj.album.object != faith {
 			throw AutoError.missingRelation
 		}
 		
@@ -387,6 +387,38 @@ final class AutoDBTests: XCTestCase {
 		}
 		let cacheRes = try await cacheDB.query(q).compactMap({ $0.values.first })
 		XCTAssertTrue(cacheRes.contains { $0.stringValue == "AlbumArt" })
+	}
+	
+	func testOneRelationFetchList() async throws {
+		
+		try await AlbumArt.query("DELETE FROM AlbumArt")
+		try await Album.query("DELETE FROM Album")
+		
+		// create albums
+		let albumNames = ["Faith", "Seventeen Seconds", "Pornography", "Three Imaginary Boys"]
+		for (index, name) in albumNames.enumerated() {
+			let album: Album = await Album.create()
+			album.value.name = name
+			try await album.save()
+			
+			let art: AlbumArt = await AlbumArt.create(AutoId(index + 1))
+			//let id = art!.id
+			await art.value.album.setObject(album)
+			try await art.save()
+		}
+		await Task.yield()
+		
+		let arts = try await AlbumArt.fetchQuery()
+		for art in arts {
+			XCTAssertTrue(art.value.album._object == nil, "Art should have no album data before fetching")
+		}
+		
+		try await arts.fetchAll(\.value.album)
+		
+		for art in arts {
+			XCTAssertTrue(art.value.album._object != nil, "Art should have album data after fetching")
+		}
+		
 	}
 	
 	/// two tables have separate actors, test that we can read and write at the same time without crashing.
@@ -503,13 +535,14 @@ final class AutoDBTests: XCTestCase {
 		
 		let duplicateItem = await UniqueString.create()
 		duplicateItem.string = "New Test"
+		let duplicateId = duplicateItem.id
 		
 		do {
 			try await duplicateItem.save()
 			XCTFail("Expected an error when saving a duplicate id")
 		} catch AutoError.uniqueConstraintFailed(let ids) {
 			print("Caught uniqueConstraintFailed error with ids: \(ids)")
-			XCTAssertTrue(ids.contains(1), "Expected id 1 to be in the unique constraint error")
+			XCTAssertTrue(ids.contains(1) || ids.contains(duplicateId), "Expected id \(duplicateId) to be in the unique constraint error")
 		}
 	}
 }

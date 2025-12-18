@@ -78,7 +78,7 @@ extension UInt64 {
 	/// Only use this when testing, may create dublicate objects when live objects are saved.
 	func truncateTable<T: Table>(token: AutoId? = nil, _ table: T.Type) async throws {
 		let db = try await setupDB(table)
-		try await db.execute(token: token, "DELETE FROM \(table.typeName)")
+		try await db.execute(token: token, "DELETE FROM \(table.tableName)")
 		let typeID = ObjectIdentifier(T.self)
 		cachedObjects[typeID] = nil
 		createdObjects[typeID] = nil
@@ -120,7 +120,7 @@ extension UInt64 {
 	/// migration info, to get a callback when migration is done simply call: `_ = try await table.db()` which will wait until migration is complete.
 	func migrationState<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier? = nil) async -> MigrationTableState {
 		let typeID = typeID ?? ObjectIdentifier(table)
-		if let db = databases[typeID] {
+		if databases[typeID] != nil {
 			return .done
 		}
 		return .isMigrating
@@ -209,10 +209,16 @@ extension UInt64 {
 		
 		var path: String
 		if settings.inAppFolder || settings.inCacheFolder {
-			path = settings.inCacheFolder ? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].path : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].path
+			let url = settings.inCacheFolder ? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0] : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+			path = url.path
 			if path.hasSuffix("/") == false {
 				path += "/"
 			}
+			#if os(macOS)
+			let appName = Bundle.main.infoDictionary?["CFBundleName"] as? String ?? Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String ?? "AutoDBApp"
+			path += appName + "/"
+			#endif
+			
 			path += settings.path
 		} else {
 			path = settings.path
@@ -230,8 +236,8 @@ extension UInt64 {
 		return db
 	}
     
-    func lookupObjectsCount(_ typeName: ObjectIdentifier) async -> Int {
-		lookupTable.changedObjects[typeName]?.count ?? 0
+    func lookupObjectsCount(_ tableName: ObjectIdentifier) async -> Int {
+		lookupTable.changedObjects[tableName]?.count ?? 0
 	}
 	
 	
@@ -665,6 +671,19 @@ extension UInt64 {
 		}
 	}
 	
+	/// coalesce all changes and save later, typically used when multiple changes are made to the same object, and you only care that the last save is executed.
+	nonisolated public func saveAllChangesLater() {
+		Task {
+			await Debounce.shared.debounce() {
+				do {
+					try await self.saveAllChanges()
+				} catch {
+					print("saveAllChangesLater error: \(error)")
+				}
+			}
+		}
+	}
+	
 	/// Calls saveChanges for this class type, the reason this function exist is to circumvent Swift's type system and allows us to call a static func using an object.
 	public func saveChanges<T: Model>(token: AutoId? = nil, _ class: T) async throws {
 		try await saveChanges(token: token, T.self)
@@ -696,7 +715,7 @@ extension UInt64 {
 	var debounceTasks: [ObjectIdentifier: Task<Void, Error>] = [:]
 	
 	/// coalesce changes for this class type and save later, typically used when multiple changes are made to the same object, and you only care that the last save is executed. Each call postpones the save for 3 seconds.
-	public func saveChangesLater<T: Model>(_ classType: T.Type) async throws {
+	public func saveChangesLater<T: Model>(_ classType: T.Type) async {
 		
 		let typeID = ObjectIdentifier(T.self)
 		debounceTasks[typeID]?.cancel()
@@ -704,9 +723,15 @@ extension UInt64 {
 		debounceTasks[typeID] = Task {
 			try await Task.sleep(nanoseconds: .seconds(3))
 			debounceTasks[typeID] = nil
-			try await saveChanges(T.self)
+			do {
+				try await saveChanges(T.self)
+			} catch {
+				print("saveChangesLater(\(classType)) error: \(error)")
+				throw error
+			}
 		}
 	}
+	
 	
 	// MARK: - change callbacks just subscribe to an AsyncSequence
 	

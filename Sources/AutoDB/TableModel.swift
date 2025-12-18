@@ -6,7 +6,7 @@
 //
 
 /// Functionality common for the Table and the Model
-public protocol TableModel {
+public protocol TableModel: Sendable, Hashable {
 	
 	var id: AutoId { get }
 	
@@ -39,6 +39,43 @@ public protocol TableModel {
 	// MARK: - deletion
 	
 	var isDeleted: Bool { get async }
+	
+	// MARK: - fetch relations from multiple objects in one request
+	//fetchAll
+}
+
+public extension Collection where Element: TableModel {
+	
+	/// Convert an array with AutoModels to a dictionary
+	func dictionary() -> [AutoId: Element] {
+		let uniqueSet = Set(self)
+		return Dictionary(uniqueKeysWithValues: uniqueSet.map { ($0.id, $0) })
+	}
+	
+	/// Sort by ids, when you want the objects returned to be in the same order as fetched: fetchIds(idsToFetch).sortById(idsToFetch)
+	func sortById(_ ids: [AutoId]) -> [Element] {
+		dictionary().sortById(ids)
+	}
+	
+	// fetch relations from multiple objects in one request
+	func fetchAll<T: RelationToOne>(_ keyPath: KeyPath<Element, T>) async throws {
+		if self.isEmpty { return }
+		guard let list = (self as? [Self.Element]) ?? (Array(self) as? [Self.Element]) else {
+			throw AutoError.missingSetup
+		}
+		
+		if list.isEmpty { return }
+		let objects: [T] = list.map { $0[keyPath: keyPath] }
+		try await objects[0].fetchAll(objects)
+	}
+}
+
+public extension Dictionary where Key == AutoId, Value: TableModel {
+	
+	/// If you need to fetch items in the order of ids, Fetch as dictionary and apply this. See fetch() in AutoRelations for an example
+	func sortById(_ ids: [AutoId]) -> [Value] {
+		ids.compactMap { self[$0] }
+	}
 }
 
 public extension TableModel {

@@ -74,7 +74,7 @@ public struct RowChangeParameters: Sendable, Codable, Hashable, Equatable {
 	public var ids: [AutoId]
 }
 
-private struct Debounce {
+private struct DebounceRowChange {
 	var parameters: RowChangeParameters
 	var debounceTask: Task<Void, Error>?
 }
@@ -622,7 +622,7 @@ public actor Database {
 		return listener
 	}
 	
-	private var debounce = [String: [SQLiteOperation: Debounce]]()
+	private var debounce = [String: [SQLiteOperation: DebounceRowChange]]()
 	private var debounceTime: UInt64 = .shortDelay
 	
 	// allow to listen to db-level changes of each row
@@ -636,7 +636,7 @@ public actor Database {
 			}
 			if debounce[tableName]?[operation] == nil {
 				tableChangeObservers[tableName]?.append(operation)
-				debounce[tableName]?[operation] = Debounce(parameters: RowChangeParameters(operation: operation, ids: [id]), debounceTask: nil)
+				debounce[tableName]?[operation] = DebounceRowChange(parameters: RowChangeParameters(operation: operation, ids: [id]), debounceTask: nil)
 			} else {
 				debounce[tableName]?[operation]?.parameters.ids.append(id)
 			}

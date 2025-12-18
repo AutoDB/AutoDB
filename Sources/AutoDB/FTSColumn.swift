@@ -114,7 +114,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	
 	private var column: String
 	private var targetTableName: String {
-		TargetTableType.typeName
+		TargetTableType.tableName
 	}
 	
 	init(_ column: String) {

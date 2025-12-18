@@ -6,8 +6,9 @@
 //
 
 // Note that this cannot be an actor since we need Encodable, it must be a class in order to set its owner automatically.
-/// A one-to-one relation,
-public final class OneRelation<AutoType: Table>: Codable, Relation, @unchecked Sendable {
+/// A one-to-one relation, typically a parent in a parent-child relation. 
+public final class OneRelation<AutoType: TableModel>: Codable, RelationToOne, @unchecked Sendable {
+	
 	private func didChange() {
 		if let owner = owner as? RelationOwner {
 			Task {
@@ -24,6 +25,7 @@ public final class OneRelation<AutoType: Table>: Codable, Relation, @unchecked S
 		self.id = id
 	}
 	
+	/// The id of the related property, note that the relation itself does not have a table.
 	public var id: AutoId = 0
 	public var _object: AutoType?
 	weak var owner: (any Owner)? = nil
@@ -44,6 +46,7 @@ public final class OneRelation<AutoType: Table>: Codable, Relation, @unchecked S
 			}
 			return try await fetch()
 		}
+		// note that 'set' accessor is not allowed on property with 'get' accessor that is 'async' or 'throws'
 	}
 	
 	/// Populate the relation safely using locks, they do not impact performance unless congested. And then you need locks.
@@ -59,7 +62,7 @@ public final class OneRelation<AutoType: Table>: Codable, Relation, @unchecked S
 		if let _object {
 			return _object
 		}
-		_object = try await AutoType.fetchId(id)
+		_object = try await AutoType.fetchId(token: nil, id, nil)
 		
 		if let _object {
 			return _object
@@ -87,4 +90,29 @@ public final class OneRelation<AutoType: Table>: Codable, Relation, @unchecked S
 	public func setOwner<OwnerType>(_ owner: OwnerType) where OwnerType : Owner {
 		self.owner = owner
 	}
+	
+	/// Batch fetch multiple objects, use like this:
+	/// let objects = ... // fetch an array of items containing a OneRelation
+	/// try await objects.fetchAll(\.album) //use a keypath to unfold the relation, in this case album.
+	public func fetchAll(_ list: [OneRelation]) async throws {
+		if list.isEmpty { return }
+		let autoType = list[0].objectType
+		let typeID = ObjectIdentifier(autoType)
+		let ids: [AutoId] = list.map(\.id)
+		
+		var fail = false
+		let objects: [AutoId: AutoType] = try await autoType.fetchIds(token: nil, ids, typeID).dictionary()
+		for relation in list {
+			if let obj = objects[relation.id] {
+				relation._object = obj
+			} else {
+				fail = true
+			}
+		}
+		if fail {
+			throw AutoError.missingId
+		}
+	}
+	
+	public var objectType: AutoType.Type { AutoType.self }
 }

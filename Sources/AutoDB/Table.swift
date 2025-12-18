@@ -14,7 +14,7 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	static var autoDBSettings: SettingsKey { get }
 	
 	/// The table name to use for storage, must be unique, good when having models inside modelObjects.
-	static var typeName: String { get }
+	static var tableName: String { get }
 	
 	/// return a list of keypaths to the variables that have index, grouped together to make multi-column index
 	/// We can't use KeyPaths, so we have to check indices in runtime instead.
@@ -82,12 +82,12 @@ public extension Table {
 	}
     
     /// a shortcut to get the name of the class as a string, to be used in SQL queries
-    var typeName: String {
-		Self.typeName
+    var tableName: String {
+		Self.tableName
     }
     
     /// class shortcut to string name
-    static var typeName: String {
+    static var tableName: String {
         String(describing: self)
     }
 	
@@ -136,7 +136,7 @@ public extension Table {
 	
 	/// migration info, to get a callback when migration is done simply call: `_ = try await table.db()` which will wait until migration is complete.
 	static func migrationState() async -> MigrationTableState {
-		return try await AutoDBManager.shared.migrationState(self, nil)
+		return await AutoDBManager.shared.migrationState(self, nil)
 	}
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
@@ -315,8 +315,9 @@ public extension Table {
 					try? SQLValue.fromAny($0)
 				}
 				
-				let query = "SELECT id FROM `\(Self.typeName)` WHERE \(uniqueIndexSet.map { "\($0) = ?" }.joined(separator: " AND "))"
-				if let existing: AutoId = try? await Self.valueQuery(token: token, query, sqlArguments: arguments) {
+				let query = "SELECT id FROM `\(Self.tableName)` WHERE \(uniqueIndexSet.map { "\($0) = ?" }.joined(separator: " AND "))"
+				let existing: AutoId? = try? await Self.valueQuery(token: token, query, sqlArguments: arguments)
+				if existing != nil {
 					duplicates.append(object.id)
 				}
 			}
@@ -391,7 +392,7 @@ public extension Collection where Element: Table {
 	func save(token: AutoId? = nil) async throws {
 		// Do some compiler-type magic to be allowed to call...
 		if let list = (self as? [Self.Element]) ?? (Array(self) as? [Self.Element]) {
-			try await Element.saveList(token: token, list)
+			try await Element.saveList(token: token, list, onlyUpdated: nil)
 		} else {
 			throw AutoError.missingSetup
 		}
@@ -409,6 +410,14 @@ public extension Collection where Element: Table {
 }
 
 public extension Dictionary where Key == AutoId, Value: Table {
+	
+	/// If you need to fetch items in the order of ids, Fetch as dictionary and apply this. See fetch() in AutoRelations for an example
+	func sortById(_ ids: [AutoId]) -> [Value] {
+		ids.compactMap { self[$0] }
+	}
+}
+
+public extension Dictionary where Key == AutoId, Value: Model {
 	
 	/// If you need to fetch items in the order of ids, Fetch as dictionary and apply this. See fetch() in AutoRelations for an example
 	func sortById(_ ids: [AutoId]) -> [Value] {

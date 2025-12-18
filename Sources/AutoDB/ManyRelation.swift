@@ -12,7 +12,7 @@ import SwiftUI
 
 /**
  A relation is an array of non-unique items of one single AutoDB type.
- It handles fetching and saving in one place, having a optional backing var to know if we have fetched or not.
+ It handles fetching and saving in one place, having an optional backing var to know if we have fetched or not.
  If the owner implements RelationOwner, it will automatically call it when changed, this way you don't need to keep track of changes yourself.
  When fetching from DB this will contain no objects, you must call initFetch/Fetch first to populate the list.
  
@@ -39,7 +39,7 @@ final class Child: AutoDB, @unchecked Sendable {
 
 // Note that this cannot be an actor since we need Encodable, it can't be a struct since we then can't modify it.
 /// A one-to-many relation, defined as an ordered list of non-unique items.
-public final class ManyRelation<AutoType: Table>: Codable, Relation, @unchecked Sendable {
+public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unchecked Sendable {
 	public static func == (lhs: ManyRelation<AutoType>, rhs: ManyRelation<AutoType>) -> Bool {
 		lhs.ids == rhs.ids
 	}
@@ -104,7 +104,7 @@ public final class ManyRelation<AutoType: Table>: Codable, Relation, @unchecked 
 		
 		let end = min(ids.count, initial)
 		let idsToFetch = Array(ids[0..<end])
-		_items = try await AutoType.fetchIds(idsToFetch).sortById(idsToFetch)
+		_items = try await AutoType.fetchIds(token: token, idsToFetch, nil).sortById(idsToFetch)
 		hasMore = _items?.count == initial
 		
 		return items
@@ -128,7 +128,7 @@ public final class ManyRelation<AutoType: Table>: Codable, Relation, @unchecked 
 		let start = _items?.count ?? 0
 		let end = min(ids.count, fetchStep)
 		let idsToFetch = Array(ids[start..<end])
-		let fetched = try await AutoType.fetchIds(idsToFetch).sortById(idsToFetch)
+		let fetched = try await AutoType.fetchIds(token: token, idsToFetch, nil).sortById(idsToFetch)
 		hasMore = fetched.count == fetchStep
 		_items?.append(contentsOf: fetched)
 		

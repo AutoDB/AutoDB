@@ -9,23 +9,34 @@ import Foundation
 import Testing
 import Combine
 
-struct Album: Table {
+final class Album: Model, @unchecked Sendable {
 	
-	var id: AutoId = 0
-	var name = ""
-	var artist = ""
-}
-
-final class AlbumArt: Model, @unchecked Sendable {
-	
-	struct AlbumArtValue: Table {
+	struct Value: Table {
 		
-		static let typeName = "AlbumArt"
 		var id: AutoId = 0
 		var name = ""
 		var artist = ""
 		
-		// in here to save to DB!
+		static let tableName = "Album"
+	}
+	
+	var value: Value
+	init(_ value: Value) {
+		self.value = value
+	}
+	//shorthand
+	var name: String { value.name }
+}
+
+final class AlbumArt: Model, @unchecked Sendable {
+	
+	struct Value: Table {
+		
+		static let tableName = "AlbumArt"
+		var id: AutoId = 0
+		var data: Data? = nil
+		
+		// what album does this belong to?
 		var album = OneRelation<Album>()
 		
 		static var autoDBSettings: SettingsKey {
@@ -33,10 +44,12 @@ final class AlbumArt: Model, @unchecked Sendable {
 		}
 	}
 	
-	var value: AlbumArtValue
-	init(_ value: AlbumArtValue) {
+	var value: Value
+	init(_ value: Value) {
 		self.value = value
 	}
+	//shorthand
+	var album: OneRelation<Album> { value.album }
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
@@ -58,7 +71,7 @@ final class DeallocTest: @unchecked Sendable {
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class CureAlbums: Model, @unchecked Sendable {
 	struct CureAlbumsTable: Table {
-		static let typeName = "CureAlbums"
+		static let tableName = "CureAlbums"
 		
 		var id: AutoId = 0
 		var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
@@ -109,7 +122,7 @@ final class CombineArtist: @unchecked Sendable, ObservableObject, RelationOwner 
 	}
 }
 
-class CombineTester {
+class CombineTester: @unchecked Sendable {
 	
 	var listeners = Set<AnyCancellable>()
 	var gotMessage = false
@@ -199,12 +212,17 @@ class ListenerHelp: @unchecked Sendable {
 }
 
 // experimenting with publishers
-class RelationQueryPublisherTests: @unchecked Sendable {
+actor RelationQueryPublisherTests	{ //}: @unchecked Sendable {
+	
+	var count = 0
+	
+	func inc() {
+		count += 1
+	}
 	
 	@Test
 	func exampleOfAsyncObserver() async throws {
 		
-		var count = 0
 		let observer = AsyncObserver<Int>()
 		Task {
 			// this task will never quit - it will "leak" until the observer is cancelled.
@@ -214,13 +232,13 @@ class RelationQueryPublisherTests: @unchecked Sendable {
 			}
 			print("This will never happen!")
 		}
-		let task = Task {
+		let task = Task { @Sendable in
 			// this task can be cancelled without needing to cancel everyone
 			for await num in observer {
 				print("cancellable task got: \(num)")
 			}
 			print("Finished observing: \(Task.isCancelled)")
-			count += 1
+			self.inc()
 		}
 		
 		// somewhere else we are doing work:
@@ -236,8 +254,12 @@ class RelationQueryPublisherTests: @unchecked Sendable {
 		//try await Task.sleep(for: .milliseconds(10))
 		
 		try await waitForCondition {
-			count == 1
+			await countIsOne()
 		}
+	}
+	
+	func countIsOne() -> Bool {
+		self.count == 1
 	}
 }
 
@@ -247,8 +269,8 @@ class RelationQueryTests {
 	@Test func deallocRelationQuery() async throws {
 		//try await AutoDBManager.shared.truncateTable(DeallocTest.self)
 		var owner: DeallocTest? = DeallocTest()
-		weak var listener = owner?.albums
-		var didDealloc = false
+		nonisolated(unsafe) weak var listener = owner?.albums
+		nonisolated(unsafe) var didDealloc = false
 		owner?.callback = {
 			didDealloc = true
 		}
@@ -304,11 +326,15 @@ class RelationQueryTests {
 	
 	func testRelationQuery() async throws {
 		try await AutoDBManager.shared.truncateTable(CureAlbums.CureAlbumsTable.self)
-		try await AutoDBManager.shared.truncateTable(Album.self)
+		try await AutoDBManager.shared.truncateTable(Album.Value.self)
 		//try await Album.db().setDebug()
 		let db = try await CureAlbums.db()
 		
 		try await CureAlbums.create(1).save()
+		
+		let tableName = CureAlbums.CureAlbumsTable.tableName
+		#expect("CureAlbums" == tableName)
+		
 		var count = try await db.query("Select count(*) From CureAlbums").first?.values.first?.intValue ?? 0
 		if count == 0 {
 
@@ -320,9 +346,9 @@ class RelationQueryTests {
 		let isEmpty = try await CureAlbums.fetchId(1).value.albums.fetchItems().isEmpty
 		#expect(isEmpty)
 		for name in ["Seventeen Seconds", "Faith"] {
-			var album = await Album.create()
-			album.name = name
-			album.artist = "The Cure"
+			let album = await Album.create()
+			album.value.name = name
+			album.value.artist = "The Cure"
 			try await album.save()
 		}
 		
@@ -343,9 +369,9 @@ class RelationQueryTests {
 			// this can happen due to the observation-delay, and is not strictly an error.
 		}
 		#expect(cure.value.albums.hasMore == false)
-		var album = await Album.create()
-		album.name = "Pornography"
-		album.artist = "The Cure"
+		let album = await Album.create()
+		album.value.name = "Pornography"
+		album.value.artist = "The Cure"
 		try await album.save()
 		do {
 			try await waitForCondition(delay: 5) {

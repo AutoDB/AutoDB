@@ -32,7 +32,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 	/// We return a list of migrations that has been done, if the auto-conversions are not suitable, just supply your own functions.
 	func setup<T: Table>(_ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> (TableInfo, [MigrationState]?) {
 		let instance = classType.init()
-		let tableName = classType.typeName
+		let tableName = classType.tableName
 		
 		self.settings = settings
 		
@@ -132,7 +132,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				
 				let tempTableName = "_\(tableName)TempAuto"
 				// if previous run was failing, drop that table
-				try? await db.query(token: token, "DROP TABLE IF EXISTS `\(tempTableName)`")
+				_ = try? await db.query(token: token, "DROP TABLE IF EXISTS `\(tempTableName)`")
 				try await db.query(token: token, tableInfo.createTableSyntax(tempTableName))
 				
 				let columnNames = tableInfo.columns.map { $0.name }

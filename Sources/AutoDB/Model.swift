@@ -321,7 +321,7 @@ public extension Model {
 	
 	static func saveChangesLater() {
 		Task.detached {
-			try await AutoDBManager.shared.saveChangesLater(Self.self)
+			await AutoDBManager.shared.saveChangesLater(Self.self)
 		}
 	}
 	
@@ -357,13 +357,13 @@ public extension Model {
 		if updated.isEmpty == false {
 			try await TableType.saveList(token: token, updated, onlyUpdated: true)
 			//remove all changed objects
-			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(TableType.self))
+			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(self))
 		}
 		
 		if created.isEmpty == false {
 			try await TableType.saveList(token: token, created, onlyUpdated: false)
 			//remove all changed objects
-			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(TableType.self))
+			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(self))
 		}
 		
 		try await didSave(objects)
@@ -442,5 +442,10 @@ public extension Collection where Element: Model {
 	func dictionary() -> [AutoId: Element] {
 		let uniqueSet = Set(self)
 		return Dictionary(uniqueKeysWithValues: uniqueSet.map { ($0.id, $0) })
+	}
+	
+	/// Sort by ids, when you want the objects returned to be in the same order as fetched: fetchIds(idsToFetch).sortById(idsToFetch)
+	func sortById(_ ids: [AutoId]) -> [Element] {
+		dictionary().sortById(ids)
 	}
 }

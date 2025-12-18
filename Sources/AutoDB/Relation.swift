@@ -20,3 +20,13 @@ public protocol Relation: AnyObject, Equatable {
 public protocol RelationOwner: Sendable {	
 	func didChange() async
 }
+
+public protocol RelationToOne: Relation {
+	var id: AutoId { get }
+	func fetchAll(_ list: [Self]) async throws
+}
+
+public protocol RelationToMany: Relation {
+	var ids: [AutoId] { get }
+	func fetchAll(_ list: [Self]) async throws
+}

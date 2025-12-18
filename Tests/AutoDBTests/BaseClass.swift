@@ -39,8 +39,8 @@ final class UniqueString: Model, @unchecked Sendable {
 	
 	struct Value: Table {
 		
-		static let typeName: String = "UniqueString"
-		var id: AutoId = 0
+		static let tableName: String = "UniqueString"
+		var id: AutoId = .generateId()
 		var string: String = ""
 		static var uniqueIndices: [[String]] {
 			[
@@ -124,6 +124,7 @@ final class IntTester: Table, @unchecked Sendable {
 	struct Value: Table {
 		var id: AutoId = 0	// all ids are of type UInt64, which makes it easy to handle uniqueness.
 		var name: String = ""	// we must have default values or nil
+		static let tableName: String = "Artist"
 	}
 	var value: Value
 	init(_ value: Value) {
@@ -153,8 +154,7 @@ final class CodeWithKeys: Table, @unchecked Sendable {
 }
 
 // Building something to handle relations
-@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-//@Observable
+//@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *) @Observable
 final class Parent: Model, @unchecked Sendable {
 	var value: Value
 	struct Value: Table {
@@ -162,7 +162,9 @@ final class Parent: Model, @unchecked Sendable {
 		var id: UInt64 = 0
 		var name = ""
 		var children = ManyRelation<Child>()
+		static let tableName: String = "Parent"
 	}
+	
 	init(_ value: Value) {
 		self.value = value
 	}
@@ -171,4 +173,6 @@ final class Parent: Model, @unchecked Sendable {
 struct Child: Table, @unchecked Sendable {
 	var id: UInt64 = 0
 	var name = "fox"
+	
+	static let tableName: String = "Child"
 }
