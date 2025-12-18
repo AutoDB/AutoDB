@@ -1,5 +1,25 @@
 # Relations
 
+AutoDB supports the most common types of relations, one-to-one, one-to-many, and query. You model this by creating a relation-property in your Model class (it is possible to use Structs/Tables too but they have drawbacks you will see later).
+
+
+## OneToMany
+
+The typical example when you have one parent with many children. We want an API that looks like this:
+
+```
+var parent: Parent = await Parent.create(1) // or fetchId(1)
+// we don't want the engine to auto-fetch any children, rather when the time is right we want to tell it to fetch:
+try await parent.children.fetch()
+// now you can loop through all children:
+for child in parent.children.items {
+	// do work
+}
+// normally, a list will change. E.g. If using SwiftUI keep fetching a
+
+
+## OneToOne
+
 Let's model a relationship. Imagine a list of AlbumArts and you want their respective Albums. Note that they could both be plain Table structs as well.
 
 ```

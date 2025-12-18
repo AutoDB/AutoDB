@@ -384,6 +384,31 @@ extension UInt64 {
 		return nil
 	}
 	
+	// MARK: other lookup functions
+	
+	nonisolated(unsafe) private var optimization = [ObjectIdentifier: Optimizations]()
+	
+	/// we can't isolate this since we need it when fetching objects, but since we only need get, we can lock the set with semaphore.
+	nonisolated func optimization<T: Model>(_ t: T, _ identifier: ObjectIdentifier? = nil) -> Optimizations? {
+		let typeID = identifier ?? ObjectIdentifier(T.self)
+		return optimization[typeID]
+	}
+	
+	func setOptimization<T: Model>(_ t: T, identifier: ObjectIdentifier? = nil, _ opt: Optimizations) async {
+		let semaphore = Semaphore()
+		await semaphore.wait()
+		defer { Task { await semaphore.signal() }}
+		
+		let typeID = identifier ?? ObjectIdentifier(T.self)
+		var optimize = optimization[typeID] ?? Optimizations()
+		if let relations = opt.relationPaths {
+			optimize.relationPaths = relations
+		}
+		
+		//optimize.hasInnerRelations = hasInnerRelations
+		optimization[typeID] = optimize
+	}
+	
 	// MARK: - fetching
 	
 	static func fetchId<T: Table>(token: AutoId? = nil, _ id: UInt64, _ identifier: ObjectIdentifier? = nil) async throws -> T? {

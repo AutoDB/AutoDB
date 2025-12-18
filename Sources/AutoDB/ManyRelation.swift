@@ -17,24 +17,28 @@ import SwiftUI
  When fetching from DB this will contain no objects, you must call initFetch/Fetch first to populate the list.
  
  Usage:
-final class Parent: AutoDB, @unchecked Sendable {
+final class Parent: Model, @unchecked Sendable {
+	var value: Value
+	struct Value: Table {
+		
+		var id: UInt64 = 0
+		var name = ""
+		var children = ManyRelation<Child>()
+		static let tableName: String = "Parent"
+	}
 	
-	var id: UInt64 = 0
-	var name = ""
-	var children = AutoRelation<Child>()
-}
-
-final class Child: AutoDB, @unchecked Sendable {
-	var id: UInt64 = 0
-	var name = "fox"
+	init(_ value: Value) {
+		self.value = value
+	}
 }
  
  let parent = try await Parent.fetchQuery(...)
- try await parent.children.fetch()
  // now items are populated with children in the order we created it:
  for child in parent.children.items {
 	...
  }
+ 
+ try await parent.children.fetch()
  */
 
 // Note that this cannot be an actor since we need Encodable, it can't be a struct since we then can't modify it.
@@ -44,9 +48,11 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		lhs.ids == rhs.ids
 	}
 	
-	public init(initial: Int = 150, limit: Int = 50) {
+	/// specify how many to fetch at the initial fetch, the limit for all subsequent fetches and if we should fetch relations on first load.
+	public init(initial: Int = 150, limit: Int = 50, initFetch: Bool = true) {
 		self.initial = initial
 		self.limit = limit
+		self.initFetch = initFetch
 		ids = []
 		items = []
 	}
@@ -56,8 +62,9 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 	
 	weak var owner: (any Owner)? = nil
 	
-	var limit: Int
 	let initial: Int
+	var limit: Int
+	let initFetch: Bool
 	var hasMore = false
 	
 	private var ids: [AutoId]
@@ -87,8 +94,10 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 	/// This is called automatically when creating an object or when fetching from DB.
 	public func setOwner<OwnerType: Owner>(_ owner: OwnerType) {
 		self.owner = owner
-		Task {
-			try? await firstFetch()
+		if initFetch {
+			Task {
+				try? await firstFetch()
+			}
 		}
 	}
 	
@@ -143,7 +152,7 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		didChange()
 	}
 	
-	/// Append more items to your relation, if not all are fetched they will not show up in the list until fetched
+	/// Append more items to your relation, if max is reached they will show up at the next fetch
 	public func append(_ items: any Collection<AutoType>) async {
 		await semaphore.wait()
 		defer { Task { await semaphore.signal() } }
@@ -222,6 +231,7 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		case ids
 		case initial
 		case limit
+		case initFetch
 	}
 	
 	public init(from decoder: any Decoder) throws {
@@ -229,6 +239,7 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		self.ids = try container.decode([AutoId].self, forKey: .ids)
 		self.initial = try container.decode(Int.self, forKey: .initial)
 		self.limit = try container.decode(Int.self, forKey: .limit)
+		self.initFetch = (try? container.decodeIfPresent(Bool.self, forKey: .initFetch)) ?? false
 	}
 	
 	public func encode(to encoder: any Encoder) throws {
@@ -237,5 +248,6 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		try container.encode(ids, forKey: .ids)
 		try container.encode(initial, forKey: .initial)
 		try container.encode(limit, forKey: .limit)
+		try container.encode(initFetch, forKey: .initFetch)
 	}
 }

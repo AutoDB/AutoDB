@@ -4,8 +4,14 @@
 //
 //  Created by Olof Andersson-Thorén on 2025-03-07.
 //
-//import Dispatch
+
 import Foundation
+
+/// let the manager store info about the types so we don't need to perform the same lookups several times.
+struct Optimizations: @unchecked Sendable {
+	var relationPaths: [AnyKeyPath]?
+	var innerRelations: [AnyKeyPath]?
+}
 
 /// All table classes must implement AutoDB and be @unchecked Sendable. Regular Sendable is not meaningful (must both be decodable and owned by a global actor).
 public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwner, TableModel {
@@ -165,9 +171,25 @@ public extension Model {
 	/// for relations that are saved in db, like ManyRelation, it must be kept in the value. When not created decoding, call this method.
 	func setOwnerOnRelations() {
 		
-		for (_, path) in value.allKeyPaths {
-			if let relation = value[keyPath: path] as? any Relation {
-				relation.setOwner(self)
+		let optimization = AutoDBManager.shared.optimization(self)
+		if let paths = optimization?.relationPaths {
+			for path in paths {
+				if let relation = value[keyPath: path] as? any Relation {
+					relation.setOwner(self)
+				}
+			}
+		} else {
+			var relationPaths = [AnyKeyPath]()
+			for (_, path) in value.allKeyPaths {
+				
+				if let relation = value[keyPath: path] as? any Relation {
+					relation.setOwner(self)
+					relationPaths.append(path as AnyKeyPath)
+				}
+			}
+			let opt = Optimizations(relationPaths: relationPaths)
+			Task(priority: .userInitiated) {
+				await AutoDBManager.shared.setOptimization(self, opt)
 			}
 		}
 		
@@ -176,10 +198,25 @@ public extension Model {
 	
 	/// for other relations that does not need to be stored, like FTSColumn, RelationQuery, etc -  it can be placed in this Model having the Table if you want. This method is called by setOwnerOnRelations() and after decoding
 	func setOwnerOnInnerRelations() {
-		
-		for (_, path) in self.allKeyPaths {
-			if let relation = self[keyPath: path] as? any Relation {
-				relation.setOwner(self)
+		let optimization = AutoDBManager.shared.optimization(self)
+		if let paths = optimization?.innerRelations {
+			for path in paths {
+				if let relation = self[keyPath: path] as? any Relation {
+					relation.setOwner(self)
+				}
+			}
+		}
+		else {
+			var innerRelations = [AnyKeyPath]()
+			for (_, path) in self.allKeyPaths {
+				if let relation = self[keyPath: path] as? any Relation {
+					relation.setOwner(self)
+					innerRelations.append(path as AnyKeyPath)
+				}
+			}
+			let opt = Optimizations(innerRelations: innerRelations)
+			Task(priority: .userInitiated) {
+				await AutoDBManager.shared.setOptimization(self, opt)
 			}
 		}
 	}

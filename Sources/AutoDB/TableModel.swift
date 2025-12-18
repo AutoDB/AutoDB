@@ -39,9 +39,6 @@ public protocol TableModel: Sendable, Hashable {
 	// MARK: - deletion
 	
 	var isDeleted: Bool { get async }
-	
-	// MARK: - fetch relations from multiple objects in one request
-	//fetchAll
 }
 
 public extension Collection where Element: TableModel {

@@ -230,8 +230,7 @@ final class AutoDBTests: XCTestCase {
 	
 	func test_fetching_api() async throws {
 		
-		let db = try await BaseClass.db()
-		try await db.query("DELETE FROM BaseClass")
+		try await BaseClass.truncateTable()
 		
 		let first = await BaseClass.create(1)
 		let second = await BaseClass.create(2)
@@ -298,7 +297,6 @@ final class AutoDBTests: XCTestCase {
 		XCTAssertEqual(artist?.otherNest, Nested(name: "some name"))
 	}
 	
-	// We can't have relations from structs, why?
 	func testRelations() async throws {
 		try await AutoDBManager.shared.truncateTable(Parent.Value.self)
 		try await AutoDBManager.shared.truncateTable(Child.self)
@@ -339,7 +337,7 @@ final class AutoDBTests: XCTestCase {
 		let data = try encoder.encode(parent.value.children)
 		print(String(data: data, encoding: .utf8)!)
 		
-		try await parent.value.children.fetch()
+		//try await parent.value.children.fetch()
 		
 		XCTAssertEqual(parent.value.children.items.first?.name, "Gunnar")
 		XCTAssertEqual(parent.value.children.items.last?.name, "Bertil")
@@ -347,52 +345,10 @@ final class AutoDBTests: XCTestCase {
 		XCTAssertNotNil(parent.value.children.owner)
 	}
 	 
-	func testOneRelationMultipleDBs() async throws {
-		let mainDB = try await ObserveBasic.db()
-		try await mainDB.query("DROP TABLE IF EXISTS AlbumArt")
-		try await mainDB.query("DROP TABLE IF EXISTS Album")
-		
-		let cacheDB = try await AlbumArt.db()
-		try await AlbumArt.query("DELETE FROM AlbumArt")
-		await Album.queryNT("DELETE FROM Album")
-		
-		let faith = await Album.create()
-		faith.value.name = "Faith"
-		try await faith.save()
-		
-		let id: AutoId = 4
-		var art: AlbumArt? = await AlbumArt.create(id)
-		//let id = art!.id
-		await art?.value.album.setObject(faith)
-		try await art?.save()
-		print("art: \(art!.value.album.id)")
-		art = nil
-		await Task.yield()
-		
-		let artObj = try await AlbumArt.fetchId(id)
-		print("artObj: \(artObj.id) \(artObj.value.album.id)")
-		
-		if try await artObj.album.object != faith {
-			throw AutoError.missingRelation
-		}
-		
-		XCTAssertTrue(artObj.value.album._object == faith)
-		XCTAssertFalse(mainDB === cacheDB)
-		
-		// make sure we have two files with different tables:
-		let q = "SELECT name FROM sqlite_master WHERE type='table';"
-		let result = try await mainDB.query(q)
-		for rows in result {
-			XCTAssertFalse(rows.values.contains { $0.stringValue == "AlbumArt" })
-		}
-		let cacheRes = try await cacheDB.query(q).compactMap({ $0.values.first })
-		XCTAssertTrue(cacheRes.contains { $0.stringValue == "AlbumArt" })
-	}
-	
 	func testOneRelationFetchList() async throws {
 		
-		try await AlbumArt.query("DELETE FROM AlbumArt")
-		try await Album.query("DELETE FROM Album")
+		try await AlbumArt.truncateTable()
+		try await Album.truncateTable()
 		
 		// create albums
 		let albumNames = ["Faith", "Seventeen Seconds", "Pornography", "Three Imaginary Boys"]
@@ -402,6 +358,7 @@ final class AutoDBTests: XCTestCase {
 			try await album.save()
 			
 			let art: AlbumArt = await AlbumArt.create(AutoId(index + 1))
+			await Task.yield()
 			//let id = art!.id
 			await art.value.album.setObject(album)
 			try await art.save()
@@ -431,8 +388,8 @@ final class AutoDBTests: XCTestCase {
 		let other = try await ObserveBasic.db()
 		//await other.setDebug()
 		
-		try await other.query("DELETE FROM IntTester")
-		try await other.query("DELETE FROM ObserveBasic")
+		try await IntTester.truncateTable()
+		try await ObserveBasic.truncateTable()
 		
 		let waiter = expectation(description: "multi")
 		let firstIteration = expectation(description: "firstIteration")

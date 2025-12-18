@@ -126,7 +126,7 @@ class FTSTests {
 		#expect(post?.ownerIndex != nil)
 		#expect(post?.ownerIndex.owner != nil)
 		
-		//TODO: THINK: should we return the owner or the table?
+		//TODO: THINK: should we return the owner or the table? We should return the owner (Model) if exists!
 		let fetchedPost = try await post?.ownerIndex.search("once").first
 		#expect(fetchedPost?.title == title)
 		let cached: Post? = await AutoDBManager.shared.modelForTable(fetchedPost)
