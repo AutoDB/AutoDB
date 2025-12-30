@@ -20,7 +20,7 @@ final class Artist: Model, @unchecked Sendable {
 	struct Value: Table {
 		
 		// define a type name, will be the table name in the database. This makes us free to call our types whaterver we want. You must do this if migrating from an existing database.
-		public static var typeName: String { "Artist" }
+		public static var tableName: String { "Artist" }
 		
 		var id: AutoId = 0		 // all ids are of type UInt64, which makes it easy to handle uniqueness.
 		var name: String = ""	 // we must have a default value

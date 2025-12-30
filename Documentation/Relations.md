@@ -8,7 +8,8 @@ The most complex and interesting of them all. We want an API that looks like thi
 
 ```
 var cureAlbums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 4, limit: 20)
-try await cureAlbums.fetchItems()	// we never fetch when created since there could be a lot of objects
+
+try await cureAlbums.fetchItems()	// we typically don't want to fetch when created since there could be a lot of objects
 
 // modifying DB should update the list
 cureAlbums.hasMore // false
@@ -17,7 +18,7 @@ cureAlbums.hasMore // true
 
 ```
 The class is using Observation (PRs are welcome), so you need iOS >= 17.0 for now.
-Note that dynamic arguments is not available yet (coming in the future), so you can't ask for any of the owner's properties etc.			
+Normally you would use this in a ViewModel or similar, and not store it in DB. But you can if you want to.			
 
 ## OneToMany
 
