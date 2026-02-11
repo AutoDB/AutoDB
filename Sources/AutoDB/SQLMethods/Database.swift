@@ -563,8 +563,7 @@ public actor Database {
 		guard sqlite3_reset(statementHandle) == SQLITE_OK, sqlite3_clear_bindings(statementHandle) == SQLITE_OK else {
 			throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 		}
-		
-		let affectedRows = sqlite3_changes64(statementHandle)
+		let affectedRows = sqlite3_changes64(dbHandle)
 		return Int(affectedRows)
 	}
 	
