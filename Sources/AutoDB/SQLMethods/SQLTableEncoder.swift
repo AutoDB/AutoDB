@@ -45,7 +45,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			if let type = (instance[keyPath: path] as? OptionalProtocol)?.wrappedType(),
 			   let (columnType, _) = SQLTableEncoder.getColumnType(type) {
 				
-				addColumn(column, columnType, type)
+				try addColumn(column, columnType, type)
 			}
 		}
 		
@@ -156,41 +156,72 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				
 				// re-add all indices
 				for indexToAdd in targetIndices {
-					try await db.query(token: token, indexToAdd.definition(tableName: tableName))
+					do {
+						try await addIndex(db, indexToAdd, token, tableName)
+					} catch {
+						print("ERROR: could not add index: \(error)")
+						migrations.append(.failedIndex(index: indexToAdd, error: error))
+					}
 				}
+				
 				addedIndices.removeAll()
 			}
 			
 			// add new indices if needed
 			for indexToAdd in addedIndices {
-				try await db.query(token: token, indexToAdd.definition(tableName: tableName))
+				do {
+					try await addIndex(db, indexToAdd, token, tableName)
+				} catch {
+					print("ERROR: could not add index: \(error)")
+					migrations.append(.failedIndex(index: indexToAdd, error: error))
+				}
 			}
 		}
 		
 		return (tableInfo, migrations)
 	}
+	
+	/// Adding an index can fail if there are duplicate values, so we catch that error and delete the duplicates before trying again. Note that this can cause data loss, so we log it and report it in the migration array.
+	func addIndex(_ db: Database, _ indexToAdd: SQLIndex, _ token: AutoId, _ tableName: String) async throws {
+		do {
+			try await db.query(token: token, indexToAdd.definition(tableName: tableName))
+		}
+		catch Database.Error.uniqueConstraintFailed {
+			
+			// delete duplicate values
+			let innerQ = "SELECT a.id FROM `\(tableName)` a, `\(tableName)` b WHERE \(indexToAdd.columnNames.map { "a.\($0) = b.\($0)" }.joined(separator: " AND ")) AND a.id != b.id"
+			try await db.query(token: token, "DELETE FROM `\(tableName)` WHERE id IN (\(innerQ))")
+			
+			// try again
+			try await db.query(token: token, indexToAdd.definition(tableName: tableName))
+			
+		} catch {
+			throw error
+		}
+	}
+		
     
 	/// add a column that defaults to non-nil, can still be optional
-	func addColumn<T: EncodableSendable>(_ column: String, _ type: ColumnType, _ valueType: Any.Type, _ nullable: Bool, _ defaultValue: T?) {
+	func addColumn<T: EncodableSendable>(_ column: String, _ type: ColumnType, _ valueType: Any.Type, _ nullable: Bool, _ defaultValue: T?) throws {
 		let column = column.deleteUnderscorePrefix()
 		if addedColumns.contains(column) || column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
 			//print("ignoring \(column)")
 			return
 		}
 		if addedColumns.insert(column).inserted {
-			columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: nullable, defaultValue: defaultValue))
+			try columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: nullable, defaultValue: defaultValue))
 		}
     }
 	
 	/// add an optional column that defaults to nil
-	func addColumn(_ column: String, _ type: ColumnType, _ valueType: Any.Type) {
+	func addColumn(_ column: String, _ type: ColumnType, _ valueType: Any.Type) throws {
 		let column = column.deleteUnderscorePrefix()
 		if addedColumns.contains(column) || column.hasPrefix("_$") || column.hasPrefix("$") || column.hasPrefix("__") {
 			//print("ignoring \(column)")
 			return
 		}
 		if addedColumns.insert(column).inserted {
-			columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: true, defaultValue: nil))
+			try columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: true, defaultValue: nil))
 		}
 	}
     
@@ -234,8 +265,8 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
                 columnType = .blob
             case is Double, is Float, is Date:
                 columnType = .real
-            case is Int, is Int8, is Int16, is Int64, is Int32,
-                 is UInt, is UInt8, is UInt16, is UInt64, is UInt32:
+            case is UInt64, is Int, is Int8, is Int16, is Int64, is Int32,
+                 is UInt, is UInt8, is UInt16, is UInt32:
                 columnType = .integer
             
             //or types
@@ -271,6 +302,10 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		if let columnType {
 			return (columnType, nullable)
 		}
+		if let rawRepresentable = value as? any RawRepresentable {
+			// use the raw value's type, otherwise you get a data and if a number you can't do regular arithmetic operations.
+			return getColumnType(rawRepresentable.rawValue)
+		}
 		return nil
     }
     
@@ -288,7 +323,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
         
 		func encodeNil(forKey key: KeyType) throws { fatalError("This will not happen, but if it does - give it a default value.") }
         func encode(_ value: String, forKey key: KeyType) throws {
-			enc.addColumn(key.stringValue, .text, String.self, false, value)
+			try enc.addColumn(key.stringValue, .text, String.self, false, value)
         }
         
         func encode<T>(_ value: T, forKey key: KeyType) throws where T : EncodableSendable {
@@ -297,20 +332,18 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				return
 			}
             if let (sqlType, nullable) = SQLTableEncoder.getColumnType(value) {
-				enc.addColumn(key.stringValue, sqlType, type(of: value), nullable, value)
+				try enc.addColumn(key.stringValue, sqlType, type(of: value), nullable, value)
             }
             else {
 				//If not of basic type, we can still encode it as blob.
 				let data = (try? SQLTableEncoder.jsEncoder.encode(value)) ?? Data()
-				//print("encoding: \(type(of: value)) for: \(key.stringValue)")
-				//print("result: " + String(data: data, encoding: .utf8)!)
-				enc.addColumn(key.stringValue, .blob, Data.self, false, data)
+				try enc.addColumn(key.stringValue, .blob, Data.self, false, data)
             }
         }
 		
 		func encodeIfPresent(_ value: String?, forKey key: KeyType) throws {
 			if let (sqlType, _) = SQLTableEncoder.getColumnType(type(of: value)) {
-				enc.addColumn(key.stringValue, sqlType, String.self, true, value)
+				try enc.addColumn(key.stringValue, sqlType, String.self, true, value)
 			}
 		}
 		
@@ -320,10 +353,10 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			}
 			let metaType = type(of: value)
 			if let (sqlType, _) = SQLTableEncoder.getColumnType(metaType) {
-				enc.addColumn(key.stringValue, sqlType, metaType, true, value)
+				try enc.addColumn(key.stringValue, sqlType, metaType, true, value)
 			} else {
 				//If not of basic type, we can still encode it as blob.
-				enc.addColumn(key.stringValue, .blob, metaType, true, value)
+				try enc.addColumn(key.stringValue, .blob, metaType, true, value)
 			}
 		}
 

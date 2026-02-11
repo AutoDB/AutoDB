@@ -182,7 +182,11 @@ extension UInt64 {
 			return database
 		} catch {
 			await setupSemaphore.signal()
-			print("error setting up database: \(error) probably uncaught migration error, check your migrations!")
+			if case Database.Error.databaseIsClosed = error {
+				print("database is closed error, perhaps switching DB-path during migrations? \(error)")
+			} else {
+				print("error setting up database: \(error) probably uncaught migration error, check your migrations!")
+			}
 			throw error
 		}
 	}
@@ -576,15 +580,16 @@ extension UInt64 {
 		return try await database.query(token: token, query, sqlArguments: values ?? [])
 	}
 	
-	/// Execute a query, e.g. an INSERT or UPDATE statement. Will use converted sqlArguments if provided, otherwise it will convert the arguments.
-	public func execute<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws {
+	/// Execute a query, e.g. an INSERT or UPDATE statement. Will use converted sqlArguments if provided, otherwise it will convert the arguments. Returns the number of affected rows.
+	@discardableResult
+	public func execute<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Int {
 		
 		let database = try await setupDB(classType)
 		let values = try sqlArguments ?? arguments?.map {
 			// we must cast or somehow find out which SQL-type each argument is!
 			try SQLValue.fromAny($0)
 		}
-		try await database.execute(token: token, query, sqlArguments: values ?? [])
+		return try await database.execute(token: token, query, sqlArguments: values ?? [])
 	}
 	
 	/// Fetch a single value from the database, e.g. a count or sum.
@@ -795,7 +800,7 @@ extension UInt64 {
 	/// Change database file in the middle of operations, this is good for testing. No dbURL means memory.
 	public func switchDB(_ newPositions: [SettingsKey: URL]) async throws {
 		for db in sharedDatabases {
-			await db.value.closeNow()
+			await db.value.close(waitSec: 0.1)
 		}
 		tables.removeAll()
 		databases.removeAll()

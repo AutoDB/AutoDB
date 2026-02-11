@@ -79,13 +79,21 @@ public struct Column: Equatable, Hashable, Sendable {
 		return str
 	}
 	
-	public init(name: String, columnType: ColumnType, valueType: Any.Type, mayBeNull: Bool = false, defaultValue: EncodableSendable?) {
+	public init(name: String, columnType: ColumnType, valueType: Any.Type, mayBeNull: Bool = false, defaultValue: EncodableSendable?) throws {
 		self.name = name
 		self.columnType = columnType
 		self.valueType = valueType
 		self.mayBeNull = mayBeNull
 		self.primaryKeyIndex = 0
-		self.defaultValueString = defaultValue.flatMap { try? SQLValue.fromAny($0).ignoreDefault() }
+		if !mayBeNull {
+			guard let defaultValue else {
+				throw Error.cannotParseColumnDefinition(table: name, description: "Non-nullable column \(name) must have a default value")
+			}
+			self.defaultValueString = try SQLValue.fromAny(defaultValue).ignoreDefault()
+			
+		} else {
+			self.defaultValueString = defaultValue.flatMap { try? SQLValue.fromAny($0).ignoreDefault() }
+		}
 	}
 	
 	internal init(row: Row, tableName: String) throws {
@@ -247,6 +255,7 @@ extension UInt64: SQLColumnWrappable, SQLStorableAsUnsignedInteger {
 	public static func fromValue(_ value: SQLValue) -> Self? { if let i = value.uint64Value { return UInt64(i) } else { return nil } }
 }
 
+
 // MARK: - Enums, hacks for optionals
 
 protocol OptionalProtocol {
@@ -328,12 +337,30 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 		if let v = value as? any SQLStorableAsUnsignedInteger {
 			return .uinteger(v.unifiedRepresentation())
 		}
+		if let raw = (value as? any RawRepresentable)?.rawValue {
+			switch raw {
+				case _ as NSNull: return .null
+				case let v as SQLValue: return v
+				case let v as any StringProtocol: return .text(String(v))
+				
+				case let v as any SQLStorableAsUnsignedInteger: return .uinteger(v.unifiedRepresentation())
+				
+				case let v as any SQLStorableAsInteger: return .integer(v.unifiedRepresentation())
+				case let v as any SQLStorableAsDouble: return .double(v.unifiedRepresentation())
+				case let v as any SQLStorableAsText: return .text(v.unifiedRepresentation())
+				case let v as any SQLStorableAsData: return .data(v.unifiedRepresentation())
+				case let v as any SQLIntegerEnum: return .integer(v.rawValue.unifiedRepresentation())
+				case let v as any SQLStringEnum: return .text(v.rawValue.unifiedRepresentation())
+				case let v as any SQLUIntegerEnum: return .uinteger(v.rawValue.unifiedRepresentation())
+				default: throw Error.cannotConvertToValue
+			}
+		}
 		
 		switch value {
 			case _ as NSNull: return .null
 			case let v as SQLValue: return v
 			case let v as any StringProtocol: return .text(String(v))
-			//case let v as any SQLStorableAsUnsignedInteger: return .uinteger(v.unifiedRepresentation())
+			//case let v as any SQLStorableAsUnsignedInteger: return .uinteger(v.unifiedRepresentation())	//commented since already handled above
 			case let v as any SQLStorableAsInteger: return .integer(v.unifiedRepresentation())
 			case let v as any SQLStorableAsDouble: return .double(v.unifiedRepresentation())
 			case let v as any SQLStorableAsText: return .text(v.unifiedRepresentation())
@@ -362,7 +389,7 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 		}
 	}
 	
-	/// SQLite needs a default value when we are not null - but we can't ever store an AutoModel without a default value. So having a duplicate value stored in the DB is pointless. Sometimes you also don't want that, e.g. when default should be Date.now()
+	/// SQLite needs a default value when we are not null - but we can't ever store/define an AutoModel without a default value. So having a duplicate value stored in the DB is pointless. Sometimes you also don't want that, e.g. when default should be Date.now()
 	public func ignoreDefault() -> String {
 		switch self {
 			case .uinteger(_): 	return "1"
@@ -464,6 +491,17 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 			case let .double(d):	return UInt64(bitPattern: Int64(d))
 			case let .text(s):    	return UInt64(s)
 			case let .data(b):    	if let str = String(data: b, encoding: .utf8) { return UInt64(str) } else { return nil }
+		}
+	}
+	
+	public var uintValue: UInt? {
+		switch self {
+			case .null:				return nil
+			case let .integer(i):	return UInt(bitPattern: Int(i))
+			case let .uinteger(i):	return UInt(i)
+			case let .double(d):	return UInt(bitPattern: Int(d))
+			case let .text(s):    	return UInt(s)
+			case let .data(b):    	if let str = String(data: b, encoding: .utf8) { return UInt(str) } else { return nil }
 		}
 	}
 	

@@ -38,7 +38,7 @@
 //  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //  SOFTWARE.
 
-
+// TODO: replace token: AutoId? = nil with TaskLocal
 
 
 import Foundation
@@ -245,8 +245,7 @@ public actor Database {
 			}
 			defer { if hasSemaphore { Task { await semaphore.signal(token: token) } } }
 			try Task.checkCancellation()
-			isClosed = true
-			sqlite3_close(dbHandle)
+			closeDB()
 		}
 		
 		// kill after some time?
@@ -261,11 +260,10 @@ public actor Database {
 			if isClosed {
 				return
 			}
-			isClosed = true
 			// if there still is db-access (which it most likely isn't), we can't know that so must interrups to let go of handle.
 			//print("Interrupting sqlite to force close")
 			sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
-			sqlite3_close(dbHandle)
+			closeDB()
 		}
 	}
 	
@@ -277,11 +275,28 @@ public actor Database {
 		}
 		isClosed = true
 		
-		//print("Interrupting sqlite to force close")
+		// interrubt any other long-running query or transaction, to let go of the handle. If there is no long-running query, this will do nothing
 		sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
-		sqlite3_close(dbHandle)
+		
+		// we cannot close DB if already in transaction - statements must finalise first.
+		let hasSemaphore = inTransaction
+		if hasSemaphore {
+			await semaphore.wait(token: nil)
+		}
+		defer { if hasSemaphore { Task { await semaphore.signal(token: nil) } } }
+		
+		closeDB()
 	}
 	
+	private func closeDB() {
+		isClosed = true
+		for (_, statement) in cachedStatements {
+			sqlite3_finalize(statement.handle)
+		}
+		cachedStatements.removeAll()
+		// since there is no await between any usages of dbHandle and isClosed, we know that no task can access the db now.
+		sqlite3_close(dbHandle)
+	}
 	public func open() async throws {
 		harshClose?.cancel()
 		gentleClose?.cancel()
@@ -507,8 +522,9 @@ public actor Database {
 	
 	// MARK: - Execute methods, perform queries that do not return rows.
 	
-	/// Execute a query with parameters, returning nothing. Will throw an error if the query returns rows.
-	public func execute(token: AutoId? = nil, _ queryString: String, _ arguments: [Sendable]?) async throws {
+	/// Execute a query with parameters, returning amount of affected rows. Will throw an error if the query returns rows.
+	@discardableResult
+	public func execute(token: AutoId? = nil, _ queryString: String, _ arguments: [Sendable]?) async throws -> Int {
 		let values = try arguments?.map {
 			// we must cast or somehow find out which SQL-type each argument is!
 			try SQLValue.fromAny($0)
@@ -516,13 +532,13 @@ public actor Database {
 		return try await execute(token: token, queryString, sqlArguments: values ?? [])
 	}
 	
-	/// Execute a query with parameters, returning nothing. Will throw an error if the query returns rows.
-	public func execute(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue] = []) async throws {
+	/// Execute a query with parameters, returning amount of affected rows. Will throw an error if the query returns rows.
+	@discardableResult
+	public func execute(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue] = []) async throws -> Int {
 		
 		if sqlArguments.isEmpty {
 			// no arguments, just run the query
-			try await execute(token: token, query)
-			return
+			return try await execute(token: token, query)
 		}
 		
 		// only take semaphore if in transaction - other times we can run queries in parallel (as much as being an actor allows)
@@ -543,13 +559,18 @@ public actor Database {
 		if result != SQLITE_DONE {
 			throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 		}
+		
 		guard sqlite3_reset(statementHandle) == SQLITE_OK, sqlite3_clear_bindings(statementHandle) == SQLITE_OK else {
 			throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 		}
+		
+		let affectedRows = sqlite3_changes64(statementHandle)
+		return Int(affectedRows)
 	}
 	
-	/// Execute a query with no parameters returning nothing
-	public func execute(token: AutoId? = nil, _ query: String) async throws {
+	/// Execute a query with no parameters returning  amount of affected rows. Will throw an error if the query returns rows.
+	@discardableResult
+	public func execute(token: AutoId? = nil, _ query: String) async throws -> Int {
 		let hasSemaphore = inTransaction || token != nil
 		if hasSemaphore {
 			await semaphore.wait(token: token)
@@ -576,6 +597,9 @@ public actor Database {
 		if result != SQLITE_OK {
 			throw Error.queryError(query: query, description: errorDesc(dbHandle))
 		}
+		
+		let affectedRows = sqlite3_changes64(dbHandle)
+		return Int(affectedRows)
 	}
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).

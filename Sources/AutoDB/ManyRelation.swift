@@ -14,7 +14,7 @@ import SwiftUI
  A relation is an array of non-unique items of one single AutoDB type.
  It handles fetching and saving in one place, having an optional backing var to know if we have fetched or not.
  If the owner implements RelationOwner, it will automatically call it when changed, this way you don't need to keep track of changes yourself.
- If it has an Owner, it cam call `initFetch()` when fetched from DB to populate the list. Set `initFetch` to true to enable this.
+ If it has an Owner, it can call `initFetch()` when fetched from DB to populate the list. Set `initFetch` to true to enable this.
  
  Usage:
 final class Parent: Model, @unchecked Sendable {
@@ -30,7 +30,15 @@ final class Parent: Model, @unchecked Sendable {
 	init(_ value: Value) {
 		self.value = value
 	}
-}
+ 	
+ 	// Handle the relation like an array of objects
+	func work() async {
+ 		// some sort of work
+ 		let child1 = Child.create(...)
+ 		let child2 = Child.create(...)
+ 		await children.append([child1, child2])
+	}
+ }
  
  let parent = try await Parent.fetchQuery(...)
  // now items are populated with children in the order we created it:
@@ -54,7 +62,6 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		self.limit = limit
 		self.initFetch = initFetch
 		ids = []
-		items = []
 	}
 	
 	// mutating funcs must be thread-safe, that is ensured by an actor-semaphore. With low congestion it only adds an extra increment of an int (and comparison) 2 extra clock cycles (and calling an actor whatever that may cost).
@@ -65,7 +72,7 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 	let initial: Int
 	var limit: Int
 	let initFetch: Bool
-	var hasMore = false
+	public var hasMore = false
 	
 	private var ids: [AutoId]
 	public var totalCount: Int {

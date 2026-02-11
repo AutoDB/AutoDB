@@ -25,11 +25,22 @@ extension RelationQuery: ObservableObject {	//ObserverSubject
 		if let owner = self.owner as? any ObservableObject, let objectWillChange = owner.objectWillChange as? ObjectWillChangePublisher {
 			objectWillChange.send()
 		}
+		if let owner = self.owner as? any RelationOwner {
+			Task {
+				await owner.didChange()
+			}
+		}
 	}
 }
 #else
 extension RelationQuery {
-	func didChange() {}
+	func didChange() {
+		if let owner = self.owner as? any RelationOwner {
+			Task {
+				await owner.didChange()
+			}
+		}
+	}
 }
 #endif
 
@@ -41,7 +52,6 @@ import Observation
  Specify the relation and how many objects to fetch like this:
  var cureAlbums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 4, limit: 20)
  Now this class holds a relation to all albums of The Cure, fetched when needed.
- The TableModel must be a table in the db, Models containing a table will not work.
  
  NOTE: The query obviously cannot have limit or offset clauses of its own!
  
@@ -55,7 +65,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 	
 	weak var owner: AnyObject?
 	
-	/// Automatically set owner if we are inside a Model object, which is the most common use-case.
+	/// Automatically set owner if we are inside a Model object, which is a common use-case.
 	public func setOwner<OwnerType: AnyObject & Sendable>(_ owner: OwnerType) {
 		
 		self.owner = owner
@@ -203,7 +213,7 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		}
 	}
 	
-	// get the current
+	/// get the current set of items, fetching the first batch if needed
 	@discardableResult
 	public func fetchItems(resetOffset: Bool = false) async throws -> [AutoType] {
 		await semaphore.wait()
@@ -224,7 +234,13 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		return items
 	}
 	
+	/// fetch the next batch of items if possible
 	public func fetchMore() async throws {
+		if offset == -1 || restrictToInitial {
+			// if called before initial fetch
+			_ = try await fetchItems()
+			return
+		}
 		await semaphore.wait()
 		defer { Task { await semaphore.signal() } }
 		

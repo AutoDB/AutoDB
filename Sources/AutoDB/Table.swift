@@ -187,6 +187,12 @@ public extension Table {
 		try await AutoDBManager.shared.execute(token: token, Self.self, query, arguments, sqlArguments: sqlArguments)
 	}
 	
+	/// Execute a query without returning any rows, like INSERT or UPDATE. Returns number of affected rows. Swift has a bug for @discardableResult, so we must have two functions with different signatures.
+	@discardableResult
+	static func executeAffectedRows(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Int {
+		return try await AutoDBManager.shared.execute(token: token, Self.self, query, arguments, sqlArguments: sqlArguments)
+	}
+	
 	// this cannot have the same signature
 	@discardableResult
 	static func query(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> [Row] {

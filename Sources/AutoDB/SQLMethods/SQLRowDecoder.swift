@@ -62,10 +62,27 @@ class SQLRowDecoder: Decoder {
 		}
 	}
 	var relations: [AnyRelation] = []
-	func getValue<T>(_ type: T.Type, _ key: String) -> T? where T : Decodable {
+	
+	func getRawValue<R: RawRepresentable>(_ type: R.Type, _ key: String) -> Any? {
+		if let decodableRaw = type.RawValue.self as? any Decodable.Type {
+			guard let rawValue = getValue(decodableRaw, key) as? R.RawValue else {
+				return nil
+			}
+			return R.init(rawValue: rawValue)
+		}
+		return nil
+	}
+	
+	func getValue<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
+		
+		if let raw = type as? any RawRepresentable.Type {
+			return getRawValue(raw, key) as? T
+		}
+		
 		guard let value = values[key] ?? values[key.trimmingCharacters(in: prefixPropertyChars)] else {
 			return nil
 		}
+		
 		switch type {
 			case is String.Type:
 				return value.stringValue as? T
@@ -84,7 +101,7 @@ class SQLRowDecoder: Decoder {
 			case is Int32.Type:
 				return value.intValue.flatMap{ Int32(clamping: $0) } as? T
 			case is UInt.Type:
-				return value.uint64Value as? T
+				return value.uintValue as? T
 			case is UInt8.Type:
 				return value.uint64Value.flatMap{ UInt8(clamping: $0) } as? T
 			case is UInt16.Type:

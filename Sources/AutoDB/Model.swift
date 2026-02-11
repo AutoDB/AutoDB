@@ -101,7 +101,7 @@ public extension Model {
 		hasher.combine(id)
 	}
 	
-	/// sometimes object's inits must be sync. Force-wait in that case.
+	/// sometimes object's inits must be sync. Force-wait in that case, this causes hang by design.
 	static func create(token: AutoId? = nil, _ id: AutoId? = nil) -> Self {
 		
 		let semaphore = DispatchSemaphore(value: 0)
@@ -314,6 +314,11 @@ public extension Model {
 	/// Execute a query without returning any rows, like INSERT or UPDATE.
 	static func execute(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws {
 		try await AutoDBManager.shared.execute(token: token, TableType.self, query, sqlArguments: sqlArguments)
+	}
+	
+	/// Execute a query without returning any rows, like INSERT or UPDATE. Returns the amount of affected rows. Since Swift 6 has a bug with @discardableResult we need to have two versions of this method.
+	static func executeAffectedRows(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> Int {
+		return try await AutoDBManager.shared.execute(token: token, TableType.self, query, sqlArguments: sqlArguments)
 	}
 	
 	/// A non-throwable query, returns nil instead of throwing
