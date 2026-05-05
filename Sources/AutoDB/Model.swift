@@ -270,9 +270,15 @@ public extension Model {
 	}
 	
 	func didChange() {
-		Task {
-			await AutoDBManager.shared.objectHasChanged(self)
-		}
+        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
+            Task.immediate {
+                await AutoDBManager.shared.objectHasChanged(self)
+            }
+        } else {
+            Task {
+                await AutoDBManager.shared.objectHasChanged(self)
+            }
+        }
 	}
 	
 	/// Refresh all objects currently in use, if changed by external process - this will bring in fresh values from DB.

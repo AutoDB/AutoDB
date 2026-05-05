@@ -7,7 +7,7 @@
 
 import Foundation
 
-final class AnyChangedModelBucket: @unchecked Sendable {
+class AnyChangedModelBucket: @unchecked Sendable {
 	var count: Int { 0 }
 
 	func removeValue(forKey id: AutoId) {}

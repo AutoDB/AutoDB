@@ -270,7 +270,7 @@ class RelationQueryTests {
 	@Test func deallocRelationQuery() async throws {
 		//try await AutoDBManager.shared.truncateTable(DeallocTest.self)
 		var owner: DeallocTest? = DeallocTest()
-		nonisolated(unsafe) weak var listener = owner?.albums
+        weak let listener = owner?.albums
 		nonisolated(unsafe) var didDealloc = false
 		owner?.callback = {
 			didDealloc = true
