@@ -502,6 +502,47 @@ final class AutoDBTests: XCTestCase {
 			XCTAssertTrue(ids.contains(1) || ids.contains(duplicateId), "Expected id \(duplicateId) to be in the unique constraint error")
 		}
 	}
-}
 
+	func testTypedModelBucketsSavePendingChanges() async throws {
+		try await AutoDBManager.shared.truncateTable(TrackedModel.Value.self)
+
+		let item = await TrackedModel.create(1)
+		item.name = "first"
+		try await item.save()
+
+		item.name = "second"
+		try await AutoDBManager.shared.saveChanges(TrackedModel.self)
+
+		let fetched = try await TrackedModel.fetchId(1)
+		XCTAssertTrue(fetched === item)
+		XCTAssertEqual(fetched.name, "second")
+		XCTAssertEqual(await AutoDBManager.shared.lookupObjectsCount(ObjectIdentifier(TrackedModel.self)), 0)
+	}
+
+	func testSaveAllChangesPersistsDroppedModelReferences() async throws {
+		try await AutoDBManager.shared.truncateTable(TrackedModel.Value.self)
+
+		weak var weakModel: TrackedModel?
+		let modelID: AutoId = 2
+
+		do {
+			var model: TrackedModel? = await TrackedModel.create(modelID)
+			model?.name = "created"
+			try await model?.save()
+
+			model?.name = "pending"
+			weakModel = model
+			model = nil
+		}
+
+		XCTAssertNotNil(weakModel)
+		try await AutoDBManager.shared.saveAllChanges()
+		try await waitForCondition {
+			weakModel == nil
+		}
+
+		let fetched = try await TrackedModel.fetchId(modelID)
+		XCTAssertEqual(fetched.name, "pending")
+	}
+}
 

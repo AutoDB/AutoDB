@@ -7,12 +7,57 @@
 
 import Foundation
 
+final class AnyChangedModelBucket: @unchecked Sendable {
+	var count: Int { 0 }
+
+	func removeValue(forKey id: AutoId) {}
+
+	func saveChanges(token: AutoId?) async throws {}
+}
+
+final class ChangedModelBucket<T: Model>: AnyChangedModelBucket, @unchecked Sendable {
+	private var values = [AutoId: T]()
+
+	override var count: Int { values.count }
+
+	func insert(_ id: AutoId, _ object: T) {
+		if values[object.id] == nil {
+			values[id] = object
+		}
+	}
+
+	override func removeValue(forKey id: AutoId) {
+		values.removeValue(forKey: id)
+	}
+
+	override func saveChanges(token: AutoId?) async throws {
+		let pendingValues = Array(values.values)
+		guard pendingValues.isEmpty == false else {
+			return
+		}
+		try await T.saveList(token: token, pendingValues)
+	}
+}
+
 ///Generic implementation of a table to lookup AutoModel objects that has changed, will be deleted and similar.
 struct LookupTable {
 	
-	var changedObjects = [ObjectIdentifier: [AutoId: any Model]]()
+	var changedObjects = [ObjectIdentifier: AnyChangedModelBucket]()
 	var deleted = [ObjectIdentifier: Set<AutoId>]()
 	var deleteLater = [ObjectIdentifier: Set<AutoId>]()
+
+	private mutating func changedBucket<T: Model>(
+		for identifier: ObjectIdentifier,
+		as type: T.Type = T.self
+	) -> ChangedModelBucket<T> {
+		if let bucket = changedObjects[identifier] as? ChangedModelBucket<T> {
+			return bucket
+		}
+
+		let bucket = ChangedModelBucket<T>()
+		changedObjects[identifier] = bucket
+		return bucket
+	}
 	
 	/// Mark an object as deleted, prevent save for any lingering objects
 	mutating func setDeleted(_ ids: [AutoId], _ typeID: ObjectIdentifier) {
@@ -64,12 +109,8 @@ struct LookupTable {
 		if isDeleted(id, identifier) {
 			return
 		}
-        if changedObjects[identifier] == nil {
-			changedObjects[identifier] = [id: object]
-        }
-        else if changedObjects[identifier]?[object.id] == nil {
-			changedObjects[identifier]?[id] = object
-        }
-    }
-}
 
+		let bucket = changedBucket(for: identifier, as: T.self)
+		bucket.insert(id, object)
+	}
+}

@@ -89,8 +89,8 @@ extension UInt64 {
 	/// If all is empty the default is used
 	nonisolated(unsafe) public static var appDefaults: [SettingsKey: AutoDBSettings] = [:]
 	
-	/// insert a new global setting for the entire app, this is a good starting point for appstart
-	/// Define app settings e.g. path
+	/// insert a new global setting for the entire app, this is a good starting point directly at appstart.
+	/// Define app settings e.g. path, backup, etc.
 	public nonisolated func setAppSettings(_ settings: AutoDBSettings, for key: SettingsKey) {
 		// all with the same key will share the same settings
 		Self.appDefaults[key] = settings
@@ -236,6 +236,10 @@ extension UInt64 {
 			values.isExcludedFromBackup = true
 			var url = URL(fileURLWithPath: path)
 			try? url.setResourceValues(values)
+            for suffix in ["-shm", "-wal"] {
+                url = URL(fileURLWithPath: path.appending(suffix))
+                try? url.setResourceValues(values)
+            }
 		}
 		return db
 	}
@@ -297,7 +301,11 @@ extension UInt64 {
 	/// Get a cached object - to check if init has run, or if this is a temp-object etc
 	public func cached<T: Model>(_ objectType: T.Type, _ id: AutoId, _ identifier: ObjectIdentifier? = nil) -> T? {
 		let typeID = identifier ?? ObjectIdentifier(T.self)
-		return cachedObjects[typeID]?[id] as? T
+		guard var objects = cachedObjects[typeID] else {
+			return nil
+		}
+
+		return objects[id] as? T
 	}
 	
 	/// Get all cached objects, filter by ids or general
@@ -687,13 +695,12 @@ extension UInt64 {
 	
 	public func saveAllChanges(token: AutoId? = nil) async throws {
 		var anyError: Error? = nil
-		for dict in lookupTable.changedObjects.values {
-			if let item = dict.first?.value {
-				do {
-					try await saveChanges(token: token, item)
-				} catch {
-					anyError = error
-				}
+		let buckets = Array(lookupTable.changedObjects.values)
+		for bucket in buckets {
+			do {
+				try await bucket.saveChanges(token: token)
+			} catch {
+				anyError = error
 			}
 		}
 		if let anyError {
@@ -731,10 +738,9 @@ extension UInt64 {
 				anyError = error
 			}
 		}
-		let dict = lookupTable.changedObjects[typeID]
-		if let dict, let array = Array(dict.values) as? [T], array.isEmpty == false {
-			
-			try await T.saveList(token: token, array)
+
+		if let bucket = lookupTable.changedObjects[typeID] as? ChangedModelBucket<T> {
+			try await bucket.saveChanges(token: token)
 		}
 		if let anyError {
 			throw anyError

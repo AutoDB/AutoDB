@@ -118,6 +118,9 @@ class SQLRowDecoder: Decoder {
 				}
 			default:
 				if let data = value.dataValue {
+					if let dataType = type as? any SQLStorableAsData.Type {
+						return dataType.from(unifiedRepresentation: data) as? T
+					}
 					
 					if let value = data as? T {
 						return value

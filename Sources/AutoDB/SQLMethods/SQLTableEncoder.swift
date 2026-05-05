@@ -263,6 +263,8 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
                 columnType = .text
             case is Data:
                 columnType = .blob
+            case is any SQLStorableAsData:
+                columnType = .blob
             case is Double, is Float, is Date:
                 columnType = .real
             case is UInt64, is Int, is Int8, is Int16, is Int64, is Int32,
@@ -273,6 +275,8 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
             case is String.Type:
                 columnType = .text
             case is Data.Type:
+                columnType = .blob
+            case is any SQLStorableAsData.Type:
                 columnType = .blob
             case is Double.Type, is Float.Type, is Date.Type:
                 columnType = .real

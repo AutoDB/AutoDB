@@ -63,6 +63,30 @@ final class UniqueString: Model, @unchecked Sendable {
 	}
 }
 
+final class TrackedModel: Model, @unchecked Sendable {
+	struct Value: Table {
+		static let tableName = "TrackedModel"
+
+		var id: AutoId = 0
+		var name: String = ""
+	}
+
+	var value: Value {
+		didSet {
+			didSet(oldValue)
+		}
+	}
+
+	init(_ value: Value) {
+		self.value = value
+	}
+
+	var name: String {
+		get { value.name }
+		set { value.name = newValue }
+	}
+}
+
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable final class ObserveBasic: Table, @unchecked Sendable {
 	

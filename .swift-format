@@ -1,0 +1,11 @@
+{
+	"indentation" : {
+		"tabs" : 1
+	},
+	"indentBlankLines" : true,
+	"lineBreakAroundMultilineExpressionChainComponents" : false,
+	"lineLength" : 9999,
+	"tabWidth" : 4,
+	"multiElementCollectionTrailingCommas" : true,
+	"version" : 1
+}

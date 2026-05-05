@@ -83,16 +83,6 @@ public extension TableModel {
 	}
 }
 
-/// AutoId is just a basic unsigned int, with the last 4 bits untouched for Swift-optimizations
-public typealias AutoId = UInt64
-public extension AutoId {
-	static func generateId() -> AutoId {
-		
-		let random = random(in: 1..<AutoId.max)
-		return random >> 4  //save some bits for Swift's optimisations
-	}
-}
-
 public enum AutoError: Error {
 	case fetchError
 	/// we must have an id to create AutoModel objects
