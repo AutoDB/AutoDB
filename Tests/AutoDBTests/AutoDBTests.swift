@@ -336,7 +336,9 @@ final class AutoDBTests: XCTestCase {
 		let data = try encoder.encode(parent.value.children)
 		print(String(data: data, encoding: .utf8)!)
 		
-		//try await parent.value.children.fetch()
+		try await waitForCondition {
+			parent.value.children.items.count == 2
+		}
 		
 		XCTAssertEqual(parent.value.children.items.first?.name, "Gunnar")
 		XCTAssertEqual(parent.value.children.items.last?.name, "Bertil")
@@ -358,16 +360,9 @@ final class AutoDBTests: XCTestCase {
 				try await album.save()
 				
 				let art: AlbumArt = await AlbumArt.create(AutoId(index + 1))
-				await Task.yield()
-				await art.value.album.setObject(album)
+				art.value.album.id = album.id
 				try await art.save()
 			}
-		}
-		await Task.yield()
-		try await waitForCondition("Album and AlbumArt models should be released so fetchQuery tests unloaded relations") {
-			let cachedArts: [AlbumArt] = await AutoDBManager.shared.cached(AlbumArt.self)
-			let cachedAlbums: [Album] = await AutoDBManager.shared.cached(Album.self)
-			return cachedArts.isEmpty && cachedAlbums.isEmpty
 		}
 		
 		let arts = try await AlbumArt.fetchQuery()

@@ -181,36 +181,48 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 	}
 	
 	func dbStateChanged(_ operation: SQLiteOperation) async throws {
-		
-		if operation == .insert {
-			// always fetch this one if offset is 0 since then it is the first item.
-			// or if we have more we will get this one at next fetch, otherwise if we don't already have it - fetch it if not initialFetch amount is reached.
-			if offset == 0 || hasMore == false {
-				// we can't know if this query actually has more items to fetch, but this allows for the db to signal that there may be more to fetch
-				hasMore = true
-				if offset == 0 {
-					// initial fetch failed
-					_ = try await fetchItems(resetOffset: true)
-				} else if offset <= initialFetch {
-					// we cannot know if these new items matches our query so all we can do is trigger a basic fetch. Here is room for improvement, e.g. just check if the query is empty.
-					try await fetchMore()
-				} else {
-					didChange()
-				}
-			}
-		} else if operation == .delete {
-			
-			await semaphore.wait()
-			defer { Task { await semaphore.signal() }}
-			
-			for index in items.indices.reversed() {
-				if await items[index].isDeleted {
-					fetchedIds.remove(items[index].id)
-					items.remove(at: index)
-					didChange()
-				}
-			}
+		guard offset != -1 else {
+			return
 		}
+
+		switch operation {
+			case .insert, .delete:
+				await semaphore.wait()
+				defer { Task { await semaphore.signal() } }
+				_ = try await refreshVisibleWindowLocked(targetVisibleCount: currentVisibleCount())
+			default:
+				break
+		}
+	}
+
+	private func currentVisibleCount() -> Int {
+		if offset == -1 {
+			return initialFetch
+		}
+		return max(offset, _items?.count ?? 0, initialFetch)
+	}
+
+	private func fetchWindow(limit: Int, offset: Int) async throws -> [AutoType] {
+		try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [limit, offset]), arguments, sqlArguments: nil)
+	}
+
+	@discardableResult
+	private func refreshVisibleWindowLocked(targetVisibleCount: Int) async throws -> [AutoType] {
+		let visibleCount = max(targetVisibleCount, 0)
+		let fetchCount = max(visibleCount, 1) + 1
+		let res = try await fetchWindow(limit: fetchCount, offset: 0)
+		let visibleItems = Array(res.prefix(visibleCount))
+
+		offset = visibleItems.count
+		hasMore = res.count > visibleItems.count
+		items = visibleItems
+		fetchedIds = Set(visibleItems.map(\.id))
+		didChange()
+
+		if restrictToInitial {
+			return Array(visibleItems.prefix(initialFetch))
+		}
+		return visibleItems
 	}
 	
 	/// get the current set of items, fetching the first batch if needed
@@ -219,14 +231,8 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		await semaphore.wait()
 		defer { Task { await semaphore.signal() } }
 		
-		if offset == -1 || (resetOffset && offset == 0) {
-			// setup first fetch
-			let res = try await AutoType.fetchQuery(token: nil, String(format: query, initialFetch, 0), arguments, sqlArguments: nil)
-			offset = res.count
-			hasMore = offset == initialFetch	// there is probably more if limit was reached
-			items = res
-			fetchedIds.formUnion(res.map(\.id))
-			didChange()
+		if offset == -1 || resetOffset {
+			return try await refreshVisibleWindowLocked(targetVisibleCount: initialFetch)
 		}
 		if restrictToInitial {
 			return Array(items[0..<min(items.count, initialFetch)])
@@ -243,29 +249,26 @@ public final class RelationQuery<AutoType: TableModel>: Codable, @unchecked Send
 		}
 		await semaphore.wait()
 		defer { Task { await semaphore.signal() } }
-		
-		var res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [limit, offset]), arguments, sqlArguments: nil)
-		if res.isEmpty {
-			if hasMore && items.count == offset {
-				hasMore = false
-				didChange()
-			}
+
+		let currentOffset = offset
+		let res = try await fetchWindow(limit: limit + 1, offset: currentOffset)
+		let nextPage = Array(res.prefix(limit))
+		if nextPage.isEmpty {
+			hasMore = false
+			didChange()
 			return
 		}
-		hasMore = res.count == limit	// there is probably more if limit was reached
-		
-		let newIds = Set(res.map { $0.id })
+
+		let newIds = Set(nextPage.map(\.id))
 		if newIds.isDisjoint(with: fetchedIds) == false {
-			// we have changed our table in such a way that the new fetch contains old items - this is quite likely since you typically don't order items by creation-date. Refetch from 0 to get the new item in an updated list!
-			res = try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [offset + res.count, 0]), arguments, sqlArguments: nil)
-			offset = res.count
-			items = res
-			
-		} else {
-			offset += res.count
-			items.append(contentsOf: res)
+			_ = try await refreshVisibleWindowLocked(targetVisibleCount: currentOffset + limit)
+			return
 		}
-		fetchedIds.formUnion(res.map(\.id))
+
+		offset = currentOffset + nextPage.count
+		hasMore = res.count > nextPage.count
+		items.append(contentsOf: nextPage)
+		fetchedIds.formUnion(nextPage.map(\.id))
 		didChange()
 	}
 }

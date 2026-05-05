@@ -59,14 +59,12 @@ final class DeallocTest: @unchecked Sendable {
 		albums.setOwner(self)
 	}
 	
-	var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 20000, limit: 3)
+	var albums = RelationQuery<Album>("WHERE artist = ?", arguments: ["The Cure"], initial: 20000, limit: 3)
 	var callback: (() -> Void)?
 	deinit {
 		callback?()
 	}
 }
-
-
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class CureAlbums: Model, @unchecked Sendable {
@@ -74,7 +72,7 @@ final class CureAlbums: Model, @unchecked Sendable {
 		static let tableName = "CureAlbums"
 		
 		var id: AutoId = 0
-		var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 1, limit: 20)
+		var albums = RelationQuery<Album>("WHERE artist = ?", arguments: ["The Cure"], initial: 1, limit: 20)
 	}
 	var value: CureAlbumsTable
 	init(_ value: CureAlbumsTable) {
@@ -85,7 +83,7 @@ final class CureAlbums: Model, @unchecked Sendable {
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 struct SaveFail: Table {
 	var id: AutoId = 0
-	var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
+	var albums = RelationQuery<Album>("WHERE artist = ?", arguments: ["The Cure"], initial: 2, limit: 3)
 }
 
 final class CombineAlbum: Model, @unchecked Sendable, ObservableObject {
@@ -115,10 +113,25 @@ final class CombineAlbum: Model, @unchecked Sendable, ObservableObject {
 final class CombineArtist: @unchecked Sendable, ObservableObject, RelationOwner {
 	
 	@Published
-	var albums = RelationQuery<CombineAlbum.CombineAlbumTable>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
+	var albums = RelationQuery<CombineAlbum.CombineAlbumTable>("WHERE artist = ?", arguments: ["The Cure"], initial: 2, limit: 3)
 	
 	func didChange() async {
 		objectWillChange.send()
+	}
+}
+
+@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+final class PagedCureAlbums: Model, @unchecked Sendable {
+	struct Value: Table {
+		static let tableName = "PagedCureAlbums"
+		
+		var id: AutoId = 0
+		var albums = RelationQuery<Album>("WHERE artist = ?", arguments: ["The Cure"], initial: 2, limit: 2)
+	}
+	
+	var value: Value
+	init(_ value: Value) {
+		self.value = value
 	}
 }
 
@@ -263,14 +276,35 @@ actor RelationQueryPublisherTests {
 	}
 }
 
-
 @Suite("RelationQueryTests", .serialized)
 class RelationQueryTests {
+	private func createAlbum(_ name: String, artist: String = "The Cure") async throws {
+		let album = await Album.create()
+		album.value.name = name
+		album.value.artist = artist
+		try await album.save()
+	}
+	
+	@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+	private func createRelationQueryOwner(limit: Int = 20) async throws -> CureAlbums {
+		try await AutoDBManager.shared.truncateTable(CureAlbums.CureAlbumsTable.self)
+		try await AutoDBManager.shared.truncateTable(Album.Value.self)
+		
+		let db = try await CureAlbums.db()
+		try await CureAlbums.create(1).save()
+		
+		let count = try await db.query("Select count(*) From CureAlbums").first?.values.first?.intValue ?? 0
+		#expect(count == 1)
+		
+		let cure = try await CureAlbums.fetchId(1)
+		cure.value.albums.limit = limit
+		return cure
+	}
 	
 	@Test func deallocRelationQuery() async throws {
 		//try await AutoDBManager.shared.truncateTable(DeallocTest.self)
 		var owner: DeallocTest? = DeallocTest()
-        weak let listener = owner?.albums
+		weak let listener = owner?.albums
 		nonisolated(unsafe) var didDealloc = false
 		owner?.callback = {
 			didDealloc = true
@@ -343,7 +377,6 @@ class RelationQueryTests {
 		#expect(cacheRes.contains { $0.stringValue == "AlbumArt" })
 	}
 	
-	
 	@Test
 	func catchWhenSaveFails() async throws {
 		let db = try await SaveFail.db()
@@ -368,81 +401,63 @@ class RelationQueryTests {
 	}
 	
 	func testRelationQuery() async throws {
-		try await AutoDBManager.shared.truncateTable(CureAlbums.CureAlbumsTable.self)
-		try await AutoDBManager.shared.truncateTable(Album.Value.self)
-		//try await Album.db().setDebug()
-		let db = try await CureAlbums.db()
-		
-		try await CureAlbums.create(1).save()
-		
+		let cure = try await createRelationQueryOwner()
 		let tableName = CureAlbums.CureAlbumsTable.tableName
 		#expect("CureAlbums" == tableName)
 		
-		var count = try await db.query("Select count(*) From CureAlbums").first?.values.first?.intValue ?? 0
-		if count == 0 {
-
-			try await Task.sleep(for: .milliseconds(100))
-			count = try await db.query("Select count(*) From CureAlbums").first?.values.first?.intValue ?? 0
-			print("no! \(count)")
-		}
-		
-		let isEmpty = try await CureAlbums.fetchId(1).value.albums.fetchItems().isEmpty
-		#expect(isEmpty)
-		for name in ["Seventeen Seconds", "Faith"] {
-			let album = await Album.create()
-			album.value.name = name
-			album.value.artist = "The Cure"
-			try await album.save()
-		}
-		
-		// newly fetched from DB should NOT have items already populated
-		let cure = try await CureAlbums.fetchId(1)
-		try await cure.value.albums.fetchItems()
-		try await waitForCondition {
-			cure.value.albums.items.isEmpty == false
-		}
-		try await cure.value.albums.fetchMore()
-		count = cure.value.albums.items.count
-		#expect(count == 2, "count is \(count)")
-		if cure.value.albums.hasMore {
-			try await cure.value.albums.fetchMore()
-			count = cure.value.albums.items.count
-			#expect(count == 2, "count is \(count)")
-			
-			// this can happen due to the observation-delay, and is not strictly an error. Why is that not an error?
-		}
+		let firstFetch = try await cure.value.albums.fetchItems()
+		#expect(firstFetch.isEmpty)
 		#expect(cure.value.albums.hasMore == false)
-		let album = await Album.create()
-		album.value.name = "Pornography"
-		album.value.artist = "The Cure"
-		try await album.save()
-		do {
-			try await waitForCondition(delay: 5) {
-				cure.value.albums.hasMore == true
-			}
-		} catch {
-			if cure.value.albums.items.count == 2 {
-				try await cure.value.albums.fetchMore()
-				if cure.value.albums.items.count > 2 {
-					print("items were saved sucessfully")
-				}
-				fatalError("Did not get message.")
-			}
-			throw error
+		
+		for name in ["Seventeen Seconds", "Faith"] {
+			try await createAlbum(name)
 		}
 		
-		// There was no problem with save - error was only with callback!
-		try await cure.value.albums.fetchMore()
-		if cure.value.albums.hasMore {
-			print("this should never happen")
-			await Task.yield()
-			try await cure.value.albums.fetchMore()
-			if cure.value.albums.hasMore {
-				print("still error!")
-				try await cure.value.albums.fetchMore()
-			}
+		try await waitForCondition {
+			cure.value.albums.items.count == 1 && cure.value.albums.hasMore == true
 		}
-		#expect(cure.value.albums.hasMore == false && cure.value.albums.items.count > 2)
+		
+		try await cure.value.albums.fetchMore()
+		#expect(cure.value.albums.items.count == 2)
+		#expect(cure.value.albums.hasMore == false)
+		
+		try await createAlbum("Pornography")
+		try await waitForCondition {
+			cure.value.albums.items.count == 2 && cure.value.albums.hasMore == true
+		}
+		
+		try await cure.value.albums.fetchMore()
+		#expect(cure.value.albums.items.count == 3)
+		#expect(cure.value.albums.hasMore == false)
+	}
+	
+	@Test
+	func deleteRefreshesVisibleWindow() async throws {
+		try await AutoDBManager.shared.truncateTable(PagedCureAlbums.Value.self)
+		try await AutoDBManager.shared.truncateTable(Album.Value.self)
+		try await PagedCureAlbums.create(1).save()
+		
+		let cure = try await PagedCureAlbums.fetchId(1)
+		for name in ["Seventeen Seconds", "Faith", "Pornography"] {
+			try await createAlbum(name)
+		}
+		
+		let firstPage = try await cure.value.albums.fetchItems()
+		#expect(firstPage.count == 2)
+		#expect(cure.value.albums.hasMore == true)
+		
+		let firstVisible = cure.value.albums.items.first
+		let deletedName = firstVisible?.name
+		try await firstVisible?.delete()
+		
+		try await waitForCondition {
+			cure.value.albums.items.count == 2 && cure.value.albums.hasMore == false
+		}
+		
+		let names = Set(cure.value.albums.items.map(\.name))
+		#expect(names.contains("Pornography"))
+		if let deletedName {
+			#expect(names.contains(deletedName) == false)
+		}
 	}
 }
-
