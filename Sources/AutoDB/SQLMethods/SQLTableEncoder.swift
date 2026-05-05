@@ -76,22 +76,22 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		
 		// MARK: compare tables to see what's needed
 		
-		// comparing as Sets to ignore differences in column/index order
-		let targetColumns = Set(tableInfo.columns)
+		// Compare columns by name so renamed, dropped, and type-changed columns are handled explicitly.
+		let columnsInDBByName = Dictionary(uniqueKeysWithValues: columnsInDB.map { ($0.name, $0) })
+		let targetColumnsByName = Dictionary(uniqueKeysWithValues: tableInfo.columns.map { ($0.name, $0) })
 		let targetIndices = tableInfo.allIndices(instance)
 		
-		// change == modified or dropped
-		let changedColumns = Set(columnsInDB).subtracting(targetColumns)	// remove similar == non-changed
+		let addedColumns = Set(targetColumnsByName.values.filter { columnsInDBByName[$0.name] == nil })
+		let droppedColumns = Set(columnsInDBByName.values.filter { targetColumnsByName[$0.name] == nil })
+		let changedTypes = Set(columnsInDBByName.values.filter { column in
+			guard let targetColumn = targetColumnsByName[column.name] else {
+				return false
+			}
+			return targetColumn != column
+		})
+		let changedColumns = droppedColumns.union(changedTypes)
 		let changedIndices = Set(indicesInDB).subtracting(targetIndices)
 		let addedIndices = targetIndices.subtracting(indicesInDB)
-		
-		let addedColumns = targetColumns.filter { column in
-			columnsInDB.contains { $0.name == column.name } == false
-		}
-		
-		let changedTypes = changedColumns.filter { column in
-			targetColumns.contains { $0.name == column.name }
-		}
 		
 		if changedIndices.isEmpty && changedColumns.isEmpty && changedTypes.isEmpty && addedColumns.isEmpty && addedIndices.isEmpty {
 			//print("No schema changes needed for \(tableName)")
@@ -126,7 +126,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				migrations.append(.newColumn(columnToAdd))
 			}
 			
-			if changeIndiciesFail || changedColumns.isEmpty == false || changedTypes.isEmpty == false {
+			if changeIndiciesFail || changedColumns.isEmpty == false {
 				// SQLite may fail renaming and dropping columns. Not clear why or when this happens (it is not due to SQLite versions), so we make a copy whenever you modify or drop a column to be on the safe side.
 				// Also if nullability have changed we need a new table - we can't insert null in a non-null column.
 				

@@ -49,7 +49,7 @@ public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwne
 	/*
 	 Note that the save functions are not exposed, since no need to implement them.
 	 Understand that if your Table has a Model, you must call save or saveChanges (etc) on the model.
-	 
+	
 	 /// save and wait until completed, potentially handling errors
 	 func save(token: AutoId?) async throws
 	 /// save and don't wait until completed, ignoring errors
@@ -63,7 +63,6 @@ public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwne
 	 /// save changes to all changed objects and don't wait until completed, ignoring errors
 	 static func saveAllChangesDetacted(token: AutoId?)
 	 */
-	
 	
 	// MARK: - cache
 	
@@ -127,7 +126,7 @@ public extension Model {
 		// don't let two threads create the same object at the same time
 		let token = token ?? AutoId.generateId()
 		await encoder.semaphore.wait(token: token)
-		defer { Task { await encoder.semaphore.signal(token: token) }}
+		defer { Task { await encoder.semaphore.signal(token: token) } }
 		
 		if let id {
 			if let item = await AutoDBManager.shared.cached(Self.self, id, typeID) {
@@ -205,8 +204,7 @@ public extension Model {
 					relation.setOwner(self)
 				}
 			}
-		}
-		else {
+		} else {
 			var innerRelations = [AnyKeyPath]()
 			for (_, path) in self.allKeyPaths {
 				if let relation = self[keyPath: path] as? any Relation {
@@ -244,7 +242,7 @@ public extension Model {
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
 	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are inside the transaction / holding the lock.
-	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
+	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
 		try await db().transaction(action)
 	}
 	
@@ -296,13 +294,13 @@ public extension Model {
 	// MARK: - db queries
 	
 	@discardableResult
-	static func query(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil)  async throws -> [Row] {
+	static func query(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Row] {
 		try await AutoDBManager.shared.query(token: token, TableType.self, query, arguments)
 	}
 	
 	// this cannot have the same signature
 	@discardableResult
-	static func query(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil)  async throws -> [Row] {
+	static func query(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
 		try await AutoDBManager.shared.query(token: token, TableType.self, query, sqlArguments: sqlArguments)
 	}
 	
@@ -330,7 +328,7 @@ public extension Model {
 	// MARK: - common queries
 	
 	/// return the first value of the first row of the result,
-	/// throws fetchError if the value is nil 
+	/// throws fetchError if the value is nil
 	static func valueQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> Val {
 		if let value: Val = try await AutoDBManager.shared.valueQuery(token: token, TableType.self, query, arguments) {
 			return value
@@ -399,7 +397,7 @@ public extension Model {
 		if updated.isEmpty == false {
 			try await TableType.saveList(token: token, updated, onlyUpdated: true)
 			//remove all changed objects
-			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(self))
+			await AutoDBManager.shared.removeFromChanged(updated.map(\.id), ObjectIdentifier(self))
 		}
 		
 		if created.isEmpty == false {

@@ -1,6 +1,6 @@
 # AutoDB
 
-Automatic persistence and database handling for all platforms in Swift, built on SQLite. Fast, automatic migrations and thread safe using actors and async/await.
+Automatic persistence and database handling in Swift, built on SQLite. AutoDB focuses on automatic migrations, cache-backed model identity, and async/await-friendly access patterns.
 
 * Automatic conflict resulution: never have merge-conflicts by never having the same data in two places in the app that are not the same.
 * Caching: don't fetch from DB data you already have fetched
@@ -75,13 +75,20 @@ Big thanks to Marco Armendt and his [Blackbird](https://github.com/marcoarment/B
 
 ## Status
 
-This is currently a work in progress. Everything is implemented and working, more test-cases are needed. See [Backlog.md](Documentation/Backlog.md) for things to be built.
+AutoDB is still evolving, but the current package is test-backed and intended for real use on the platforms listed below. See [Backlog.md](Documentation/Backlog.md) for the remaining gaps and future work.
+
+## Current support
+
+- Package platforms: macOS 14+, iOS 17+, tvOS 13+
+- Tested regularly: macOS and iOS
+- `RelationQuery` currently depends on Observation availability, which means macOS 14+, iOS 17+, tvOS 17+, watchOS 10+ for that specific API surface
+- Cross-platform targets outside Apple platforms remain planned work, not current release-ready support
 
 ## Details
 
 Read the [Documentation.md](Documentation/Documentation.md) for more details.
 
-All platforms are/will be supported by AutoDB, read more in [Android.md](Documentation/Android.md).
+For planned cross-platform work beyond the current Apple-focused package support, read [Android.md](Documentation/Android.md).
 
 ## Contact
 
@@ -98,4 +105,3 @@ Reasons are multiple, but mainly:
 2. [GRDB](https://github.com/groue/GRDB.swift) is great but not automatic, you have to do migrations and you have to massage it to handle relationships and FTS etc.
 3. There are a bunch of other great frameworks too, as the mentioned [Blackbird](https://github.com/marcoarment/Blackbird) but they all have their many flaws and shortcomings. I must be allowed to use Unsigned 64 bit integers for instance. And while macros and property wrappers are nice and all, they should be optional and not a built-in requirement inside a library.
 4. 
-

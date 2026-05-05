@@ -53,7 +53,6 @@ class CodableTests {
 		option?.state = .changedValue
 		try await option?.save()
 		option = nil
-		AutoDBManager.shared.cachedObjects
 		
 		option = try await OptionTable.fetchQuery("WHERE name = ?", [StringEnum.changedValue]).first
 		// we have changed them, encoder may pick default values if failing to decode:

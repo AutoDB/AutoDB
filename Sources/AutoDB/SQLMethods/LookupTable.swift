@@ -22,7 +22,7 @@ final class ChangedModelBucket<T: Model>: AnyChangedModelBucket, @unchecked Send
 
 	func insert(_ id: AutoId, _ object: T) {
 		if values[object.id] == nil {
-			values[id] = object
+			values[object.id] = object
 		}
 	}
 
@@ -112,5 +112,11 @@ struct LookupTable {
 
 		let bucket = changedBucket(for: identifier, as: T.self)
 		bucket.insert(id, object)
+	}
+
+	mutating func clear(_ identifier: ObjectIdentifier) {
+		changedObjects[identifier] = nil
+		deleted[identifier] = nil
+		deleteLater[identifier] = nil
 	}
 }

@@ -17,7 +17,7 @@ await Album.createWith(artist: "The Cure", name: "Faith")
 cureAlbums.hasMore // true
 
 ```
-The class is using Observation (PRs are welcome), so you need iOS >= 17.0 for now.
+`RelationQuery` currently uses Observation, so this API requires macOS 14+, iOS 17+, tvOS 17+, or watchOS 10+. The Combine hooks relay owner updates for `ObservableObject` usage on those platforms, but there is not yet a separate pre-Observation implementation.
 Normally you would use this in a ViewModel or similar, and not store it in DB. But you can if you want to.			
 
 ## OneToMany

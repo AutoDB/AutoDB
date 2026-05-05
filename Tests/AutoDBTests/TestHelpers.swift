@@ -11,6 +11,10 @@ enum WaitError: Error {
 	case reason(String)
 }
 
+final class WeakBox<T: AnyObject>: @unchecked Sendable {
+	weak var value: T?
+}
+
 @available(macOS 14.0, iOS 15.0, *)
 public func waitForCondition(delay: Double = 15, _ reason: String? = nil, _ closure: ( @Sendable () async throws -> Bool)) async throws {
 	let endDate = Date.now.addingTimeInterval(delay)
@@ -28,4 +32,3 @@ public func waitForCondition(delay: Double = 15, _ reason: String? = nil, _ clos
 	}
 	throw WaitError.timeRanOut
 }
-

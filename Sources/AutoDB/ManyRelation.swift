@@ -121,7 +121,7 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		let end = min(ids.count, initial)
 		let idsToFetch = Array(ids[0..<end])
 		_items = try await AutoType.fetchIds(token: token, idsToFetch, nil).sortById(idsToFetch)
-		hasMore = _items?.count == initial
+		hasMore = _items?.count == initial // make sure to compare the actually fetched items in case there are missmatches
 		
 		return items
 	}
@@ -142,10 +142,10 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		// this is the easiest way of doing it since we want to fetch them in order.
 		let fetchStep = limit
 		let start = _items?.count ?? 0
-		let end = min(ids.count, fetchStep)
+		let end = min(ids.count, start + fetchStep)
 		let idsToFetch = Array(ids[start..<end])
 		let fetched = try await AutoType.fetchIds(token: token, idsToFetch, nil).sortById(idsToFetch)
-		hasMore = fetched.count == fetchStep
+		hasMore = ids.count > end
 		_items?.append(contentsOf: fetched)
 		
 		return items

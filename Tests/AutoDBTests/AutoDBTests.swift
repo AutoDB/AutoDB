@@ -2,7 +2,6 @@ import XCTest
 @testable import AutoDB
 import Foundation
 
-
 struct ExampleInit: Table {
 	var id: AutoId = 0
 	let something: Int
@@ -31,21 +30,21 @@ class Resource {
 	}
 }
 
-	/*
-	 There are many things you are thinking about some are already solved! Do them one at a time by building tests
-	 1. How to generate SQL types from an empty object. (solved)
-	 2. How to exclude properties you don't want (for now just a list of names in the settings object, or codable)
-	 3. How to do generic fetching (solved?)
-	 4. Creating and filling an object from DB. (using codable)
-	 5. Storing object to DB. (using codable)
-	 6. How to track changes - we can't => instead just have a hasChanges variable and if set call into manager to add you to the list.
-	 
-	 Rules:
-	 Codable is a must
-	 We can't use @PropertyWrappers
-	 We don't want to piggy-back on any other system like Combine, FMDB, GRDB etc.
-	 
-	 */
+/*
+ There are many things you are thinking about some are already solved! Do them one at a time by building tests
+ 1. How to generate SQL types from an empty object. (solved)
+ 2. How to exclude properties you don't want (for now just a list of names in the settings object, or codable)
+ 3. How to do generic fetching (solved?)
+ 4. Creating and filling an object from DB. (using codable)
+ 5. Storing object to DB. (using codable)
+ 6. How to track changes - we can't => instead just have a hasChanges variable and if set call into manager to add you to the list.
+
+ Rules:
+ Codable is a must
+ We can't use @PropertyWrappers
+ We don't want to piggy-back on any other system like Combine, FMDB, GRDB etc.
+
+ */
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class AutoDBTests: XCTestCase {
@@ -66,7 +65,7 @@ final class AutoDBTests: XCTestCase {
 		}
 		return path
 	}()
-	
+
 	// generic fetching, an object should be created, inserted into the DBManager and be fetched as long as it exists there.
 	func testStoring() async throws {
 		
@@ -159,7 +158,7 @@ final class AutoDBTests: XCTestCase {
 	
 	@available(macOS 15.0, *)
 	func testDecodeInts() async throws {
-		let values:[String : SQLValue] = [
+		let values: [String: SQLValue] = [
 			"id": try SQLValue.fromAny(UInt64.max),
 			"integer": try SQLValue.fromAny(Int.min),
 			"integer32": try SQLValue.fromAny(Int32.min),
@@ -167,7 +166,7 @@ final class AutoDBTests: XCTestCase {
 			"integer8": try SQLValue.fromAny(Int8.min),
 			"integeru8": try SQLValue.fromAny(UInt8.max),
 		]
-		
+
 		let db = try await IntTester.db()
 		let table = await AutoDBManager.shared.tableInfo(IntTester.self)
 		
@@ -242,7 +241,7 @@ final class AutoDBTests: XCTestCase {
 		XCTAssertEqual(list.count, 2, "Fail to fetch all items!")
 		let got = list[AutoId(1)]
 		XCTAssertNotNil(got)
-		XCTAssertNil(got?.anOptInt)	//this should compile
+		XCTAssertNil(got?.anOptInt)  //this should compile
 		try await list.values.save()
 	}
 	
@@ -282,7 +281,7 @@ final class AutoDBTests: XCTestCase {
 	func testWithCodingKeys() async throws {
 		try await AutoDBManager.shared.truncateTable(CodeWithKeys.self)
 		
-		var first:CodeWithKeys? = await CodeWithKeys.create(1)
+		var first: CodeWithKeys? = await CodeWithKeys.create(1)
 		first?.name = "The Cure"
 		first?.otherNest = Nested(name: "some name")
 		try await first?.save()
@@ -344,7 +343,7 @@ final class AutoDBTests: XCTestCase {
 		
 		XCTAssertNotNil(parent.value.children.owner)
 	}
-	 
+	
 	func testOneRelationFetchList() async throws {
 		
 		try await AlbumArt.truncateTable()
@@ -352,18 +351,24 @@ final class AutoDBTests: XCTestCase {
 		
 		// create albums
 		let albumNames = ["Faith", "Seventeen Seconds", "Pornography", "Three Imaginary Boys"]
-		for (index, name) in albumNames.enumerated() {
-			let album: Album = await Album.create()
-			album.value.name = name
-			try await album.save()
-			
-			let art: AlbumArt = await AlbumArt.create(AutoId(index + 1))
-			await Task.yield()
-			//let id = art!.id
-			await art.value.album.setObject(album)
-			try await art.save()
+		do {
+			for (index, name) in albumNames.enumerated() {
+				let album: Album = await Album.create()
+				album.value.name = name
+				try await album.save()
+				
+				let art: AlbumArt = await AlbumArt.create(AutoId(index + 1))
+				await Task.yield()
+				await art.value.album.setObject(album)
+				try await art.save()
+			}
 		}
 		await Task.yield()
+		try await waitForCondition("Album and AlbumArt models should be released so fetchQuery tests unloaded relations") {
+			let cachedArts: [AlbumArt] = await AutoDBManager.shared.cached(AlbumArt.self)
+			let cachedAlbums: [Album] = await AutoDBManager.shared.cached(Album.self)
+			return cachedArts.isEmpty && cachedAlbums.isEmpty
+		}
 		
 		let arts = try await AlbumArt.fetchQuery()
 		for art in arts {
@@ -488,7 +493,7 @@ final class AutoDBTests: XCTestCase {
 		let updated = try await UniqueString.fetchId(1)
 		XCTAssertEqual(updated.string, "New Test")
 		
-		XCTAssertTrue(updated === fetched) // they should be the same object
+		XCTAssertTrue(updated === fetched)  // they should be the same object
 		
 		let duplicateItem = await UniqueString.create()
 		duplicateItem.string = "New Test"
@@ -502,47 +507,47 @@ final class AutoDBTests: XCTestCase {
 			XCTAssertTrue(ids.contains(1) || ids.contains(duplicateId), "Expected id \(duplicateId) to be in the unique constraint error")
 		}
 	}
-
+	
 	func testTypedModelBucketsSavePendingChanges() async throws {
 		try await AutoDBManager.shared.truncateTable(TrackedModel.Value.self)
-
+		
 		let item = await TrackedModel.create(1)
 		item.name = "first"
 		try await item.save()
-
+		
 		item.name = "second"
 		try await AutoDBManager.shared.saveChanges(TrackedModel.self)
-
+		
 		let fetched = try await TrackedModel.fetchId(1)
+		let pendingCount = await AutoDBManager.shared.lookupObjectsCount(ObjectIdentifier(TrackedModel.self))
 		XCTAssertTrue(fetched === item)
 		XCTAssertEqual(fetched.name, "second")
-		XCTAssertEqual(await AutoDBManager.shared.lookupObjectsCount(ObjectIdentifier(TrackedModel.self)), 0)
+		XCTAssertEqual(pendingCount, 0)
 	}
-
+	
 	func testSaveAllChangesPersistsDroppedModelReferences() async throws {
 		try await AutoDBManager.shared.truncateTable(TrackedModel.Value.self)
-
-		weak var weakModel: TrackedModel?
+		
+		let weakModel = WeakBox<TrackedModel>()
 		let modelID: AutoId = 2
-
+		
 		do {
 			var model: TrackedModel? = await TrackedModel.create(modelID)
 			model?.name = "created"
 			try await model?.save()
-
+			
 			model?.name = "pending"
-			weakModel = model
+			weakModel.value = model
 			model = nil
 		}
-
-		XCTAssertNotNil(weakModel)
+		
+		XCTAssertNotNil(weakModel.value)
 		try await AutoDBManager.shared.saveAllChanges()
 		try await waitForCondition {
-			weakModel == nil
+			weakModel.value == nil
 		}
-
+		
 		let fetched = try await TrackedModel.fetchId(modelID)
 		XCTAssertEqual(fetched.name, "pending")
 	}
 }
-

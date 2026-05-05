@@ -1,4 +1,7 @@
 {
+	"rules": {
+		"NoAccessLevelOnExtensionDeclaration": false,
+	},
 	"indentation" : {
 		"tabs" : 1
 	},

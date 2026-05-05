@@ -6,13 +6,10 @@ SQL
 	- test all types
 	- store Int/String enums as Int/String  
 
-Creating index and changing column type does not work as expected!
-
 Relations:
-	- RelationQuery is only supported from iOS 17, build/finish the combine version
-	- When fetching relations, hasMore is sometimes set too late. Tests fail randomly.
-	- Finish FTSColumn
-	
+	- RelationQuery is still Observation-only; build a separate implementation for older OS versions if that compatibility is needed
+	- think through update hooks for query-backed lists when brand new rows should be inserted directly instead of discovered on the next fetch
+
 # Known bugs / TODOs
 
 Find a solution for temp-objects:

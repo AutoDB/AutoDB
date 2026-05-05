@@ -48,6 +48,7 @@ extension UInt64 {
     var lookupTable = LookupTable()
 	var cachedObjects = [ObjectIdentifier: WeakDictionary<AutoId, AnyObject>]()
 	private var createdObjects = [ObjectIdentifier: Set<AutoId>]()
+	private var modelCacheIdentifiersByTableIdentifier = [ObjectIdentifier: Set<ObjectIdentifier>]()
 	
 	var databases = [ObjectIdentifier: Database]()
 	var sharedDatabases = [SettingsKey: Database]()
@@ -80,8 +81,19 @@ extension UInt64 {
 		let db = try await setupDB(table)
 		try await db.execute(token: token, "DELETE FROM \(table.tableName)")
 		let typeID = ObjectIdentifier(T.self)
+		clearCachedState(for: typeID)
+
+		if let relatedModelTypeIDs = modelCacheIdentifiersByTableIdentifier[typeID] {
+			for modelTypeID in relatedModelTypeIDs {
+				clearCachedState(for: modelTypeID)
+			}
+		}
+	}
+
+	private func clearCachedState(for typeID: ObjectIdentifier) {
 		cachedObjects[typeID] = nil
 		createdObjects[typeID] = nil
+		lookupTable.clear(typeID)
 	}
 	
 	/// Instead of asking each Table, supply defaults for any new table. If an ObjectIdentifier of a Table.Type is not within any - settings is picked from the first existing one in order: regular, cache, specific.
@@ -251,7 +263,9 @@ extension UInt64 {
 	
 	// Mark this object as changed by placing it in the array - we avoid storage variables on the objects themselves.
 	func objectHasChanged<T: Model>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
-		lookupTable.objectHasChanged(object, identifier)
+		let modelTypeID = identifier ?? ObjectIdentifier(T.self)
+		registerModelCacheIdentifier(modelTypeID, tableTypeID: object.valueIdentifier)
+		lookupTable.objectHasChanged(object, modelTypeID)
 	}
 	
 	// MARK: created objects
@@ -355,10 +369,19 @@ extension UInt64 {
 	
 	func cacheObject<T: Model>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
 		let typeID = identifier ?? ObjectIdentifier(T.self)
+		registerModelCacheIdentifier(typeID, tableTypeID: object.valueIdentifier)
 		if cachedObjects[typeID] == nil {
 			cachedObjects[typeID] = WeakDictionary([object.id: object])
 		} else {
 			cachedObjects[typeID]?[object.id] = object
+		}
+	}
+
+	private func registerModelCacheIdentifier(_ modelTypeID: ObjectIdentifier, tableTypeID: ObjectIdentifier) {
+		if modelCacheIdentifiersByTableIdentifier[tableTypeID] == nil {
+			modelCacheIdentifiersByTableIdentifier[tableTypeID] = [modelTypeID]
+		} else {
+			modelCacheIdentifiersByTableIdentifier[tableTypeID]?.insert(modelTypeID)
 		}
 	}
 	

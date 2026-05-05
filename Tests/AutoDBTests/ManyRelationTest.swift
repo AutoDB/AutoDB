@@ -9,6 +9,7 @@ import Testing
 @testable import AutoDB
 import Foundation
 
+@Suite(.serialized)
 class ManyRelationTest {
 	
 	@Test
@@ -38,6 +39,34 @@ class ManyRelationTest {
 		// parent must be a Model for owner to be set automatically.
 		//#expect(parent.children.owner != nil)
 	}
+
+	@Test
+	func testPagedFetchStopsAtTotalCount() async throws {
+		try await AutoDBManager.shared.truncateTable(PagedParentStruct.self)
+		try await AutoDBManager.shared.truncateTable(Child.self)
+
+		let parent = await PagedParentStruct.create(1)
+		let names = ["A", "B", "C"]
+		var children = [Child]()
+		for (index, name) in names.enumerated() {
+			var child = await Child.create(AutoId(index + 1))
+			child.name = name
+			try await child.save()
+			children.append(child)
+		}
+
+		await parent.children.append(children)
+		try await parent.save()
+
+		let fetched = try await PagedParentStruct.fetchId(1)
+		let firstPage = try await fetched.children.firstFetch()
+		#expect(firstPage.count == 2)
+		#expect(fetched.children.hasMore)
+
+		let secondPage = try await fetched.children.fetch()
+		#expect(secondPage.count == 3)
+		#expect(fetched.children.hasMore == false)
+	}
 	
 	func createData() async throws {
 		var item: ParentStruct = await ParentStruct.create(1)
@@ -57,6 +86,11 @@ class ManyRelationTest {
 			try await item.save()
 		}
 	}
+}
+
+struct PagedParentStruct: Table {
+	var id: UInt64 = 0
+	var children = ManyRelation<Child>(initial: 2, limit: 2, initFetch: false)
 }
 
 struct ParentStruct: Table {

@@ -55,55 +55,67 @@ final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
 	}
 }
 
+@Suite(.serialized)
 class FTSTests {
 	
-	//@Test
-	func basic() async throws {
-		try await FTS.create(1, "some long and boring story about the prince and the queen", "Ambition in the back of a black car").save()
-		var item = try await FTS.fetchId(1)
-		#expect(item.text.contains("some long"))
-		
-		try await FTS.query("DELETE from FTS where text LIKE '%magical%'")
-		
-		try await FTS.create(nil, "magical beings oaa they are cool").save()
-		let someNew = try await FTS.create(nil, "magical beings")
-		try await someNew.save()
-		
-		let result = try await FTSColumn<FTS>.search("long and boring", column: "text").first
-		
-		#expect(result?.id == 1)
-		#expect(result == item)
-		
-		//now let's change it
-		item.text = "ÖÄÅ"
-		try await item.save()
-		let other = try await FTS.fetchQuery("WHERE text LIKE '%ÖÄÅ%'").first
-		#expect(other?.id == 1)
-		
-		// wait for change trigger in DB
-		try await waitForCondition("should give us one result only - should not match oaa") {
-			try await someNew.fts.search("ÖÄÅ").count == 1	//should give us one result - we need to discover changes and re-index! - delete on change!
-		}
-		try await waitForCondition("should not match öäå") {
-			try await someNew.fts.search("oAA").count == 1
-		}
-		
-		//we need a way to separate two indicies from each other even in a static function
-		let ambition = try await FTSColumn<FTS>.search("Ambition", column: "somethingElse").first
-		#expect(ambition?.somethingElse == "Ambition in the back of a black car")
-		//try await Task.sleep(for: .seconds(2))
+	private func resetFTS() async throws {
+		try await FTS.truncateTable()
+	}
+
+	@discardableResult
+	private func seedFTSData() async throws -> (primary: FTS, magical: FTS, secondary: FTS) {
+		try await resetFTS()
+		let primary = try await FTS.create(1, "some long and boring story about the prince and the queen", "Ambition in the back of a black car")
+		let magical = try await FTS.create(2, "magical beings oaa they are cool")
+		let secondary = try await FTS.create(3, "magical beings")
+		return (primary, magical, secondary)
 	}
 	
 	@Test func search() async throws {
-		
+		let seeded = try await seedFTSData()
+
+		let result = try await FTSColumn<FTS>.search("long and boring", column: "text").first
+		#expect(result?.id == seeded.primary.id)
+		#expect(result == seeded.primary)
+
+		let ambition = try await FTSColumn<FTS>.search("Ambition", column: "somethingElse").first
+		#expect(ambition?.id == seeded.primary.id)
+		#expect(ambition?.somethingElse == "Ambition in the back of a black car")
+	}
+
+	@Test
+	func reindexesAfterUpdateAndDelete() async throws {
+		let seeded = try await seedFTSData()
+		var updated = try await FTS.fetchId(seeded.primary.id)
+		updated.text = "ÖÄÅ"
+		try await updated.save()
+		let updatedID = updated.id
+
+		try await waitForCondition("updated text should be searchable and old text removed from the FTS index") {
+			let updatedMatches = try await FTSColumn<FTS>.search("ÖÄÅ", column: "text")
+			let oldMatches = try await FTSColumn<FTS>.search("long and boring", column: "text")
+			return updatedMatches.count == 1 && updatedMatches.first?.id == updatedID && oldMatches.isEmpty
+		}
+
+		try await waitForCondition("diacritic folding should not collapse Nordic vowels into unrelated words") {
+			try await FTSColumn<FTS>.search("oAA", column: "text").count == 1
+		}
+
+		try await seeded.magical.delete()
+		try await seeded.secondary.delete()
+		try await waitForCondition("deleted rows should disappear from the FTS index") {
+			try await FTSColumn<FTS>.search("magical", column: "text").isEmpty
+		}
 	}
 	
 	@Test
 	func testXTimes() async throws {
 		for index in 0..<1000 {
-			try await basic()
+			let seeded = try await seedFTSData()
+			let result = try await FTSColumn<FTS>.search("long and boring", column: "text").first
+			#expect(result?.id == seeded.primary.id)
 			if index % 100 == 0 {
-				print("basic completed: \(index)")
+				print("fts completed: \(index)")
 			}
 		}
 	}
@@ -134,4 +146,3 @@ class FTSTests {
 	}
 		
 }
-

@@ -2,6 +2,14 @@
 
 The purpose is to have a automatic system for handling persistance. Objects should be able to save and restore themselves and common headaches should be removed, like migration and uniqueness. A common platform for syncing that can be reused across apps can easier be built if there are common grounds.
 
+## Availability
+
+Current package support is macOS 14+, iOS 17+, and tvOS 13+.
+
+- The core table/model APIs, migrations, caching, and FTS are part of the stable package surface.
+- `RelationQuery` currently relies on Observation, so it is only available on macOS 14+, iOS 17+, tvOS 17+, and watchOS 10+.
+- Cross-platform work outside Apple platforms is still exploratory rather than release-ready.
+
 ## Quick start
 
 See the [README](/README.md).
@@ -146,7 +154,7 @@ Objects are cached with weak pointers, meaning that they will be deallocated whe
 A common source of errors and hangs is migration. The system knows about current SQL-tables on disc, and handle migration automatically and efficiently by comparing with the data-classes. It handles adding and removing columns, and changing types (to some extent). If you change a String to Int it will work as long as the string can be an Int like "2", but everything else like "some words" will of course not be a meaningful Int - so keep that in mind. For best result, never change your types. Instead, create new columns.
 Migration is really fast and even if your tables have millions of rows it will probably not be noticable for the user.
 
-NOTE: AutoDB cannot (yet) rename properties, if you change the name of a variable it will delete the old column and create a new one - potentially causing data loss.
+NOTE: AutoDB does not automatically infer renames. If you change a property name it will create the new column and treat the old one as removed, so use the migration callback to copy data from the preserved old table when you need a rename-safe migration.
 
 ## Uniqueness
 
@@ -167,6 +175,8 @@ Just annotate your AutoDB classes with @Observable.
 	...
 }
 ```
+
+This path requires Observation availability, which currently means macOS 14+, iOS 17+, tvOS 17+, or watchOS 10+.
 
 ### ObservableObject
 

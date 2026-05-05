@@ -34,6 +34,17 @@ struct MigIndex: Table {
 	}
 }
 
+struct MigChangedIndex: Table {
+	static let tableName = "MigChangedIndex"
+
+	var id: AutoId = 1
+	var toInt = 1
+	var plain = "plain"
+
+	static var uniqueIndices: [[String]] { [["toInt"]] }
+	static var indices: [[String]] { [["plain", "toInt"]] }
+}
+
 struct Mig: Table {
 	var id: AutoId = 1
 	var toInt = 1	// a type converted from String to Int
@@ -114,7 +125,7 @@ class MigrationTests {
 		
 		/// First we create an "old" table that will be migrated.
 		let db = try await MigFirst.db()
-		try? await db.execute("DROP TABLE Mig")
+		_ = try? await db.execute("DROP TABLE Mig")
 		try await db.execute(Mig.createTableSQL)
 		try await db.execute("INSERT INTO Mig (id, plain_old, toInt) VALUES (1, 'some test value', 'no number')")
 		let thread = Task {
@@ -139,13 +150,42 @@ class MigrationTests {
 	//CREATE INDEX `plain_index` ON Mig (plain);
 	@Test func dropUnusedIndexes() async throws {
 		let db = try await MigFirst.db()
-		try? await db.execute("DROP TABLE MigIndex")
+		_ = try? await db.execute("DROP TABLE MigIndex")
 		try await db.execute(MigIndex.createTableSQL)
 		try await db.execute("INSERT INTO MigIndex (id, plain, toInt) VALUES (1, 'some test value', 2)")
 		try await db.execute("CREATE INDEX removeThisIndex ON MigIndex (plain)")
 		print("now:")
 		let first = try await MigIndex.fetchId(1)
 		#expect(first.toInt == 2)
+
+		let indices = try await db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'MigIndex'")
+			.compactMap { $0["name"]?.stringValue }
+		#expect(indices.contains("removeThisIndex") == false)
+		#expect(indices.contains("MigIndex_plain_index"))
+		#expect(indices.contains("MigIndex_toInt_index"))
+	}
+
+	@Test func rebuildChangedIndexes() async throws {
+		let db = try await MigFirst.db()
+		_ = try? await db.execute("DROP TABLE MigChangedIndex")
+		try await db.execute("""
+		CREATE TABLE IF NOT EXISTS "MigChangedIndex" (
+		 `id` INTEGER NOT NULL DEFAULT 1,
+		 `plain` TEXT NOT NULL DEFAULT 'plain',
+		 `toInt` INTEGER NOT NULL DEFAULT 67,
+		 PRIMARY KEY (`id`));
+		""")
+		try await db.execute("INSERT INTO MigChangedIndex (id, plain, toInt) VALUES (1, 'some test value', 2)")
+		try await db.execute("CREATE INDEX MigChangedIndex_plain_index ON MigChangedIndex (plain)")
+
+		let first = try await MigChangedIndex.fetchId(1)
+		#expect(first.toInt == 2)
+
+		let indices = try await db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'MigChangedIndex'")
+			.compactMap { $0["name"]?.stringValue }
+		#expect(indices.contains("MigChangedIndex_plain_index") == false)
+		#expect(indices.contains("MigChangedIndex_plain_toInt_index"))
+		#expect(indices.contains("MigChangedIndex_toInt_index"))
 	}
 	
 	@Test
@@ -160,4 +200,3 @@ class MigrationTests {
 		
 	}
 }
-
