@@ -1,6 +1,16 @@
 # AutoDB Swift
 
-The purpose is to have a automatic system for handling persistance. Objects should be able to save and restore themselves and common headaches should be removed, like migration and uniqueness. A common platform for syncing that can be reused across apps can easier be built if there are common grounds.
+The purpose is to have an automatic system for handling persistence. Objects should be able to save and restore themselves and common headaches should be removed, especially migration, uniqueness, and relation handling.
+
+## Release scope
+
+AutoDB 1.0 is an Apple-first Swift Package release.
+
+- Package platforms: macOS 14+, iOS 17+, tvOS 13+
+- `RelationQuery` availability: macOS 14+, iOS 17+, tvOS 17+, watchOS 10+
+- Cross-platform support outside Apple platforms is not part of the 1.0 contract
+
+For first integration steps, start with the [README](../README.md) and the [Adoption Guide](Adoption.md).
 
 ## Availability
 
@@ -12,7 +22,7 @@ Current package support is macOS 14+, iOS 17+, and tvOS 13+.
 
 ## Quick start
 
-See the [README](/README.md).
+See the [README](../README.md).
 
 # Overview
 
@@ -45,6 +55,28 @@ The reasons are many:
 * Speed. When writing to DB you just need to send the structs to handle themselves. No locking, retain/release etc, needs to be done. 
 
 Eating the cake and having it too!
+
+## 1.0 guarantees and limits
+
+### Migrations
+
+AutoDB compares the stored SQL schema with the current `Table` definition and automatically applies supported additive/removal changes and compatible conversions. It does not infer renames. If you rename a property, treat that as a migration you own and use the migration callback to copy data from the old column or temporary table before the old schema is dropped.
+
+### Cache-backed identity
+
+`Model` instances are cached by concrete model type and `id`. While a model remains retained, fetching it again returns the same live instance. The cache is weak, so once nobody retains the model it may be recreated on the next fetch. This identity guarantee does not apply to plain `Table` values, which are intentionally uncached value snapshots.
+
+### Save semantics
+
+`save()` persists immediately. `didChange()` marks a model as dirty for a later `saveChanges()` or `saveAllChanges()` flush. Dirty buckets retain models until they are persisted, so batched writes reduce disk churn by temporarily keeping those models alive.
+
+### `RelationQuery`
+
+`RelationQuery` is stable in 1.0 only on Observation-capable OS versions. Its public contract is incremental fetching with deterministic paging state: inserts and deletes refresh the visible window, and overlapping later pages rebuild from offset `0` so `items`, `offset`, and `hasMore` stay consistent. There is no older-OS fallback implementation in 1.0.
+
+### FTS
+
+`FTSColumn` relies on SQLite FTS5. Update and delete triggers invalidate stale index rows, and searches repopulate missing rows on demand. If you provide a custom `FTSCallbackOwner`, its callback should deterministically map each `id` to the text that should be indexed.
 
 ## Plain SQL queries
 
@@ -105,6 +137,14 @@ var post: Post = await Post.create()
 let fairyTalePosts: [PostTable] = try await post.ownerIndex.search("once upon a time")
 ```
 
+The 1.0 contract for FTS is:
+
+- `FTSColumn` is part of the public supported API
+- SQLite FTS5 support is required
+- update and delete triggers keep the index invalidated correctly
+- missing rows are repopulated on demand during search
+- if you rename the indexed column or callback behavior, treat that as a migration concern just like any other schema-visible change
+
 # Transactions
 
 Transactions are supported, wrap your code in a closure where no calls may throw errors. If it does, DB-state is rolled back to its initial state. Like this:
@@ -125,7 +165,7 @@ try? await TransClass.transaction { _, token in
 // All other calls to db will await until this point where the transaction is done.
 ```
 
-Note that the use of "token" is required until Swift 6.3, but will be removed in a future update. At least until 6.3 has been out for a while and time to implement this has conjoured itself into existence. 
+The transaction `token` is part of the current public contract. Pass it through all AutoDB calls made inside the transaction closure to avoid deadlocks.
 
 ## Deadlocks with transactions
 

@@ -6,9 +6,9 @@
 //
 import Foundation
 #if canImport(Darwin)
-import SQLite3
+	import SQLite3
 #else
-import SQLCipher
+	import SQLCipher
 #endif
 
 // implement this protocol if you don't want textCreation to be automatically pulled from the column with the same name.
@@ -35,7 +35,7 @@ actor FTSHandler {
 	
 	/// this table's FTS column is locked by semaphore when searching and setting up - note that we only use one semaphore per table even if you have multiple FTS columns.
 	var columnLock = [ObjectIdentifier: Semaphore]()
-	var ftsTables = [ObjectIdentifier: [String : FTSTableInfo]]()	// note that each table can have multiple FTS columns
+	var ftsTables = [ObjectIdentifier: [String: FTSTableInfo]]()  // note that each table can have multiple FTS columns
 	
 	// return true if this is the first time called
 	func setup<TargetTableType: TableModel>(_ type: TargetTableType.Type, _ column: String, _ typeID: ObjectIdentifier, _ targetTableName: String) async throws -> Bool {
@@ -56,7 +56,7 @@ actor FTSHandler {
 		
 		// no-one is allowed to query or populate index before we are setup
 		await columnLock[typeID]?.wait()
-		defer { Task { await columnLock[typeID]?.signal() }}
+		defer { Task { await columnLock[typeID]?.signal() } }
 		
 		guard sqlite3_compileoption_used("ENABLE_FTS5") != 0 else {
 			throw AutoError.noFTSSupport
@@ -73,25 +73,24 @@ actor FTSHandler {
 		
 		// Keep deleted and updated data up to date with triggers, if we delete or update text in the target-table we must delete it from the FTS-table (it will later be re-indexed).
 		let deleteTrigger = """
-		CREATE TRIGGER IF NOT EXISTS `\(tableName)Delete` AFTER DELETE ON `\(targetTableName)` BEGIN
-			DELETE FROM `\(tableName)` WHERE `\(tableName)`.id = OLD.id;
-		END;
-		"""
+			CREATE TRIGGER IF NOT EXISTS `\(tableName)Delete` AFTER DELETE ON `\(targetTableName)` BEGIN
+				DELETE FROM `\(tableName)` WHERE `\(tableName)`.id = OLD.id;
+			END;
+			"""
 		try await TargetTableType.query(token: nil, deleteTrigger, nil)
 		
-		
 		let updateTrigger = """
-		CREATE TRIGGER IF NOT EXISTS `\(tableName)Update` AFTER UPDATE ON `\(targetTableName)` BEGIN
-			DELETE FROM `\(tableName)` WHERE `\(tableName)`.id = OLD.id;
-		END;
-		"""
+			CREATE TRIGGER IF NOT EXISTS `\(tableName)Update` AFTER UPDATE ON `\(targetTableName)` BEGIN
+				DELETE FROM `\(tableName)` WHERE `\(tableName)`.id = OLD.id;
+			END;
+			"""
 		try await TargetTableType.query(token: nil, updateTrigger, nil)
 		
 		let insertTrigger = """
-		CREATE TRIGGER IF NOT EXISTS `\(tableName)Insert` AFTER INSERT ON `\(targetTableName)` BEGIN
-			DELETE FROM `\(tableName)` WHERE `\(tableName)`.id = NEW.id;
-		END;
-		"""
+			CREATE TRIGGER IF NOT EXISTS `\(tableName)Insert` AFTER INSERT ON `\(targetTableName)` BEGIN
+				DELETE FROM `\(tableName)` WHERE `\(tableName)`.id = NEW.id;
+			END;
+			"""
 		try await TargetTableType.query(token: nil, insertTrigger, nil)
 		try await TargetTableType.query(token: nil, "PRAGMA trusted_schema=1;", nil)
 		
@@ -117,7 +116,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 		TargetTableType.tableName
 	}
 	
-	init(_ column: String) {
+	public init(_ column: String) {
 		self.column = column
 		Task {
 			try await setup(TargetTableType.self)
@@ -182,8 +181,8 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 				}
 			}
 			return result
-		}	
-		
+		}
+        
 		await FTSHandler.shared.setTextCallback(typeID, column, textCallback)
 	}
 	
@@ -201,7 +200,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 		
 		// at first entrence we must wait for semaphore
 		await semaphore.wait()
-		defer { Task { await semaphore.signal() }}
+		defer { Task { await semaphore.signal() } }
 		
 		try await populateIndexIterate(typeID, column)
 	}
@@ -209,7 +208,8 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	static private func populateIndexIterate(_ typeID: ObjectIdentifier, _ column: String) async throws {
 		
 		guard let tableInfo = await FTSHandler.shared.ftsTables[typeID]?[column],
-			  let textCallback = tableInfo.textCallback else {
+			let textCallback = tableInfo.textCallback
+		else {
 			return
 		}
 		
@@ -219,7 +219,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 			try await TargetTableType.query("DELETE FROM `\(tableInfo.tableName)`")
 		}
 		
-		let limit = 20000	// any limit will do, just make it small enough to not take noticable RAM/CPU per fetch, while big enough to handle most updates in one go.
+		let limit = 20000  // any limit will do, just make it small enough to not take noticable RAM/CPU per fetch, while big enough to handle most updates in one go.
 		let query = "SELECT id FROM `\(tableInfo.targetTableName)` WHERE id NOT in (SELECT id FROM `\(tableInfo.tableName)`) LIMIT \(limit)"
 		let ids = try await TargetTableType.query(query).flatMap { $0.values.compactMap { $0.uint64Value } }
 		if ids.isEmpty {
@@ -245,8 +245,8 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 		
 		let typeID = ObjectIdentifier(TargetTableType.self)
 		guard let tables = await FTSHandler.shared.ftsTables[typeID],
-			  let firstColumn = tables.keys.first,
-			  let tableInfo = tables[firstColumn]
+              let firstColumn = tables.keys.first,
+              let tableInfo = tables[firstColumn]
 		else {
 			return []
 		}
@@ -287,4 +287,3 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 		return String(phrase.precomposedStringWithCanonicalMapping.map { regular.contains($0) ? $0 : String($0).folding(options: .diacriticInsensitive, locale: nil).first! })
 	}
 }
-

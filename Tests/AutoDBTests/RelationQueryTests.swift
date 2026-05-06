@@ -451,7 +451,17 @@ class RelationQueryTests {
 		try await firstVisible?.delete()
 		
 		try await waitForCondition {
-			cure.value.albums.items.count == 2 && cure.value.albums.hasMore == false
+			let names = Set(cure.value.albums.items.map(\.name))
+			guard cure.value.albums.items.count == 2, cure.value.albums.hasMore == false else {
+				return false
+			}
+			guard names.contains("Pornography") else {
+				return false
+			}
+			if let deletedName {
+				return names.contains(deletedName) == false
+			}
+			return true
 		}
 		
 		let names = Set(cure.value.albums.items.map(\.name))

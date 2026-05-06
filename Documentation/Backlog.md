@@ -1,4 +1,6 @@
-# AutoDB Swift
+# Post-1.0 Backlog
+
+The items below are explicitly post-1.0 work. They are not part of the release contract described in [README.md](../README.md) and [CHANGELOG.md](../CHANGELOG.md).
 
 SQL
 	- update hook when having fetch-lists in ManyRelation (as in RelationQuery)
