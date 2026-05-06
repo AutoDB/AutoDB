@@ -126,11 +126,12 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	/// if owner implements FTSCallbackOwner, it gets handled automatically. Otherwise it will import text directly from the column with the same name
 	public func setOwner<OwnerType: Owner>(_ owner: OwnerType) {
 		self.owner = owner
-		Task {
-			if let ftsOwner = owner as? (any FTSCallbackOwner) {
-				await setCallbackOwner(ftsOwner)
-			}
-		}
+        
+        Task.immediatePort { [self] in
+            if let ftsOwner = owner as? (any FTSCallbackOwner) {
+                await setCallbackOwner(ftsOwner)
+            }
+        }
 	}
 	
 	/// Calls setCallbackOwner for this class type, the reason this function exist is to circumvent Swift's type system and allows us to call a static func using an object.
