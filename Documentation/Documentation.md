@@ -62,6 +62,28 @@ Eating the cake and having it too!
 
 AutoDB compares the stored SQL schema with the current `Table` definition and automatically applies supported additive/removal changes and compatible conversions. It does not infer renames. If you rename a property, treat that as a migration you own and use the migration callback to copy data from the old column or temporary table before the old schema is dropped.
 
+Guaranteed in 1.0:
+
+- adding columns while preserving existing rows
+- removing columns by rebuilding and copying the surviving columns
+- widening from non-optional to optional
+- tightening from optional to non-optional when the stored rows already satisfy the new non-null requirement
+- primitive conversions already covered by the test suite: numeric `TEXT -> INTEGER`, `INTEGER -> TEXT`, and compatible integer-width changes
+- preserving `URL`, `Date`, `Data`, primitive-backed enums, and Codable `BLOB` payloads through rebuild-style migrations when the column names remain the same
+- index add/remove/change handling covered by the migration suite
+
+Tolerated but not guaranteed:
+
+- tightening from optional to non-optional when stored rows still contain `NULL`
+- nonnumeric `TEXT -> INTEGER` conversions
+
+Those two cases currently complete, but the resulting values follow SQLite/default-value behavior rather than a semantic conversion you should rely on. E.g if the column is defined as `NOT NULL DEFAULT 'empty'` it will return `empty` for stored nil values. 
+
+Unsupported without a manual migration callback:
+
+- rename inference
+- lossy or domain-specific type conversions where you need to inspect and transform old values intentionally
+
 ### Cache-backed identity
 
 `Model` instances are cached by concrete model type and `id`. While a model remains retained, fetching it again returns the same live instance. The cache is weak, so once nobody retains the model it may be recreated on the next fetch. This identity guarantee does not apply to plain `Table` values, which are intentionally uncached value snapshots.
@@ -77,6 +99,24 @@ AutoDB compares the stored SQL schema with the current `Table` definition and au
 ### FTS
 
 `FTSColumn` relies on SQLite FTS5. Update and delete triggers invalidate stale index rows, and searches repopulate missing rows on demand. If you provide a custom `FTSCallbackOwner`, its callback should deterministically map each `id` to the text that should be indexed.
+
+### Primitive storage and enums
+
+AutoDB stores SQL-native primitives using SQLite primitive column types rather than encoding them as `BLOB`.
+
+Guaranteed SQL-native storage in 1.0:
+
+- `String`, `URL`
+- `Bool`, signed integers, unsigned integers
+- `Double`, `Float`, `Date`
+- `Data`, `AutoId128`
+- optionals of the supported primitive families above
+
+For enums:
+
+- non-optional raw-value enums with SQL-compatible raw values are stored using their raw primitive storage
+- if you need an optional enum column to remain SQL-native and queryable by raw value, use `SQLStringEnum`, `SQLIntegerEnum`, or `SQLUIntegerEnum`
+- Codable payloads that are not SQL-native remain `BLOB` columns backed by encoded data
 
 ## Plain SQL queries
 

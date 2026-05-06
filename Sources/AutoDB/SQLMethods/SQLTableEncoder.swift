@@ -248,6 +248,24 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 #endif
 		return false
 	}
+
+	private static func getColumnType(_ type: Any.Type, nullable: Bool = false) -> (ColumnType, Bool)? {
+		switch type {
+			case is String.Type, is any SQLStorableAsText.Type, is any SQLStringEnum.Type:
+				return (.text, nullable)
+			case is Data.Type, is any SQLStorableAsData.Type:
+				return (.blob, nullable)
+			case is Double.Type, is Float.Type, is Date.Type, is any SQLStorableAsDouble.Type:
+				return (.real, nullable)
+			case is Bool.Type, is Int.Type, is Int8.Type, is Int16.Type, is Int32.Type, is Int64.Type,
+			     is UInt.Type, is UInt8.Type, is UInt16.Type, is UInt32.Type, is UInt64.Type,
+			     is any SQLStorableAsInteger.Type, is any SQLStorableAsUnsignedInteger.Type,
+			     is any SQLIntegerEnum.Type, is any SQLUIntegerEnum.Type:
+				return (.integer, nullable)
+			default:
+				return nil
+		}
+	}
     
     /// Must convert each type to SQLite-types, note that they are dynamic so SQL doesn't really care what type we claim it to be.
 	static func getColumnType<T>(_ value: T) -> (ColumnType, Bool)? {
@@ -255,56 +273,11 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		if alwaysIgnoreType(value) {
 			return nil
 		}
-        var columnType:ColumnType? = nil
-		var nullable = false
-		switch value {
-            //we can have values
-            case is String:
-                columnType = .text
-            case is Data:
-                columnType = .blob
-            case is any SQLStorableAsData:
-                columnType = .blob
-            case is Double, is Float, is Date:
-                columnType = .real
-            case is UInt64, is Int, is Int8, is Int16, is Int64, is Int32,
-                 is UInt, is UInt8, is UInt16, is UInt32:
-                columnType = .integer
-            
-            //or types
-            case is String.Type:
-                columnType = .text
-            case is Data.Type:
-                columnType = .blob
-            case is any SQLStorableAsData.Type:
-                columnType = .blob
-            case is Double.Type, is Float.Type, is Date.Type:
-                columnType = .real
-            case is Int.Type, is Int8.Type, is Int16.Type, is Int64.Type, is Int32.Type,
-                 is UInt.Type, is UInt8.Type, is UInt16.Type, is UInt64.Type, is UInt32.Type:
-                columnType = .integer
-                
-            //or types that are optional
-            case is String?.Type:
-                columnType = .text
-				nullable = true
-            case is Data?.Type:
-                columnType = .blob
-				nullable = true
-            case is Double?.Type, is Float?.Type, is Date?.Type:
-                columnType = .real
-				nullable = true
-            case is Int?.Type, is Int8?.Type, is Int16?.Type, is Int64?.Type, is Int32?.Type,
-                 is UInt?.Type, is UInt8?.Type, is UInt16?.Type, is UInt64?.Type, is UInt32?.Type:
-                columnType = .integer
-				nullable = true
-            default:
-                //All other gets JSON format since we know they are enodable
-                //.blob
-                break
-        }
-		if let columnType {
-			return (columnType, nullable)
+		if let columnType = getColumnType(T.self) {
+			return columnType
+		}
+		if let columnType = getColumnType(type(of: value)) {
+			return columnType
 		}
 		if let rawRepresentable = value as? any RawRepresentable {
 			// use the raw value's type, otherwise you get a data and if a number you can't do regular arithmetic operations.
@@ -346,7 +319,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
         }
 		
 		func encodeIfPresent(_ value: String?, forKey key: KeyType) throws {
-			if let (sqlType, _) = SQLTableEncoder.getColumnType(type(of: value)) {
+			if let (sqlType, _) = SQLTableEncoder.getColumnType(String.self) {
 				try enc.addColumn(key.stringValue, sqlType, String.self, true, value)
 			}
 		}
@@ -355,12 +328,11 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			if SQLTableEncoder.alwaysIgnoreType(value) {
 				return
 			}
-			let metaType = type(of: value)
-			if let (sqlType, _) = SQLTableEncoder.getColumnType(metaType) {
-				try enc.addColumn(key.stringValue, sqlType, metaType, true, value)
+			if let (sqlType, _) = SQLTableEncoder.getColumnType(T.self) {
+				try enc.addColumn(key.stringValue, sqlType, T.self, true, value)
 			} else {
 				//If not of basic type, we can still encode it as blob.
-				try enc.addColumn(key.stringValue, .blob, metaType, true, value)
+				try enc.addColumn(key.stringValue, .blob, T.self, true, value)
 			}
 		}
 

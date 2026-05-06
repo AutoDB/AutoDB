@@ -82,6 +82,27 @@ class SQLRowDecoder: Decoder {
 		guard let value = values[key] ?? values[key.trimmingCharacters(in: prefixPropertyChars)] else {
 			return nil
 		}
+
+		if let textType = type as? any SQLStorableAsText.Type,
+		   let text = value.stringValue {
+			return textType.from(unifiedRepresentation: text) as? T
+		}
+		if let integerType = type as? any SQLStorableAsInteger.Type,
+		   let integer = value.int64Value {
+			return integerType.from(unifiedRepresentation: integer) as? T
+		}
+		if let unsignedIntegerType = type as? any SQLStorableAsUnsignedInteger.Type,
+		   let integer = value.uint64Value {
+			return unsignedIntegerType.from(unifiedRepresentation: integer) as? T
+		}
+		if let doubleType = type as? any SQLStorableAsDouble.Type,
+		   let double = value.doubleValue {
+			return doubleType.from(unifiedRepresentation: double) as? T
+		}
+		if let dataType = type as? any SQLStorableAsData.Type,
+		   let data = value.dataValue {
+			return dataType.from(unifiedRepresentation: data) as? T
+		}
 		
 		switch type {
 			case is String.Type:
@@ -118,10 +139,6 @@ class SQLRowDecoder: Decoder {
 				}
 			default:
 				if let data = value.dataValue {
-					if let dataType = type as? any SQLStorableAsData.Type {
-						return dataType.from(unifiedRepresentation: data) as? T
-					}
-					
 					if let value = data as? T {
 						return value
 					}
