@@ -59,7 +59,7 @@ final class DeallocTest: @unchecked Sendable {
 		albums.setOwner(self)
 	}
 	
-	var albums = RelationQuery<Album>("WHERE artist = ?", arguments: ["The Cure"], initial: 20000, limit: 3)
+	var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 20000, limit: 3)
 	var callback: (() -> Void)?
 	deinit {
 		callback?()
@@ -72,7 +72,7 @@ final class CureAlbums: Model, @unchecked Sendable {
 		static let tableName = "CureAlbums"
 		
 		var id: AutoId = 0
-		var albums = RelationQuery<Album>("WHERE artist = ?", arguments: ["The Cure"], initial: 1, limit: 20)
+		var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 1, limit: 20)
 	}
 	var value: CureAlbumsTable
 	init(_ value: CureAlbumsTable) {
@@ -83,7 +83,7 @@ final class CureAlbums: Model, @unchecked Sendable {
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 struct SaveFail: Table {
 	var id: AutoId = 0
-	var albums = RelationQuery<Album>("WHERE artist = ?", arguments: ["The Cure"], initial: 2, limit: 3)
+	var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 3)
 }
 
 final class CombineAlbum: Model, @unchecked Sendable, ObservableObject {
@@ -113,7 +113,7 @@ final class CombineAlbum: Model, @unchecked Sendable, ObservableObject {
 final class CombineArtist: @unchecked Sendable, ObservableObject, RelationOwner {
 	
 	@Published
-	var albums = RelationQuery<CombineAlbum.CombineAlbumTable>("WHERE artist = ?", arguments: ["The Cure"], initial: 2, limit: 3)
+	var albums = RelationQuery<CombineAlbum.CombineAlbumTable>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 3)
 	
 	func didChange() async {
 		objectWillChange.send()
@@ -126,7 +126,7 @@ final class PagedCureAlbums: Model, @unchecked Sendable {
 		static let tableName = "PagedCureAlbums"
 		
 		var id: AutoId = 0
-		var albums = RelationQuery<Album>("WHERE artist = ?", arguments: ["The Cure"], initial: 2, limit: 2)
+		var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 2)
 	}
 	
 	var value: Value
@@ -269,6 +269,17 @@ actor RelationQueryPublisherTests {
 		try await waitForCondition {
 			await countIsOne()
 		}
+	}
+
+	@Test
+	func asyncObserverDoesNotLoseFirstQueuedValue() async {
+		let observer = AsyncObserver<Int>()
+		let iterator = observer.makeAsyncIterator()
+		
+		await observer.appendWait(42)
+		let first = await iterator.next()
+		
+		#expect(first == 42)
 	}
 	
 	func countIsOne() -> Bool {

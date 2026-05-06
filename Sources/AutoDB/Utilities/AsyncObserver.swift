@@ -117,16 +117,19 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 	
 	// make a copy of the Observer and start enquing incoming values
 	public func makeAsyncIterator() -> Self {
-        var copy = self
+		var copy = self
 		let queue = Queue()
 		copy.queue = queue
+		let registrationSemaphore = DispatchSemaphore(value: 0)
 		Task {
-			// start listening at once and build the queue of incoming values,
+			// Register the queue before returning so the first event cannot be lost
+			// to a scheduling race between iterator creation and observation.
 			await copy.globalSender.addObserver(queue)
-				
+			registrationSemaphore.signal()
 		}
+		registrationSemaphore.wait()
 		return copy
-    }
+	}
 	
 	/// Each async-loop has one queue with items, and picks from it or wait inside for the next item.
 	fileprivate actor Queue {
@@ -212,4 +215,3 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 	}
 
 }
-
