@@ -604,30 +604,35 @@ public actor Database {
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
 	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are holding the lock. We could send around the AutoDB and only allow access when locked - but that would basically be the same thing.
-	public func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
+	public func transaction<R: Sendable>(token: AutoId? = nil, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
 		
+        // note that we can have transactions inside transactions, as long as we reuse the token
+        let token = token ?? AutoId.generateId()
 		let transactionID = AutoId.generateId()
-		await semaphore.wait(token: transactionID)
+		await semaphore.wait(token: token)
+        let nestedTransaction = inTransaction
 		inTransaction = true	// now everyone must wait for semaphore
 		defer {
 			Task {
 				// Set a token to wait for semaphores, this way we can call DB simultaneous with regular queries but wait when there are transactions.
 				// also closing the DB will wait for a whole transaction.
-				inTransaction = false
+                if nestedTransaction == false {
+                    inTransaction = false
+                }
 				
 				// must be done in this order, waiting transactions may start un-ordered. Does that matter?
-				await semaphore.signal(token: transactionID)
+				await semaphore.signal(token: token)
 			}
 		}
 		if isClosed { throw Error.databaseIsClosed }
 		
-		try await execute(token: transactionID, "SAVEPOINT \"\(transactionID)\"")
+		try await execute(token: token, "SAVEPOINT \"\(transactionID)\"")
 		do {
-			let result: R = try await action(self, transactionID)
-			try await execute(token: transactionID, "RELEASE SAVEPOINT \"\(transactionID)\"")
+			let result: R = try await action(self, token)
+			try await execute(token: token, "RELEASE SAVEPOINT \"\(transactionID)\"")
 			return result
 		} catch {
-			try await execute(token: transactionID, "ROLLBACK TO SAVEPOINT \"\(transactionID)\"")
+			try await execute(token: token, "ROLLBACK TO SAVEPOINT \"\(transactionID)\"")
 			throw error
 		}
 	}

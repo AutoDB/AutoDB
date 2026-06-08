@@ -78,7 +78,7 @@ extension UInt64 {
 	
 	/// Only use this when testing, may create dublicate objects when live objects are saved.
 	func truncateTable<T: Table>(token: AutoId? = nil, _ table: T.Type) async throws {
-		let db = try await setupDB(table)
+		let db = try await setupDB(token: token, table)
 		try await db.execute(token: token, "DELETE FROM \(table.tableName)")
 		let typeID = ObjectIdentifier(T.self)
 		clearCachedState(for: typeID)
@@ -140,7 +140,7 @@ extension UInt64 {
 	
 	/// Setup database for this class, attach to file defined in settings. Settings defaults to .main, implement autoDBSettings in each Table to specify location or use the cache.
 	@discardableResult
-	func setupDB<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier? = nil) async throws -> Database {
+	func setupDB<TableType: Table>(token: AutoId? = nil, _ table: TableType.Type, _ typeID: ObjectIdentifier? = nil) async throws -> Database {
 		let typeID = typeID ?? ObjectIdentifier(table)
 		if let db = databases[typeID] {
 			return db
@@ -166,14 +166,14 @@ extension UInt64 {
 			}
 			
 			// setup table and perform migrations
-			let (encoder, migrations) = try await SQLTableEncoder().setup(table, database, tableSettings)
+			let (encoder, migrations) = try await SQLTableEncoder().setup(token: token, table, database, tableSettings)
 			tables[typeID] = encoder
 			
 			if let migrations, migrations.isEmpty == false {
 				// NOTE! This will deadlock if other tables are not setup.
 				
 				// we must wait until migrations take place, we do that using a transaction. All queries will wait until the transaction is done.
-				try? await database.transaction { db, token in
+				try? await database.transaction(token: token) { db, token in
 					
 					await setDatabase(db, typeID)
 					// release the setupSemaphore so other tables can be created, this will allow other's to queue onto the db, but the transaction-semaphore will force them to wait until we are done.
@@ -537,7 +537,7 @@ extension UInt64 {
 	func fetchQueryRelations<T: Table>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue], refreshData: Bool = false) async throws -> [(T, [AnyRelation])] {
 		
 		let typeID = ObjectIdentifier(T.self)
-		try await setupDB(T.self, typeID)
+        try await setupDB(token: token, T.self, typeID)
 		let decoder = try await getDecoder(T.self)
 		let table = decoder.tableInfo
 		
@@ -602,7 +602,7 @@ extension UInt64 {
 	/// Execute a regular query that may return results. Will use converted sqlArguments if provided, otherwise it will convert the arguments.
 	@discardableResult
 	public func query<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
-		let database = try await setupDB(classType)
+		let database = try await setupDB(token: token, classType)
 		
 		let values = try sqlArguments ?? arguments?.map {
 			// we must cast or somehow find out which SQL-type each argument is!
@@ -615,7 +615,7 @@ extension UInt64 {
 	@discardableResult
 	public func execute<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Int {
 		
-		let database = try await setupDB(classType)
+		let database = try await setupDB(token: token, classType)
 		let values = try sqlArguments ?? arguments?.map {
 			// we must cast or somehow find out which SQL-type each argument is!
 			try SQLValue.fromAny($0)

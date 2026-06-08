@@ -30,7 +30,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 	}()
 	
 	/// We return a list of migrations that has been done, if the auto-conversions are not suitable, just supply your own functions.
-	func setup<T: Table>(_ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> (TableInfo, [MigrationState]?) {
+	func setup<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> (TableInfo, [MigrationState]?) {
 		let instance = classType.init()
 		let tableName = classType.tableName
 		
@@ -54,21 +54,21 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		
 		var columnsInDB: [Column] = []
 		let query = "PRAGMA table_info('\(tableName)')"
-		for row in try await db.query(query) {
+		for row in try await db.query(token: token, query) {
 			columnsInDB.append(try Column(row: row, tableName: tableName))
 		}
 		
 		if columnsInDB.isEmpty {
 			// table does not exist. Create it!
-			try await db.execute(tableInfo.createTableSyntax())
+            try await db.execute(token: token, tableInfo.createTableSyntax())
 			
 			for statement in tableInfo.createIndexStatements(instance) {
-				try await db.execute(statement)
+				try await db.execute(token: token, statement)
 			}
 			return (tableInfo, [.createdTable])
 		}
 		
-		let indicesInDB: [SQLIndex] = try await db.query("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?", [tableName]).compactMap { row in
+		let indicesInDB: [SQLIndex] = try await db.query(token: token, "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?", [tableName]).compactMap { row in
 			guard let sql = row["sql"]?.stringValue else { return nil }
 			
 			return try SQLIndex(definition: sql)
