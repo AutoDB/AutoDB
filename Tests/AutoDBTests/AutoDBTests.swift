@@ -430,7 +430,7 @@ final class AutoDBTests: XCTestCase {
 		
 		Task {
 			for index in firstIterations..<maxIterations {
-				try await other.query("INSERT INTO IntTester (id, integer) VALUES(?, ?)", [index, index])
+				_ = try? await other.query("INSERT INTO IntTester (id, integer) VALUES(?, ?)", [index, index])
 				//print("saved \(index)")
 			}
 			print("second chunk is saved")
@@ -443,7 +443,7 @@ final class AutoDBTests: XCTestCase {
 				while item == nil || item!.integer == 0 {
 					item = try? await IntTester.fetchId(AutoId(index))
 					if item == nil {
-						try await Task.sleep(for: .microseconds(10))
+						try? await Task.sleep(for: .microseconds(10))
 					}
 				}
 				//print("A got \(index)")
@@ -458,7 +458,7 @@ final class AutoDBTests: XCTestCase {
 				while item == nil || item! == 0 {
 					item = try? await other.query("SELECT integer FROM IntTester WHERE id = ?", [index]).first?.values.first?.intValue
 					if item == nil {
-						try await Task.sleep(for: .microseconds(10))
+						try? await Task.sleep(for: .microseconds(10))
 					}
 				}
 				//print("B got \(index)")

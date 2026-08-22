@@ -22,9 +22,14 @@ public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwne
 	
 	//var originalValue: TableType { get set }
 	
-	/// The backing value,
+	/// The backing value
 	var value: TableType { get set }
-	
+
+	/// Read or modify the value, fires change-tracking when the value changed.
+	/// The default implementation is a get-modify-set on `value` (same guarantees as mutating `value` directly), StoredModel conformers get a truly atomic version.
+	@discardableResult
+	func withValue<R>(_ body: (inout TableType) throws -> R) rethrows -> R
+
 	var valueIdentifier: ObjectIdentifier { get }
 	
 	/// Id is owned by the Value, it can not be changed after init.
@@ -77,6 +82,16 @@ public extension Model {
 		value.id
 	}
 	
+	/// Read or modify the value through a closure. This default bridges via `value`,
+	/// so the conformer's didSet performs the change-tracking.
+	@discardableResult
+	func withValue<R>(_ body: (inout TableType) throws -> R) rethrows -> R {
+		var copy = value
+		let result = try body(&copy)
+		value = copy
+		return result
+	}
+
 	/// Call this when value is changed for automatic change-tracking, like so: var value: TableType { didSet { didSet(oldValue) }}
 	func didSet(_ oldValue: TableType) {
 		// check if the value actually have changed
@@ -428,9 +443,10 @@ public extension Model {
 		}
 	}
 	
+    /// Synchronous delete, spawns deletion and ignores errors
 	func delete(token: AutoId? = nil) {
 		Task {
-			try await delete(token: token)
+			try? await delete(token: token)
 		}
 	}
 	

@@ -241,7 +241,7 @@ actor RelationQueryPublisherTests {
 			// this task will never quit - it will "leak" until the observer is cancelled.
 			for await num in observer {
 				print("none-quitter got: \(num)")
-				try await Task.sleep(for: .milliseconds(20))
+				try? await Task.sleep(for: .milliseconds(20))
 			}
 			print("This will never happen!")
 		}

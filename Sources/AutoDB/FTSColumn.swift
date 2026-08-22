@@ -111,6 +111,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	
 	weak var owner: Owner? = nil
 	
+    public var setupError: Error?
 	private var column: String
 	private var targetTableName: String {
 		TargetTableType.tableName
@@ -119,7 +120,13 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	public init(_ column: String) {
 		self.column = column
 		Task {
-			try await setup(TargetTableType.self)
+            // TODO: better handling of the setupError
+            do {
+                try await setup(TargetTableType.self)
+            } catch {
+                print("FTSColumn setup error: \(error)")
+                setupError = error
+            }
 		}
 	}
 	
@@ -189,7 +196,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	
 	/// insert missing text into the index
 	static func populateIndex(_ column: String) async throws {
-		
+        
 		let typeID = ObjectIdentifier(TargetTableType.self)
 		while await FTSHandler.shared.columnLock[typeID] == nil {
 			try? await Task.sleep(nanoseconds: 1_000_000)

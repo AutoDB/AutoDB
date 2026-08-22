@@ -23,8 +23,8 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	static var uniqueIndices: [[String]] { get }
 	
 	/// Migration delegate-function called when migrating, you *must* use token for all queries inside (otherwise will ⚠️ deadlock). If you are happy with auto-migrations (please double-check), you don't need to implement this function.
-	/// warning ⚠️: You can use any raw SQL query, but if you access/query a Table or Model from the same db-file, that is not setup yet -> it will deadlock. So either make sure you create Tables in order, or use raw queries.
-	/// See documentation for full set of rules when auto-migrating.
+	/// warning ⚠️: You can use any raw SQL query, but if you access/query a Table or Model from the same db-file, that is not setup yet -> it can deadlock. So when using raw queries, make sure Tables are created and setup.
+	/// See documentation for full set of rules for auto-migration.
 	static func migration(_ token: AutoId?, _ db: isolated Database, _ state: MigrationState) async -> Void
 	
 	/*
@@ -345,9 +345,10 @@ public extension Table {
 		}
 	}
 	
+    /// Synchronous delete, spawns deletion and ignores errors
 	func delete(token: AutoId? = nil) {
 		Task {
-			try await delete(token: token)
+			try? await delete(token: token)
 		}
 	}
 	
