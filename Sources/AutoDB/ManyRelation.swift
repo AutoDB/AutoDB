@@ -7,7 +7,7 @@
 
 import Foundation
 #if canImport(SwiftUI)
-import SwiftUI
+	import SwiftUI
 #endif
 
 /**
@@ -15,22 +15,22 @@ import SwiftUI
  It handles fetching and saving in one place, having an optional backing var to know if we have fetched or not.
  If the owner implements RelationOwner, it will automatically call it when changed, this way you don't need to keep track of changes yourself.
  If it has an Owner, it can call `initFetch()` when fetched from DB to populate the list. Set `initFetch` to true to enable this.
- 
+
  Usage:
 final class Parent: Model, @unchecked Sendable {
 	var value: Value
 	struct Value: Table {
-		
+
 		var id: UInt64 = 0
 		var name = ""
 		var children = ManyRelation<Child>()
 		static let tableName: String = "Parent"
 	}
-	
+
 	init(_ value: Value) {
 		self.value = value
 	}
- 	
+
  	// Handle the relation like an array of objects
 	func work() async {
  		// some sort of work
@@ -39,13 +39,13 @@ final class Parent: Model, @unchecked Sendable {
  		await children.append([child1, child2])
 	}
  }
- 
+
  let parent = try await Parent.fetchQuery(...)
  // now items are populated with children in the order we created it:
  for child in parent.children.items {
 	...
  }
- 
+
  try await parent.children.fetch()
  */
 
@@ -121,7 +121,7 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		let end = min(ids.count, initial)
 		let idsToFetch = Array(ids[0..<end])
 		_items = try await AutoType.fetchIds(token: token, idsToFetch, nil).sortById(idsToFetch)
-		hasMore = _items?.count == initial // make sure to compare the actually fetched items in case there are missmatches
+		hasMore = _items?.count == initial  // make sure to compare the actually fetched items in case there are missmatches
 		
 		return items
 	}
@@ -221,19 +221,19 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		}
 		didChange()
 	}
-
-#if canImport(SwiftUI)
+	
+	#if canImport(SwiftUI)
 		// TODO: make your own version of move
-	public func move(fromOffsets: IndexSet, toOffset: Int) async {
-		await semaphore.wait()
-		defer { Task { await semaphore.signal() } }
-		
-		_items?.move(fromOffsets: fromOffsets, toOffset: toOffset)
-		ids.move(fromOffsets: fromOffsets, toOffset: toOffset)
-		didChange()
-	}
-#endif
- 
+		public func move(fromOffsets: IndexSet, toOffset: Int) async {
+			await semaphore.wait()
+			defer { Task { await semaphore.signal() } }
+			
+			_items?.move(fromOffsets: fromOffsets, toOffset: toOffset)
+			ids.move(fromOffsets: fromOffsets, toOffset: toOffset)
+			didChange()
+		}
+	#endif
+	
 	private enum CodingKeys: CodingKey {
 		case ids
 		case initial

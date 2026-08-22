@@ -111,7 +111,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	
 	weak var owner: Owner? = nil
 	
-    public var setupError: Error?
+	public var setupError: Error?
 	private var column: String
 	private var targetTableName: String {
 		TargetTableType.tableName
@@ -120,25 +120,25 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	public init(_ column: String) {
 		self.column = column
 		Task {
-            // TODO: better handling of the setupError
-            do {
-                try await setup(TargetTableType.self)
-            } catch {
-                print("FTSColumn setup error: \(error)")
-                setupError = error
-            }
+			// TODO: better handling of the setupError
+			do {
+				try await setup(TargetTableType.self)
+			} catch {
+				print("FTSColumn setup error: \(error)")
+				setupError = error
+			}
 		}
 	}
 	
 	/// if owner implements FTSCallbackOwner, it gets handled automatically. Otherwise it will import text directly from the column with the same name
 	public func setOwner<OwnerType: Owner>(_ owner: OwnerType) {
 		self.owner = owner
-        
-        Task.immediatePort { [self] in
-            if let ftsOwner = owner as? (any FTSCallbackOwner) {
-                await setCallbackOwner(ftsOwner)
-            }
-        }
+		
+		Task.immediatePort { [self] in
+			if let ftsOwner = owner as? (any FTSCallbackOwner) {
+				await setCallbackOwner(ftsOwner)
+			}
+		}
 	}
 	
 	/// Calls setCallbackOwner for this class type, the reason this function exist is to circumvent Swift's type system and allows us to call a static func using an object.
@@ -190,13 +190,13 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 			}
 			return result
 		}
-        
+
 		await FTSHandler.shared.setTextCallback(typeID, column, textCallback)
 	}
 	
 	/// insert missing text into the index
 	static func populateIndex(_ column: String) async throws {
-        
+		
 		let typeID = ObjectIdentifier(TargetTableType.self)
 		while await FTSHandler.shared.columnLock[typeID] == nil {
 			try? await Task.sleep(nanoseconds: 1_000_000)
@@ -253,8 +253,8 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 		
 		let typeID = ObjectIdentifier(TargetTableType.self)
 		guard let tables = await FTSHandler.shared.ftsTables[typeID],
-              let firstColumn = tables.keys.first,
-              let tableInfo = tables[firstColumn]
+			let firstColumn = tables.keys.first,
+			let tableInfo = tables[firstColumn]
 		else {
 			return []
 		}

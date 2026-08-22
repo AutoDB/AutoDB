@@ -8,22 +8,22 @@
 /**
  Lock free semaphore using Async/Await, it does not guarantee FIFO but tries to.
  Semaphore taken from CommonSwift utility functions
- 
+
  ```
  Use like this:
 class Example {
 	private let semaphore = Semaphore(value: 1)
-	
+
 	private let data: Data?
 	func longRunningTask() async -> Data {
-		
+
 		// wait until previous work is done, then continue, note that without congestion, this is just incrementing and decrementing an int. Takes basically no extra time.
 		await semaphore.wait()
 		defer { Task { await semaphore.signal() } }
-		
+
 		// if already created, just continue
 		if let data { return data }
-		
+
 		// Only one will create the data
 		let data = ... do the actual work
 		self.data = data
@@ -31,20 +31,20 @@ class Example {
 	}
 }
 ```
- 
+
  For reccurring tasks, where you need re-entry to your actor - use a token. If you own a semaphore with a token you can access the restricted area as much as you like.
  There are people who think that this can be done with a NSReccuringLock - that is not the case with async/await with actors. *usually* it will work fine but since an actor may run on different threads it may not (those locks know you own them by checking the currentThread - this is not how you do things with actors).
- 
+
  ```
  class Example {
- 
+
 	func reccuringTask(_ token: AutoId? = nil) async {
-		
+
 		let token = token ?? AutoId.generateId()
 		// wait until previous work is done then continue, unless you are already cleared by the semaphore - then just continue.
 		await semaphore.wait(token: token)
 		defer { Task { await semaphore.signal(token: token) } }	// signal with token too!
-		
+
 		// do whatever work you need to do
 		let data = ... do the actual work
 		reccuringTask(token)
@@ -110,8 +110,7 @@ public actor Semaphore {
 			// if we have the token we ignore the global count
 			reEntryTokens[token] = myCount + 1
 			return
-		}
-		else if counter < allowedWorkers {
+		} else if counter < allowedWorkers {
 			if let token {
 				reEntryTokens[token] = reEntryTokens[token] ?? 0 + 1
 			}
@@ -120,7 +119,7 @@ public actor Semaphore {
 		}
 		
 		await withCheckedContinuation { continuation in
-			updateWaiters.append( {
+			updateWaiters.append({
 				continuation.resume()
 			})
 		}
@@ -152,7 +151,7 @@ public actor Semaphore {
 	}
 	
 	/// A shorthand if you just want to call a closure
-	public func lock(token: AutoId? = nil, _ task: @Sendable() async throws -> Void) async rethrows {
+	public func lock(token: AutoId? = nil, _ task: @Sendable () async throws -> Void) async rethrows {
 		await wait(token: token)
 		defer {
 			signal(token: token)
@@ -160,5 +159,3 @@ public actor Semaphore {
 		try await task()
 	}
 }
-
-

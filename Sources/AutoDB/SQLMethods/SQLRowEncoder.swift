@@ -30,7 +30,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	static let jsonEncoder = JSONEncoder()
 	
 	public var codingPath: [CodingKey] = []
-	public var userInfo: [CodingUserInfoKey : Any] = [:]
+	public var userInfo: [CodingUserInfoKey: Any] = [:]
 	
 	/// take this before starting to encode
 	let semaphore = Semaphore()
@@ -117,7 +117,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 		values[key.deleteUnderscorePrefix()] = value
 	}
 	
-	public func container<Key>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> where Key : CodingKey {
+	public func container<Key>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> where Key: CodingKey {
 		// if we have started a new object
 		try? commitRow()
 		return KeyedEncodingContainer(Container(enc: self))
@@ -147,12 +147,12 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 			enc.addColumn(key.stringValue, value)
 		}
 		
-		func encode<T>(_ value: T, forKey key: KeyType) throws where T : Encodable {
+		func encode<T>(_ value: T, forKey key: KeyType) throws where T: Encodable {
 			
 			enc.addColumn(key.stringValue, value)
 		}
 		
-		func encodeIfPresent<T>(_ value: T?, forKey key: KeyType) throws where T : Encodable {
+		func encodeIfPresent<T>(_ value: T?, forKey key: KeyType) throws where T: Encodable {
 			if let value {
 				try encode(value, forKey: key)
 			} else {

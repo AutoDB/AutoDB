@@ -1,6 +1,6 @@
 //
 //  File.swift
-//  
+//
 //
 //  Created by Olof Thorén on 2021-07-06.
 //
@@ -9,26 +9,26 @@ import Foundation
 
 /// Setup and do migrations using the tableEncoder, it will then return a TableInfo we need to store for future use.
 class SQLTableEncoder: Encoder, @unchecked Sendable {
-    
+	
 	var columns = [Column]()
 	var addedColumns: Set<String> = []
 	var settings: AutoDBSettings?
 	
 	public var codingPath: [CodingKey]
-	public var userInfo: [CodingUserInfoKey : Any]
+	public var userInfo: [CodingUserInfoKey: Any]
 	var singleValueEncoder = SingleValueEncoder()
 	
-	init(_ codingPath: [CodingKey] = [], _ userInfo: [CodingUserInfoKey : Any] = [:]) {
+	init(_ codingPath: [CodingKey] = [], _ userInfo: [CodingUserInfoKey: Any] = [:]) {
 		self.codingPath = codingPath
 		self.userInfo = userInfo
 	}
 	
 	static let jsEncoder: JSONEncoder = {
 		let encoder = JSONEncoder()
-		encoder.outputFormatting = .sortedKeys	//sort keys so the data will always look the same for the same values.
+		encoder.outputFormatting = .sortedKeys  //sort keys so the data will always look the same for the same values.
 		return encoder
 	}()
-	
+
 	/// We return a list of migrations that has been done, if the auto-conversions are not suitable, just supply your own functions.
 	func setup<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> (TableInfo, [MigrationState]?) {
 		let instance = classType.init()
@@ -43,7 +43,8 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		// now we are missing all optionals with default nil-value, add all optionals again (we ignore duplicate keys)
 		for (column, path) in instance.allKeyPaths {
 			if let type = (instance[keyPath: path] as? OptionalProtocol)?.wrappedType(),
-			   let (columnType, _) = SQLTableEncoder.getColumnType(type) {
+				let (columnType, _) = SQLTableEncoder.getColumnType(type)
+			{
 				
 				try addColumn(column, columnType, type)
 			}
@@ -60,7 +61,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		
 		if columnsInDB.isEmpty {
 			// table does not exist. Create it!
-            try await db.execute(token: token, tableInfo.createTableSyntax())
+			try await db.execute(token: token, tableInfo.createTableSyntax())
 			
 			for statement in tableInfo.createIndexStatements(instance) {
 				try await db.execute(token: token, statement)
@@ -73,7 +74,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			
 			return try SQLIndex(definition: sql)
 		}
-		
+
 		// MARK: compare tables to see what's needed
 		
 		// Compare columns by name so renamed, dropped, and type-changed columns are handled explicitly.
@@ -83,12 +84,13 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		
 		let addedColumns = Set(targetColumnsByName.values.filter { columnsInDBByName[$0.name] == nil })
 		let droppedColumns = Set(columnsInDBByName.values.filter { targetColumnsByName[$0.name] == nil })
-		let changedTypes = Set(columnsInDBByName.values.filter { column in
-			guard let targetColumn = targetColumnsByName[column.name] else {
-				return false
-			}
-			return targetColumn != column
-		})
+		let changedTypes = Set(
+			columnsInDBByName.values.filter { column in
+				guard let targetColumn = targetColumnsByName[column.name] else {
+					return false
+				}
+				return targetColumn != column
+			})
 		let changedColumns = droppedColumns.union(changedTypes)
 		let changedIndices = Set(indicesInDB).subtracting(targetIndices)
 		let addedIndices = targetIndices.subtracting(indicesInDB)
@@ -117,7 +119,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			
 			// add new columns
 			for columnToAdd in addedColumns {
-				if !columnToAdd.mayBeNull, let valueType = columnToAdd.valueType, valueType is URL.Type {	// TODO: I don't think this is true anymore
+				if !columnToAdd.mayBeNull, let valueType = columnToAdd.valueType, valueType is URL.Type {  // TODO: I don't think this is true anymore
 					print("Cannot add non-NULL URL column `\(columnToAdd.name)` yet! Need to specify a valid default URL")
 					throw TableError.impossibleUrlMigration
 				}
@@ -142,8 +144,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				if changedColumns.isEmpty {
 					try await db.query(token: token, "DROP TABLE `\(tableName)`")
 					try await db.query(token: token, "ALTER TABLE `\(tempTableName)` RENAME TO `\(tableName)`")
-				}
-				else {
+				} else {
 					
 					// let the old db use the temp-name
 					try await db.query(token: token, "ALTER TABLE `\(tempTableName)` RENAME TO `\(tempTableName)2`")
@@ -185,8 +186,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 	func addIndex(_ db: Database, _ indexToAdd: SQLIndex, _ token: AutoId, _ tableName: String) async throws {
 		do {
 			try await db.query(token: token, indexToAdd.definition(tableName: tableName))
-		}
-		catch Database.Error.uniqueConstraintFailed {
+		} catch Database.Error.uniqueConstraintFailed {
 			
 			// delete duplicate values
 			let innerQ = "SELECT a.id FROM `\(tableName)` a, `\(tableName)` b WHERE \(indexToAdd.columnNames.map { "a.\($0) = b.\($0)" }.joined(separator: " AND ")) AND a.id != b.id"
@@ -199,8 +199,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			throw error
 		}
 	}
-		
-    
+	
 	/// add a column that defaults to non-nil, can still be optional
 	func addColumn<T: EncodableSendable>(_ column: String, _ type: ColumnType, _ valueType: Any.Type, _ nullable: Bool, _ defaultValue: T?) throws {
 		let column = column.deleteUnderscorePrefix()
@@ -211,7 +210,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		if addedColumns.insert(column).inserted {
 			try columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: nullable, defaultValue: defaultValue))
 		}
-    }
+	}
 	
 	/// add an optional column that defaults to nil
 	func addColumn(_ column: String, _ type: ColumnType, _ valueType: Any.Type) throws {
@@ -224,52 +223,52 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			try columns.append(Column(name: column, columnType: type, valueType: valueType, mayBeNull: true, defaultValue: nil))
 		}
 	}
-    
-    public func container<Key>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> where Key : CodingKey {
-        
-        return KeyedEncodingContainer(Container(enc: self))
-    }
-    
-    func unkeyedContainer() -> UnkeyedEncodingContainer {
-        return singleValueEncoder
-    }
-    func singleValueContainer() -> SingleValueEncodingContainer {
-        return singleValueEncoder
-    }
+	
+	public func container<Key>(keyedBy type: Key.Type) -> KeyedEncodingContainer<Key> where Key: CodingKey {
+		
+		return KeyedEncodingContainer(Container(enc: self))
+	}
+	
+	func unkeyedContainer() -> UnkeyedEncodingContainer {
+		return singleValueEncoder
+	}
+	func singleValueContainer() -> SingleValueEncodingContainer {
+		return singleValueEncoder
+	}
 	
 	static func alwaysIgnoreType<T>(_ value: T) -> Bool {
-#if canImport(Darwin) && canImport(Observation)
-		if #available(macOS 14.0, *), #available(iOS 17.0, *) {
-			if type(of: value) is Observation.ObservationRegistrar.Type {
-				// all observed objects get this, we ignore it
-				return true
+		#if canImport(Darwin) && canImport(Observation)
+			if #available(macOS 14.0, *), #available(iOS 17.0, *) {
+				if type(of: value) is Observation.ObservationRegistrar.Type {
+					// all observed objects get this, we ignore it
+					return true
+				}
 			}
-		}
-#endif
+		#endif
 		return false
 	}
-
+	
 	private static func getColumnType(_ type: Any.Type, nullable: Bool = false) -> (ColumnType, Bool)? {
 		switch type {
-			case is String.Type, is any SQLStorableAsText.Type, is any SQLStringEnum.Type:
-				return (.text, nullable)
-			case is Data.Type, is any SQLStorableAsData.Type:
-				return (.blob, nullable)
-			case is Double.Type, is Float.Type, is Date.Type, is any SQLStorableAsDouble.Type:
-				return (.real, nullable)
-			case is Bool.Type, is Int.Type, is Int8.Type, is Int16.Type, is Int32.Type, is Int64.Type,
-			     is UInt.Type, is UInt8.Type, is UInt16.Type, is UInt32.Type, is UInt64.Type,
-			     is any SQLStorableAsInteger.Type, is any SQLStorableAsUnsignedInteger.Type,
-			     is any SQLIntegerEnum.Type, is any SQLUIntegerEnum.Type:
-				return (.integer, nullable)
-			default:
-				return nil
+		case is String.Type, is any SQLStorableAsText.Type, is any SQLStringEnum.Type:
+			return (.text, nullable)
+		case is Data.Type, is any SQLStorableAsData.Type:
+			return (.blob, nullable)
+		case is Double.Type, is Float.Type, is Date.Type, is any SQLStorableAsDouble.Type:
+			return (.real, nullable)
+		case is Bool.Type, is Int.Type, is Int8.Type, is Int16.Type, is Int32.Type, is Int64.Type,
+			is UInt.Type, is UInt8.Type, is UInt16.Type, is UInt32.Type, is UInt64.Type,
+			is any SQLStorableAsInteger.Type, is any SQLStorableAsUnsignedInteger.Type,
+			is any SQLIntegerEnum.Type, is any SQLUIntegerEnum.Type:
+			return (.integer, nullable)
+		default:
+			return nil
 		}
 	}
-    
-    /// Must convert each type to SQLite-types, note that they are dynamic so SQL doesn't really care what type we claim it to be.
+	
+	/// Must convert each type to SQLite-types, note that they are dynamic so SQL doesn't really care what type we claim it to be.
 	static func getColumnType<T>(_ value: T) -> (ColumnType, Bool)? {
-        
+		
 		if alwaysIgnoreType(value) {
 			return nil
 		}
@@ -284,39 +283,38 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			return getColumnType(rawRepresentable.rawValue)
 		}
 		return nil
-    }
-    
-    /// This is used for Encoding, so that we can leverage Swifts Codable to get the values and types.
-    class Container<KeyType: CodingKey>: KeyedEncodingContainerProtocol {
+	}
+	
+	/// This is used for Encoding, so that we can leverage Swifts Codable to get the values and types.
+	class Container<KeyType: CodingKey>: KeyedEncodingContainerProtocol {
 		typealias Key = KeyType
 		
 		var enc: SQLTableEncoder
 		
-        var codingPath: [CodingKey] = []
+		var codingPath: [CodingKey] = []
 		
 		init(enc: SQLTableEncoder) {
 			self.enc = enc
 		}
-        
+		
 		func encodeNil(forKey key: KeyType) throws { fatalError("This will not happen, but if it does - give it a default value.") }
-        func encode(_ value: String, forKey key: KeyType) throws {
+		func encode(_ value: String, forKey key: KeyType) throws {
 			try enc.addColumn(key.stringValue, .text, String.self, false, value)
-        }
-        
-        func encode<T>(_ value: T, forKey key: KeyType) throws where T : EncodableSendable {
-            
-            if SQLTableEncoder.alwaysIgnoreType(value) {
+		}
+		
+		func encode<T>(_ value: T, forKey key: KeyType) throws where T: EncodableSendable {
+			
+			if SQLTableEncoder.alwaysIgnoreType(value) {
 				return
 			}
-            if let (sqlType, nullable) = SQLTableEncoder.getColumnType(value) {
+			if let (sqlType, nullable) = SQLTableEncoder.getColumnType(value) {
 				try enc.addColumn(key.stringValue, sqlType, type(of: value), nullable, value)
-            }
-            else {
+			} else {
 				//If not of basic type, we can still encode it as blob.
 				let data = (try? SQLTableEncoder.jsEncoder.encode(value)) ?? Data()
 				try enc.addColumn(key.stringValue, .blob, Data.self, false, data)
-            }
-        }
+			}
+		}
 		
 		func encodeIfPresent(_ value: String?, forKey key: KeyType) throws {
 			if let (sqlType, _) = SQLTableEncoder.getColumnType(String.self) {
@@ -324,7 +322,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			}
 		}
 		
-		func encodeIfPresent<T>(_ value: T?, forKey key: KeyType) throws where T : EncodableSendable {
+		func encodeIfPresent<T>(_ value: T?, forKey key: KeyType) throws where T: EncodableSendable {
 			if SQLTableEncoder.alwaysIgnoreType(value) {
 				return
 			}
@@ -335,46 +333,46 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				try enc.addColumn(key.stringValue, .blob, T.self, true, value)
 			}
 		}
-
-        func nestedContainer<NestedKey>(keyedBy keyType: NestedKey.Type, forKey key: KeyType) -> KeyedEncodingContainer<NestedKey> where NestedKey: CodingKey { fatalError() }
-        func nestedUnkeyedContainer(forKey key: KeyType) -> UnkeyedEncodingContainer { fatalError() }
-        func superEncoder() -> Encoder { fatalError() }
-        func superEncoder(forKey key: KeyType) -> Encoder { fatalError() }
-    }
-    
-    class SingleValueEncoder: SingleValueEncodingContainer, UnkeyedEncodingContainer {
-        
-        enum EncodingError: Error {
-            ///We don't know how to store nil columns - typically an error when decoding optionals
-            case nilEncoding
-        }
-        
-        var lastType: ColumnType?
+		
+		func nestedContainer<NestedKey>(keyedBy keyType: NestedKey.Type, forKey key: KeyType) -> KeyedEncodingContainer<NestedKey> where NestedKey: CodingKey { fatalError() }
+		func nestedUnkeyedContainer(forKey key: KeyType) -> UnkeyedEncodingContainer { fatalError() }
+		func superEncoder() -> Encoder { fatalError() }
+		func superEncoder(forKey key: KeyType) -> Encoder { fatalError() }
+	}
+	
+	class SingleValueEncoder: SingleValueEncodingContainer, UnkeyedEncodingContainer {
+		
+		enum EncodingError: Error {
+			///We don't know how to store nil columns - typically an error when decoding optionals
+			case nilEncoding
+		}
+		
+		var lastType: ColumnType?
 		var lastNullable: Bool?
-        func encode<T>(_ value: T) throws where T : Encodable {
+		func encode<T>(_ value: T) throws where T: Encodable {
 			if let tuple = SQLTableEncoder.getColumnType(value) {
 				(lastType, lastNullable) = tuple
 			}
-        }
-        var codingPath: [CodingKey] = []
-        var count: Int = 1
-        
-        func encodeNil() throws {
-            throw EncodingError.nilEncoding
-        }
-        
-        func nestedContainer<NestedKey>(keyedBy keyType: NestedKey.Type) -> KeyedEncodingContainer<NestedKey> where NestedKey : CodingKey {
-            fatalError()
-        }
-        
-        func nestedUnkeyedContainer() -> UnkeyedEncodingContainer {
-            fatalError()
-        }
-        
-        func superEncoder() -> Encoder {
-                    
-            fatalError()
-        }
-    }
-    
+		}
+		var codingPath: [CodingKey] = []
+		var count: Int = 1
+		
+		func encodeNil() throws {
+			throw EncodingError.nilEncoding
+		}
+		
+		func nestedContainer<NestedKey>(keyedBy keyType: NestedKey.Type) -> KeyedEncodingContainer<NestedKey> where NestedKey: CodingKey {
+			fatalError()
+		}
+		
+		func nestedUnkeyedContainer() -> UnkeyedEncodingContainer {
+			fatalError()
+		}
+		
+		func superEncoder() -> Encoder {
+			
+			fatalError()
+		}
+	}
+	
 }

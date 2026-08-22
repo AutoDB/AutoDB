@@ -1,6 +1,6 @@
 //
 //  LookupTable.swift
-//  
+//
 //
 //  Created by Olof Thorén on 2021-07-05.
 //
@@ -9,27 +9,27 @@ import Foundation
 
 class AnyChangedModelBucket: @unchecked Sendable {
 	var count: Int { 0 }
-
+	
 	func removeValue(forKey id: AutoId) {}
-
+	
 	func saveChanges(token: AutoId?) async throws {}
 }
 
 final class ChangedModelBucket<T: Model>: AnyChangedModelBucket, @unchecked Sendable {
 	private var values = [AutoId: T]()
-
+	
 	override var count: Int { values.count }
-
+	
 	func insert(_ id: AutoId, _ object: T) {
 		if values[object.id] == nil {
 			values[object.id] = object
 		}
 	}
-
+	
 	override func removeValue(forKey id: AutoId) {
 		values.removeValue(forKey: id)
 	}
-
+	
 	override func saveChanges(token: AutoId?) async throws {
 		let pendingValues = Array(values.values)
 		guard pendingValues.isEmpty == false else {
@@ -45,7 +45,7 @@ struct LookupTable {
 	var changedObjects = [ObjectIdentifier: AnyChangedModelBucket]()
 	var deleted = [ObjectIdentifier: Set<AutoId>]()
 	var deleteLater = [ObjectIdentifier: Set<AutoId>]()
-
+	
 	private mutating func changedBucket<T: Model>(
 		for identifier: ObjectIdentifier,
 		as type: T.Type = T.self
@@ -53,7 +53,7 @@ struct LookupTable {
 		if let bucket = changedObjects[identifier] as? ChangedModelBucket<T> {
 			return bucket
 		}
-
+		
 		let bucket = ChangedModelBucket<T>()
 		changedObjects[identifier] = bucket
 		return bucket
@@ -99,21 +99,21 @@ struct LookupTable {
 	}
 	
 	mutating func objectHasChanged<T: Model>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
-        
+		
 		objectHasChanged(object.id, object, identifier)
-    }
-    
+	}
+	
 	mutating func objectHasChanged<T: Model>(_ id: UInt64, _ object: T, _ identifier: ObjectIdentifier?) {
 		
 		let identifier = identifier ?? ObjectIdentifier(T.self)
 		if isDeleted(id, identifier) {
 			return
 		}
-
+		
 		let bucket = changedBucket(for: identifier, as: T.self)
 		bucket.insert(id, object)
 	}
-
+	
 	mutating func clear(_ identifier: ObjectIdentifier) {
 		changedObjects[identifier] = nil
 		deleted[identifier] = nil

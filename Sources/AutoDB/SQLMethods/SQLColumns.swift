@@ -39,9 +39,9 @@
 
 import Foundation
 #if canImport(Darwin)
-import SQLite3
+	import SQLite3
 #else
-import SQLCipher
+	import SQLCipher
 #endif
 
 public typealias EncodableSendable = Encodable & Sendable
@@ -71,7 +71,7 @@ public struct Column: Equatable, Hashable, Sendable {
 	// data is created like this: "X'\(data.map { String(format: "%02hhX", $0) }.joined())'"
 	public let defaultValueString: String?
 	
-	public let primaryKeyIndex: Int // Only used for sorting, not considered for equality
+	public let primaryKeyIndex: Int  // Only used for sorting, not considered for equality
 	
 	public func definition() -> String {
 		let defValue = mayBeNull ? SQLValue.null.sqliteLiteral() : defaultValueString ?? SQLValue.null.sqliteLiteral()
@@ -255,13 +255,12 @@ extension UInt64: SQLColumnWrappable, SQLStorableAsUnsignedInteger {
 	public static func fromValue(_ value: SQLValue) -> Self? { if let i = value.uint64Value { return UInt64(i) } else { return nil } }
 }
 
-
 // MARK: - Enums, hacks for optionals
 
 protocol OptionalProtocol {
 	func wrappedType() -> Any.Type
 }
-extension Optional : OptionalProtocol {
+extension Optional: OptionalProtocol {
 	func wrappedType() -> Any.Type {
 		return Wrapped.self
 	}
@@ -306,12 +305,12 @@ extension SQLUIntegerEnum {
 public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLiteral, ExpressibleByBooleanLiteral, ExpressibleByIntegerLiteral, Hashable, Comparable {
 	public static func < (lhs: SQLValue, rhs: SQLValue) -> Bool {
 		switch lhs {
-			case .null:           return false
-			case let .uinteger(i): return i < rhs.uint64Value ?? 0
-			case let .integer(i): return i < rhs.int64Value ?? 0
-			case let .double(d):  return d < rhs.doubleValue ?? 0
-			case let .text(s):    return s < rhs.stringValue ?? ""
-			case let .data(b):    return b.count < rhs.dataValue?.count ?? 0
+		case .null: return false
+		case let .uinteger(i): return i < rhs.uint64Value ?? 0
+		case let .integer(i): return i < rhs.int64Value ?? 0
+		case let .double(d): return d < rhs.doubleValue ?? 0
+		case let .text(s): return s < rhs.stringValue ?? ""
+		case let .data(b): return b.count < rhs.dataValue?.count ?? 0
 		}
 	}
 	
@@ -339,28 +338,12 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 		}
 		if let raw = (value as? any RawRepresentable)?.rawValue {
 			switch raw {
-				case _ as NSNull: return .null
-				case let v as SQLValue: return v
-				case let v as any StringProtocol: return .text(String(v))
-				
-				case let v as any SQLStorableAsUnsignedInteger: return .uinteger(v.unifiedRepresentation())
-				
-				case let v as any SQLStorableAsInteger: return .integer(v.unifiedRepresentation())
-				case let v as any SQLStorableAsDouble: return .double(v.unifiedRepresentation())
-				case let v as any SQLStorableAsText: return .text(v.unifiedRepresentation())
-				case let v as any SQLStorableAsData: return .data(v.unifiedRepresentation())
-				case let v as any SQLIntegerEnum: return .integer(v.rawValue.unifiedRepresentation())
-				case let v as any SQLStringEnum: return .text(v.rawValue.unifiedRepresentation())
-				case let v as any SQLUIntegerEnum: return .uinteger(v.rawValue.unifiedRepresentation())
-				default: throw Error.cannotConvertToValue
-			}
-		}
-		
-		switch value {
 			case _ as NSNull: return .null
 			case let v as SQLValue: return v
 			case let v as any StringProtocol: return .text(String(v))
-			//case let v as any SQLStorableAsUnsignedInteger: return .uinteger(v.unifiedRepresentation())	//commented since already handled above
+			
+			case let v as any SQLStorableAsUnsignedInteger: return .uinteger(v.unifiedRepresentation())
+			
 			case let v as any SQLStorableAsInteger: return .integer(v.unifiedRepresentation())
 			case let v as any SQLStorableAsDouble: return .double(v.unifiedRepresentation())
 			case let v as any SQLStorableAsText: return .text(v.unifiedRepresentation())
@@ -369,35 +352,51 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 			case let v as any SQLStringEnum: return .text(v.rawValue.unifiedRepresentation())
 			case let v as any SQLUIntegerEnum: return .uinteger(v.rawValue.unifiedRepresentation())
 			default: throw Error.cannotConvertToValue
+			}
+		}
+		
+		switch value {
+		case _ as NSNull: return .null
+		case let v as SQLValue: return v
+		case let v as any StringProtocol: return .text(String(v))
+		//case let v as any SQLStorableAsUnsignedInteger: return .uinteger(v.unifiedRepresentation())	//commented since already handled above
+		case let v as any SQLStorableAsInteger: return .integer(v.unifiedRepresentation())
+		case let v as any SQLStorableAsDouble: return .double(v.unifiedRepresentation())
+		case let v as any SQLStorableAsText: return .text(v.unifiedRepresentation())
+		case let v as any SQLStorableAsData: return .data(v.unifiedRepresentation())
+		case let v as any SQLIntegerEnum: return .integer(v.rawValue.unifiedRepresentation())
+		case let v as any SQLStringEnum: return .text(v.rawValue.unifiedRepresentation())
+		case let v as any SQLUIntegerEnum: return .uinteger(v.rawValue.unifiedRepresentation())
+		default: throw Error.cannotConvertToValue
 		}
 	}
 	
 	public init(stringLiteral value: String) { self = .text(value) }
-	public init(floatLiteral value: Double)  { self = .double(value) }
+	public init(floatLiteral value: Double) { self = .double(value) }
 	public init(integerLiteral value: Int64) { self = .integer(value) }
 	public init(uInteger value: UInt64) { self = .uinteger(value) }
-	public init(booleanLiteral value: Bool)  { self = .integer(value ? 1 : 0) }
+	public init(booleanLiteral value: Bool) { self = .integer(value ? 1 : 0) }
 	
 	public func sqliteLiteral() -> String {
 		switch self {
-			case let .uinteger(i): 	return String(i)
-			case let .integer(i):	return String(i)
-			case let .double(d):  	return String(d)
-			case let .text(s):    	return "'\(s.replacingOccurrences(of: "'", with: "''"))'"
-			case let .data(b):    	return "X'\(b.map { String(format: "%02hhX", $0) }.joined())'"
-			case .null:           	return "NULL"
+		case let .uinteger(i): return String(i)
+		case let .integer(i): return String(i)
+		case let .double(d): return String(d)
+		case let .text(s): return "'\(s.replacingOccurrences(of: "'", with: "''"))'"
+		case let .data(b): return "X'\(b.map { String(format: "%02hhX", $0) }.joined())'"
+		case .null: return "NULL"
 		}
 	}
 	
 	/// SQLite needs a default value when we are not null - but we can't ever store/define an AutoModel without a default value. So having a duplicate value stored in the DB is pointless. Sometimes you also don't want that, e.g. when default should be Date.now()
 	public func ignoreDefault() -> String {
 		switch self {
-			case .uinteger(_): 	return "1"
-			case .integer(_): 	return "1"
-			case .double(_):  	return "1.0"
-			case .text(_):    	return "''"
-			case .data(_):    	return "X''"
-			case .null:			return "NULL"
+		case .uinteger(_): return "1"
+		case .integer(_): return "1"
+		case .double(_): return "1.0"
+		case .text(_): return "''"
+		case .data(_): return "X''"
+		case .null: return "NULL"
 		}
 	}
 	
@@ -430,103 +429,103 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 	
 	public var boolValue: Bool? {
 		switch self {
-			case .null:           return nil
-			case let .integer(i): return i > 0
-			case let .uinteger(i): return i > 0
-			case let .double(d):  return d > 0
-			case let .text(s):    return (Int(s) ?? 0) != 0
-			case let .data(b):    if let str = String(data: b, encoding: .utf8), let i = Int(str) { return i != 0 } else { return nil }
+		case .null: return nil
+		case let .integer(i): return i > 0
+		case let .uinteger(i): return i > 0
+		case let .double(d): return d > 0
+		case let .text(s): return (Int(s) ?? 0) != 0
+		case let .data(b): if let str = String(data: b, encoding: .utf8), let i = Int(str) { return i != 0 } else { return nil }
 		}
 	}
 	
 	public var dataValue: Data? {
 		switch self {
-			case .null:           return nil
-			case let .data(b):    return b
-			case let .uinteger(i): return String(i).data(using: .utf8)
-			case let .integer(i): return String(i).data(using: .utf8)
-			case let .double(d):  return String(d).data(using: .utf8)
-			case let .text(s):    return s.data(using: .utf8)
+		case .null: return nil
+		case let .data(b): return b
+		case let .uinteger(i): return String(i).data(using: .utf8)
+		case let .integer(i): return String(i).data(using: .utf8)
+		case let .double(d): return String(d).data(using: .utf8)
+		case let .text(s): return s.data(using: .utf8)
 		}
 	}
 	
 	public var doubleValue: Double? {
 		switch self {
-			case .null:           return nil
-			case let .double(d):  return d
-			case let .uinteger(i): return Double(i)
-			case let .integer(i): return Double(i)
-			case let .text(s):    return Double(s)
-			case let .data(b):    if let str = String(data: b, encoding: .utf8) { return Double(str) } else { return nil }
+		case .null: return nil
+		case let .double(d): return d
+		case let .uinteger(i): return Double(i)
+		case let .integer(i): return Double(i)
+		case let .text(s): return Double(s)
+		case let .data(b): if let str = String(data: b, encoding: .utf8) { return Double(str) } else { return nil }
 		}
 	}
 	
 	public var intValue: Int? {
 		switch self {
-			case .null:           return nil
-			case let .uinteger(i): return Int(bitPattern: UInt(i))
-			case let .integer(i): return Int(i)
-			case let .double(d):  return Int(d)
-			case let .text(s):    return Int(s)
-			case let .data(b):    if let str = String(data: b, encoding: .utf8) { return Int(str) } else { return nil }
+		case .null: return nil
+		case let .uinteger(i): return Int(bitPattern: UInt(i))
+		case let .integer(i): return Int(i)
+		case let .double(d): return Int(d)
+		case let .text(s): return Int(s)
+		case let .data(b): if let str = String(data: b, encoding: .utf8) { return Int(str) } else { return nil }
 		}
 	}
 	
 	public var int64Value: Int64? {
 		switch self {
-			case .null:           return nil
-			case let .integer(i): return i
-			case let .uinteger(i): return Int64(bitPattern: i)
-			case let .double(d):  return Int64(d)
-			case let .text(s):    return Int64(s)
-			case let .data(b):    if let str = String(data: b, encoding: .utf8) { return Int64(str) } else { return nil }
+		case .null: return nil
+		case let .integer(i): return i
+		case let .uinteger(i): return Int64(bitPattern: i)
+		case let .double(d): return Int64(d)
+		case let .text(s): return Int64(s)
+		case let .data(b): if let str = String(data: b, encoding: .utf8) { return Int64(str) } else { return nil }
 		}
 	}
 	
 	public var uint64Value: UInt64? {
 		switch self {
-			case .null:				return nil
-			case let .integer(i):	return UInt64(bitPattern: i)
-			case let .uinteger(i):	return i
-			case let .double(d):	return UInt64(bitPattern: Int64(d))
-			case let .text(s):    	return UInt64(s)
-			case let .data(b):    	if let str = String(data: b, encoding: .utf8) { return UInt64(str) } else { return nil }
+		case .null: return nil
+		case let .integer(i): return UInt64(bitPattern: i)
+		case let .uinteger(i): return i
+		case let .double(d): return UInt64(bitPattern: Int64(d))
+		case let .text(s): return UInt64(s)
+		case let .data(b): if let str = String(data: b, encoding: .utf8) { return UInt64(str) } else { return nil }
 		}
 	}
 	
 	public var uintValue: UInt? {
 		switch self {
-			case .null:				return nil
-			case let .integer(i):	return UInt(bitPattern: Int(i))
-			case let .uinteger(i):	return UInt(i)
-			case let .double(d):	return UInt(bitPattern: Int(d))
-			case let .text(s):    	return UInt(s)
-			case let .data(b):    	if let str = String(data: b, encoding: .utf8) { return UInt(str) } else { return nil }
+		case .null: return nil
+		case let .integer(i): return UInt(bitPattern: Int(i))
+		case let .uinteger(i): return UInt(i)
+		case let .double(d): return UInt(bitPattern: Int(d))
+		case let .text(s): return UInt(s)
+		case let .data(b): if let str = String(data: b, encoding: .utf8) { return UInt(str) } else { return nil }
 		}
 	}
 	
 	public var stringValue: String? {
 		switch self {
-			case .null:           return nil
-			case let .text(s):    return s
-			case let .integer(i): return String(i)
-			case let .uinteger(i): return String(i)
-			case let .double(d):  return String(d)
-			case let .data(b):    return String(data: b, encoding: .utf8)
+		case .null: return nil
+		case let .text(s): return s
+		case let .integer(i): return String(i)
+		case let .uinteger(i): return String(i)
+		case let .double(d): return String(d)
+		case let .data(b): return String(data: b, encoding: .utf8)
 		}
 	}
 	
-	private static let copyValue = unsafeBitCast(-1, to: sqlite3_destructor_type.self) // a.k.a. SQLITE_TRANSIENT
+	private static let copyValue = unsafeBitCast(-1, to: sqlite3_destructor_type.self)  // a.k.a. SQLITE_TRANSIENT
 	
 	internal func bind(database: isolated Database, statement: OpaquePointer, index: Int32, for query: String) throws {
 		var result: Int32
 		switch self {
-			case     .null:       result = sqlite3_bind_null(statement, index)
-			case let .integer(i): result = sqlite3_bind_int64(statement, index, Int64(i))
-			case let .uinteger(i): result = sqlite3_bind_int64(statement, index, Int64(bitPattern: i))
-			case let .double(d):  result = sqlite3_bind_double(statement, index, d)
-			case let .text(s):    result = sqlite3_bind_text(statement, index, s, -1, SQLValue.copyValue)
-			case let .data(d):    result = d.withUnsafeBytes { bytes in sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(bytes.count), SQLValue.copyValue) }
+		case .null: result = sqlite3_bind_null(statement, index)
+		case let .integer(i): result = sqlite3_bind_int64(statement, index, Int64(i))
+		case let .uinteger(i): result = sqlite3_bind_int64(statement, index, Int64(bitPattern: i))
+		case let .double(d): result = sqlite3_bind_double(statement, index, d)
+		case let .text(s): result = sqlite3_bind_text(statement, index, s, -1, SQLValue.copyValue)
+		case let .data(d): result = d.withUnsafeBytes { bytes in sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(bytes.count), SQLValue.copyValue) }
 		}
 		if result != SQLITE_OK { throw Database.Error.queryArgumentValueError(query: query, description: database.errorDesc(database.dbHandle)) }
 	}
@@ -583,7 +582,6 @@ public struct SQLIndex: Equatable, Hashable, Sendable {
 		
 		// use the name defined in DB:
 		self.name = indexName
-		
 		
 		guard scanner.scanString("ON") != nil else { throw Error.cannotParseIndexDefinition(definition: definition, description: "Expected 'ON'") }
 		

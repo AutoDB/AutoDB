@@ -1,6 +1,6 @@
 //
 //  AsyncObserver.swift
-//  
+//
 //
 //  Created by Olof Andersson-Thorén on 2023-01-01.
 //
@@ -9,17 +9,17 @@ import Foundation
 
 /**
  TODO: update this outdated doc:
- 
+
  An async sequence that you use to be notified with future data in a sequence. Use it like an array, all objects appended to it will be sent to the observer.
  It has no memory of what has happend but you get all new changes. Note that leaking can happen if you are careless.
  Example of the regular setup:
- 
+
 final class ExampleClass: @unchecked Sendable {
-	
+
 	// store the task if you want to cancel observation
 	var observerTask: Task<Void, Error>?
 	func startListening() async {
-		
+
 		let observer = try await TheModelClass.changeObserver()
 		observerTask = Task { [weak self] in
 			for await change in observer {
@@ -28,7 +28,7 @@ final class ExampleClass: @unchecked Sendable {
 			}
 		}
 	}
-	
+
 	func handleChanges(_ operation: SQLiteOperation, _ id: AutoId) async throws {
 		...
 	}
@@ -67,14 +67,14 @@ await observer.cancel()
 public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProtocol, Sendable {
 	
 	/// The sender-actor is shared by all observers to have one entry-point for to add new items
-    fileprivate let globalSender = Sender()
+	fileprivate let globalSender = Sender()
 	/// each await-loop (a copy) has its own task-queue, that stores all incoming values and allows the listener to hande each returned result in its own time
 	private var queue: Queue?
-    
+	
 	var _isCancelled = false
-    public var isCancelled: Bool {
-		_isCancelled || Task.isCancelled //  || queue?.isCancelled == true
-    }
+	public var isCancelled: Bool {
+		_isCancelled || Task.isCancelled  //  || queue?.isCancelled == true
+	}
 	
 	public init() {}
 	
@@ -84,25 +84,25 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 	}
 	
 	// if you only want scheduling, to continue with other tasks before this is delivered
-    public func append(_ element: Element?) {
+	public func append(_ element: Element?) {
 		Task {
 			await globalSender.sendResource(element)
 		}
-    }
+	}
 	
 	/// To cancel an AsyncObserver you must cancel its surounding Task and send it a message.
 	/// To cancel ALL listeners to this Observer which ends all for-loops currently iterating (and you can't start new ones) cancelAll is here for you.
 	/// Why would anyone ever use this?
 	public mutating func cancelAll() async {
-        _isCancelled = true
+		_isCancelled = true
 		await globalSender.cancel()
-    }
+	}
 	
 	/// In the copied iterator we supply the for-loop by returning next element. Terminate loop with nil.
-    public func next() async -> Element? {
-        if isCancelled {
-            return nil
-        }
+	public func next() async -> Element? {
+		if isCancelled {
+			return nil
+		}
 		
 		return await withTaskCancellationHandler {
 			
@@ -113,7 +113,7 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 				await queue?.cancel()
 			}
 		}
-    }
+	}
 	
 	// make a copy of the Observer and start enquing incoming values
 	public func makeAsyncIterator() -> Self {
@@ -191,7 +191,7 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 	fileprivate actor Sender {
 		
 		var isCancelled = false
-		var observers = WeakArray<Queue>([])	// figure out this type-error: 'WeakArray' requires that 'any AsyncObserverObject' be a class type (which it is...)
+		var observers = WeakArray<Queue>([])  // figure out this type-error: 'WeakArray' requires that 'any AsyncObserverObject' be a class type (which it is...)
 		init() {}
 		
 		func addObserver(_ observer: Queue) {
@@ -213,5 +213,5 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 			observers.removeAll()
 		}
 	}
-
+	
 }

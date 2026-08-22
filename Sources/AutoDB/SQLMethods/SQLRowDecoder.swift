@@ -49,11 +49,11 @@ class SQLRowDecoder: Decoder {
 		case rawRepresentable
 		case jsonBlob
 	}
-
+	
 	static let jsonDecoder = JSONDecoder()
-
+	
 	var codingPath: [any CodingKey] = []
-	var userInfo: [CodingUserInfoKey : Any] = [:]
+	var userInfo: [CodingUserInfoKey: Any] = [:]
 	
 	var values: [String: SQLValue] = [:]
 	var defaultValues: [String: AnyDecodable] = [:]
@@ -116,36 +116,41 @@ class SQLRowDecoder: Decoder {
 	private func normalizedKey(_ key: String) -> String {
 		key.deleteUnderscorePrefix()
 	}
-
+	
 	func getRawValue<R: RawRepresentable>(_ type: R.Type, from value: SQLValue) -> Any? {
 		if let rawType = R.RawValue.self as? any SQLStorableAsText.Type,
-		   let text = value.stringValue,
-		   let rawValue = rawType.from(unifiedRepresentation: text) as? R.RawValue {
+			let text = value.stringValue,
+			let rawValue = rawType.from(unifiedRepresentation: text) as? R.RawValue
+		{
 			return R.init(rawValue: rawValue)
 		}
 		if let rawType = R.RawValue.self as? any SQLStorableAsInteger.Type,
-		   let integer = value.int64Value,
-		   let rawValue = rawType.from(unifiedRepresentation: integer) as? R.RawValue {
+			let integer = value.int64Value,
+			let rawValue = rawType.from(unifiedRepresentation: integer) as? R.RawValue
+		{
 			return R.init(rawValue: rawValue)
 		}
 		if let rawType = R.RawValue.self as? any SQLStorableAsUnsignedInteger.Type,
-		   let integer = value.uint64Value,
-		   let rawValue = rawType.from(unifiedRepresentation: integer) as? R.RawValue {
+			let integer = value.uint64Value,
+			let rawValue = rawType.from(unifiedRepresentation: integer) as? R.RawValue
+		{
 			return R.init(rawValue: rawValue)
 		}
 		if let rawType = R.RawValue.self as? any SQLStorableAsDouble.Type,
-		   let double = value.doubleValue,
-		   let rawValue = rawType.from(unifiedRepresentation: double) as? R.RawValue {
+			let double = value.doubleValue,
+			let rawValue = rawType.from(unifiedRepresentation: double) as? R.RawValue
+		{
 			return R.init(rawValue: rawValue)
 		}
 		if let rawType = R.RawValue.self as? any SQLStorableAsData.Type,
-		   let data = value.dataValue,
-		   let rawValue = rawType.from(unifiedRepresentation: data) as? R.RawValue {
+			let data = value.dataValue,
+			let rawValue = rawType.from(unifiedRepresentation: data) as? R.RawValue
+		{
 			return R.init(rawValue: rawValue)
 		}
 		return nil
 	}
-
+	
 	func getValue<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
 		let key = normalizedKey(key)
 		
@@ -154,39 +159,39 @@ class SQLRowDecoder: Decoder {
 		}
 		
 		switch decodePlans[key] ?? Self.makeDecodePlan(for: T.self) {
-			case .textTransform(let transform):
-				return value.stringValue.flatMap(transform) as? T
-			case .integerTransform(let transform):
-				return value.int64Value.flatMap(transform) as? T
-			case .unsignedIntegerTransform(let transform):
-				return value.uint64Value.flatMap(transform) as? T
-			case .doubleTransform(let transform):
-				return value.doubleValue.flatMap(transform) as? T
-			case .dataTransform(let transform):
-				return value.dataValue.flatMap(transform) as? T
-			case .rawRepresentable:
-				if let raw = type as? any RawRepresentable.Type {
-					return getRawValue(raw, from: value) as? T
-				}
-			case .jsonBlob:
-				if let data = value.dataValue {
-					if let value = data as? T {
-						return value
-					}
-					let value = try? Self.jsonDecoder.decode(T.self, from: data)
-					if let relation = value as? AnyRelation {
-						relations.append(relation)
-					}
+		case .textTransform(let transform):
+			return value.stringValue.flatMap(transform) as? T
+		case .integerTransform(let transform):
+			return value.int64Value.flatMap(transform) as? T
+		case .unsignedIntegerTransform(let transform):
+			return value.uint64Value.flatMap(transform) as? T
+		case .doubleTransform(let transform):
+			return value.doubleValue.flatMap(transform) as? T
+		case .dataTransform(let transform):
+			return value.dataValue.flatMap(transform) as? T
+		case .rawRepresentable:
+			if let raw = type as? any RawRepresentable.Type {
+				return getRawValue(raw, from: value) as? T
+			}
+		case .jsonBlob:
+			if let data = value.dataValue {
+				if let value = data as? T {
 					return value
 				}
-			case nil:
-				break
+				let value = try? Self.jsonDecoder.decode(T.self, from: data)
+				if let relation = value as? AnyRelation {
+					relations.append(relation)
+				}
+				return value
+			}
+		case nil:
+			break
 		}
 		return nil
 	}
 	
 	// default values are no longer needed since we take them straight from the DB. Should we keep this as safe-guard?
-	func getDefaultValue<T>(_ type: T.Type, _ key: String) -> T? where T : Decodable {
+	func getDefaultValue<T>(_ type: T.Type, _ key: String) -> T? where T: Decodable {
 		let key = normalizedKey(key)
 		// not nest shows up as key... why does reflection tell us that?
 		if let value = defaultValues[key] {
@@ -211,14 +216,14 @@ class SQLRowDecoder: Decoder {
 	
 	func hasValue(_ key: String) -> Bool {
 		guard let value = values[normalizedKey(key)],
-			  value != .null
+			value != .null
 		else {
 			return false
 		}
 		return true
 	}
 	
-	func container<Key>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> where Key : CodingKey {
+	func container<Key>(keyedBy type: Key.Type) throws -> KeyedDecodingContainer<Key> where Key: CodingKey {
 		usedKeys.removeAll()
 		relations.removeAll()
 		return KeyedDecodingContainer(Container(self))
@@ -243,7 +248,7 @@ class SQLRowDecoder: Decoder {
 			dec.hasValue(key.stringValue) == false
 		}
 		
-		func nestedContainer<NestedKey>(keyedBy type: NestedKey.Type, forKey key: KeyType) throws -> KeyedDecodingContainer<NestedKey> where NestedKey : CodingKey {
+		func nestedContainer<NestedKey>(keyedBy type: NestedKey.Type, forKey key: KeyType) throws -> KeyedDecodingContainer<NestedKey> where NestedKey: CodingKey {
 			fatalError()
 		}
 		
@@ -274,7 +279,7 @@ class SQLRowDecoder: Decoder {
 			return ""
 		}
 		
-		func decode<T>(_ type: T.Type, forKey key: KeyType) throws -> T where T : Decodable {
+		func decode<T>(_ type: T.Type, forKey key: KeyType) throws -> T where T: Decodable {
 			if let item = dec.getValue(type, key.stringValue) {
 				return item
 			} else if let value = dec.getDefaultValue(type, key.stringValue) {
@@ -284,7 +289,7 @@ class SQLRowDecoder: Decoder {
 			throw DecodedError.cannotGuessVariable(key.stringValue)
 		}
 		
-		func decodeIfPresent<T>(_ type: T.Type, forKey key: KeyType) throws -> T? where T : Decodable {
+		func decodeIfPresent<T>(_ type: T.Type, forKey key: KeyType) throws -> T? where T: Decodable {
 			if let item = dec.getValue(type, key.stringValue) {
 				return item
 			} else {

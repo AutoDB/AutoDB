@@ -27,12 +27,15 @@ AutoDB 1.0 is intended to be the first stable Apple-first Swift Package release.
 - Cross-platform targets outside Apple platforms are not part of the 1.0 support contract
 - FTS requires SQLite FTS5 support
 
-### Deferred non-goals
+### Deferred goals
 
 - Linux, Android, Windows, and WASI support
+- Sync-specific product features such as built-in cascading sync systems
+
+### Features that will not be implemented
+
 - Lower deployment targets than the current package floor
 - A separate older-OS `RelationQuery` implementation
-- Sync-specific product features such as built-in cascading sync systems
 
 ### Adoption notes
 

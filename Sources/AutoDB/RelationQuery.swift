@@ -160,9 +160,9 @@ protocol ObserverSubject {
 		}
 		
 		private func ensureListening() async {
-            if listenerTask != nil {
-                return
-            }
+			if listenerTask != nil {
+				return
+			}
 			await semaphore.wait()
 			defer { Task { await semaphore.signal() } }
 			
@@ -267,7 +267,7 @@ protocol ObserverSubject {
 		
 		/// fetch the next batch of items if possible
 		public func fetchMore() async throws {
-            // must be here if we are expecting listener callbacks, this has to do with task scheduling of setOwner - there are smarter ways to do this, will update in the future but it has no real performance hit so not pressing.
+			// must be here if we are expecting listener callbacks, this has to do with task scheduling of setOwner - there are smarter ways to do this, will update in the future but it has no real performance hit so not pressing.
 			await ensureListening()
 			if offset == -1 || restrictToInitial {
 				// if called before initial fetch

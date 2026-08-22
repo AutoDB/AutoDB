@@ -30,7 +30,7 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	/*
 	 Note that the save functions are not exposed, since no need to implement them.
 	 Understand that if your Table has a Model, you must call save or saveChanges (etc) on the model.
-	 
+	
 	/// save and wait until completed, potentially handling errors
 	func save(token: AutoId?) async throws
 	/// save and don't wait until completed, ignoring errors
@@ -80,16 +80,16 @@ public extension Table {
 	func hash(into hasher: inout Hasher) {
 		hasher.combine(id)
 	}
-    
-    /// a shortcut to get the name of the class as a string, to be used in SQL queries
-    var tableName: String {
+	
+	/// a shortcut to get the name of the class as a string, to be used in SQL queries
+	var tableName: String {
 		Self.tableName
-    }
-    
-    /// class shortcut to string name
-    static var tableName: String {
-        String(describing: self)
-    }
+	}
+	
+	/// class shortcut to string name
+	static var tableName: String {
+		String(describing: self)
+	}
 	
 	static var identifier: ObjectIdentifier {
 		ObjectIdentifier(self)
@@ -111,7 +111,6 @@ public extension Table {
 	}
 	
 	/// sync version of create, if you must
-	
 	
 	static func create(token: AutoId? = nil, _ id: AutoId? = nil) -> Self {
 		let semaphore = DispatchSemaphore(value: 0)
@@ -142,7 +141,7 @@ public extension Table {
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
 	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are inside the transaction / holding the lock.
-	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
+	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
 		try await db().transaction(action)
 	}
 	
@@ -176,7 +175,6 @@ public extension Table {
 		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments, sqlArguments: sqlArguments)
 	}
 	
-	
 	@discardableResult
 	static func query(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Row] {
 		try await AutoDBManager.shared.query(token: token, Self.self, query, arguments)
@@ -208,7 +206,7 @@ public extension Table {
 	// MARK: - common queries
 	
 	/// return the first value of the first row of the result,
-	/// throws fetchError if the value is nil 
+	/// throws fetchError if the value is nil
 	static func valueQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Val {
 		if let value: Val = try await AutoDBManager.shared.valueQuery(token: token, Self.self, query, arguments, sqlArguments: sqlArguments) {
 			return value
@@ -256,7 +254,7 @@ public extension Table {
 		
 		let encoder = try await AutoDBManager.shared.getEncoder(Self.self, typeID)
 		await encoder.semaphore.wait()
-		defer { Task { await encoder.semaphore.signal() }}
+		defer { Task { await encoder.semaphore.signal() } }
 		
 		// separate insert and update, otherwise update will overwrite existing objects.
 		let updated: [Self]
@@ -265,13 +263,11 @@ public extension Table {
 			// we only have updated objects, so we can skip the created check
 			updated = objects
 			created = []
-		}
-		else if onlyUpdated == false {
+		} else if onlyUpdated == false {
 			// we only have created objects, so we can skip the updated check
 			updated = []
 			created = objects
-		}
-		else {
+		} else {
 			let result = await AutoDBManager.shared.filterCreated(typeID, objects)
 			created = result.created
 			updated = result.updated
@@ -345,7 +341,7 @@ public extension Table {
 		}
 	}
 	
-    /// Synchronous delete, spawns deletion and ignores errors
+	/// Synchronous delete, spawns deletion and ignores errors
 	func delete(token: AutoId? = nil) {
 		Task {
 			try? await delete(token: token)

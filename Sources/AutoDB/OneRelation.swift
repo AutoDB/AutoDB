@@ -6,7 +6,7 @@
 //
 
 // Note that this cannot be an actor since we need Encodable, it must be a class in order to set its owner automatically.
-/// A one-to-one relation, typically a parent in a parent-child relation. 
+/// A one-to-one relation, typically a parent in a parent-child relation.
 public final class OneRelation<AutoType: TableModel>: Codable, RelationToOne, @unchecked Sendable {
 	
 	private func didChange() {
@@ -87,7 +87,7 @@ public final class OneRelation<AutoType: TableModel>: Codable, RelationToOne, @u
 		didChange()
 	}
 	
-	public func setOwner<OwnerType>(_ owner: OwnerType) where OwnerType : Owner {
+	public func setOwner<OwnerType>(_ owner: OwnerType) where OwnerType: Owner {
 		self.owner = owner
 	}
 	

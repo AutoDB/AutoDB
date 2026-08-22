@@ -40,30 +40,29 @@
 
 // TODO: replace token: AutoId? = nil with TaskLocal
 
-
 import Foundation
 #if canImport(Darwin)
-import SQLite3
+	import SQLite3
 #else
-fileprivate class NSFileCoordinator {
-	struct WritingOptions : OptionSet, @unchecked Sendable {
-		
-		var rawValue: UInt
-		init(rawValue: UInt) {
-			self.rawValue = rawValue
+	fileprivate class NSFileCoordinator {
+		struct WritingOptions: OptionSet, @unchecked Sendable {
+			
+			var rawValue: UInt
+			init(rawValue: UInt) {
+				self.rawValue = rawValue
+			}
+			static var forMerging: NSFileCoordinator.WritingOptions { .init(rawValue: 0) }
 		}
-		static var forMerging: NSFileCoordinator.WritingOptions { .init(rawValue: 0) }
+		init(filePresenter whateverNilThing: Int?) {}
+		func coordinate(writingItemAt url: URL, options: NSFileCoordinator.WritingOptions = [], error: inout NSError?, byAccessor writer: (URL) -> Void) {}
 	}
-	init(filePresenter whateverNilThing: Int?) {}
-	func coordinate(writingItemAt url: URL, options: NSFileCoordinator.WritingOptions = [], error: inout NSError?, byAccessor writer: (URL) -> Void) {}
-}
-import SQLCipher
+	import SQLCipher
 #endif
 
 #if canImport(Android)
-import Android
+	import Android
 #elseif canImport(GlibC)
-import GlibC
+	import GlibC
 #endif
 
 public typealias RowChangeObserver = AsyncObserver<RowChangeParameters>
@@ -100,7 +99,6 @@ extension [Row] {
 	}
 }
 
-
 /**
  AutoDB is the database connection mechanism of the system.
  */
@@ -116,7 +114,7 @@ public actor Database {
 	
 	public var isClosed: Bool = false
 	private var cachedStatements: [String: PreparedStatement] = [:]
-	private let semaphore = Semaphore() 
+	private let semaphore = Semaphore()
 	private var inTransaction: Bool = false
 	private var debugPrintEveryQuery = false
 	
@@ -175,7 +173,8 @@ public actor Database {
 	}
 	
 	nonisolated
-	private func setup(_ dbHandle: OpaquePointer) throws {
+		private func setup(_ dbHandle: OpaquePointer) throws
+	{
 		
 		// this allows us to do simultaneous writes, by waiting whenever the DB is busy. It is by design to retry.
 		sqlite3_busy_timeout(dbHandle, 80)
@@ -186,18 +185,21 @@ public actor Database {
 		}
 		
 		// we don't need to assign a pointer to this function since we can only have one update_hook per handle.
-		sqlite3_update_hook(dbHandle, { ctx, operation, dbName, tableName, rowid in
-			
-			guard let ctx, let operation = SQLiteOperation(rawValue: operation),
-				  let tableName, let tableNameStr = String(cString: tableName, encoding: .utf8) else {
-				return
-			}
-			let autoDB = Unmanaged<Database>.fromOpaque(ctx).takeUnretainedValue()
-			Task {
-				await autoDB.callListeners(tableNameStr, operation, rowid)
-			}
-			
-		}, Unmanaged<Database>.passUnretained(self).toOpaque())
+		sqlite3_update_hook(
+			dbHandle,
+			{ ctx, operation, dbName, tableName, rowid in
+				
+				guard let ctx, let operation = SQLiteOperation(rawValue: operation),
+					let tableName, let tableNameStr = String(cString: tableName, encoding: .utf8)
+				else {
+					return
+				}
+				let autoDB = Unmanaged<Database>.fromOpaque(ctx).takeUnretainedValue()
+				Task {
+					await autoDB.callListeners(tableNameStr, operation, rowid)
+				}
+				
+			}, Unmanaged<Database>.passUnretained(self).toOpaque())
 	}
 	
 	func reopen() throws {
@@ -262,7 +264,7 @@ public actor Database {
 			}
 			// if there still is db-access (which it most likely isn't), we can't know that so must interrups to let go of handle.
 			//print("Interrupting sqlite to force close")
-			sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
+			sqlite3_interrupt(dbHandle)  //https://www.sqlite.org/c3ref/interrupt.html
 			closeDB()
 		}
 	}
@@ -276,7 +278,7 @@ public actor Database {
 		isClosed = true
 		
 		// interrubt any other long-running query or transaction, to let go of the handle. If there is no long-running query, this will do nothing
-		sqlite3_interrupt(dbHandle)	//https://www.sqlite.org/c3ref/interrupt.html
+		sqlite3_interrupt(dbHandle)  //https://www.sqlite.org/c3ref/interrupt.html
 		
 		// we cannot close DB if already in transaction - statements must finalise first.
 		let hasSemaphore = inTransaction
@@ -386,7 +388,7 @@ public actor Database {
 	private func preparedStatement(_ query: String, _ sqlArguments: [SQLValue]) throws -> PreparedStatement {
 		let statement = try preparedStatement(query)
 		let statementHandle = statement.handle
-		var idx = 1 // SQLite bind-parameter indices start at 1, not 0!
+		var idx = 1  // SQLite bind-parameter indices start at 1, not 0!
 		for value in sqlArguments {
 			try value.bind(database: self, statement: statementHandle, index: Int32(idx), for: query)
 			idx += 1
@@ -446,15 +448,15 @@ public actor Database {
 		
 		guard result == SQLITE_ROW || result == SQLITE_DONE else {
 			switch result {
-				case SQLITE_CONSTRAINT:
-					debugPrint(statement, query, extra: "Unique constraint failed for: ")
-					sqlite3_reset(statementHandle)
-					sqlite3_clear_bindings(statementHandle)
-					throw Error.uniqueConstraintFailed
-				default:
-					sqlite3_reset(statementHandle)
-					sqlite3_clear_bindings(statementHandle)
-					throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
+			case SQLITE_CONSTRAINT:
+				debugPrint(statement, query, extra: "Unique constraint failed for: ")
+				sqlite3_reset(statementHandle)
+				sqlite3_clear_bindings(statementHandle)
+				throw Error.uniqueConstraintFailed
+			default:
+				sqlite3_reset(statementHandle)
+				sqlite3_clear_bindings(statementHandle)
+				throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 			}
 		}
 		return (statementHandle, result)
@@ -472,7 +474,7 @@ public actor Database {
 		}
 		
 		var columnNames: [String] = []
-		for i in 0 ..< columnCount {
+		for i in 0..<columnCount {
 			guard let charPtr = sqlite3_column_name(statementHandle, i), case let name = String(cString: charPtr) else {
 				throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 			}
@@ -483,27 +485,27 @@ public actor Database {
 		var rows: [Row] = []
 		while result == SQLITE_ROW {
 			var row: Row = [:]
-			for i in 0 ..< Int(columnCount) {
+			for i in 0..<Int(columnCount) {
 				switch sqlite3_column_type(statementHandle, Int32(i)) {
-					case SQLITE_NULL:    row[columnNames[i]] = .null
-					case SQLITE_INTEGER: row[columnNames[i]] = .integer(sqlite3_column_int64(statementHandle, Int32(i)))
-					case SQLITE_FLOAT:   row[columnNames[i]] = .double(sqlite3_column_double(statementHandle, Int32(i)))
-						
-					case SQLITE_TEXT:
-						guard let charPtr = sqlite3_column_text(statementHandle, Int32(i)) else { throw Error.queryResultValueError(query: query, column: columnNames[i]) }
-						row[columnNames[i]] = .text(String(cString: charPtr))
-						
-					case SQLITE_BLOB:
-						let byteLength = sqlite3_column_bytes(statementHandle, Int32(i))
-						if byteLength > 0 {
-							guard let bytes = sqlite3_column_blob(statementHandle, Int32(i)) else { throw Error.queryResultValueError(query: query, column: columnNames[i]) }
-							row[columnNames[i]] = .data(Data(bytes: bytes, count: Int(byteLength)))
-						} else {
-							row[columnNames[i]] = .data(Data())
-						}
-						
-					default:
-						throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
+				case SQLITE_NULL: row[columnNames[i]] = .null
+				case SQLITE_INTEGER: row[columnNames[i]] = .integer(sqlite3_column_int64(statementHandle, Int32(i)))
+				case SQLITE_FLOAT: row[columnNames[i]] = .double(sqlite3_column_double(statementHandle, Int32(i)))
+				
+				case SQLITE_TEXT:
+					guard let charPtr = sqlite3_column_text(statementHandle, Int32(i)) else { throw Error.queryResultValueError(query: query, column: columnNames[i]) }
+					row[columnNames[i]] = .text(String(cString: charPtr))
+
+				case SQLITE_BLOB:
+					let byteLength = sqlite3_column_bytes(statementHandle, Int32(i))
+					if byteLength > 0 {
+						guard let bytes = sqlite3_column_blob(statementHandle, Int32(i)) else { throw Error.queryResultValueError(query: query, column: columnNames[i]) }
+						row[columnNames[i]] = .data(Data(bytes: bytes, count: Int(byteLength)))
+					} else {
+						row[columnNames[i]] = .data(Data())
+					}
+
+				default:
+					throw Error.queryExecutionError(query: query, description: errorDesc(dbHandle))
 				}
 			}
 			rows.append(row)
@@ -604,21 +606,21 @@ public actor Database {
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
 	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are holding the lock. We could send around the AutoDB and only allow access when locked - but that would basically be the same thing.
-	public func transaction<R: Sendable>(token: AutoId? = nil, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
+	public func transaction<R: Sendable>(token: AutoId? = nil, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
 		
-        // note that we can have transactions inside transactions, as long as we reuse the token
-        let token = token ?? AutoId.generateId()
+		// note that we can have transactions inside transactions, as long as we reuse the token
+		let token = token ?? AutoId.generateId()
 		let transactionID = AutoId.generateId()
 		await semaphore.wait(token: token)
-        let nestedTransaction = inTransaction
-		inTransaction = true	// now everyone must wait for semaphore
+		let nestedTransaction = inTransaction
+		inTransaction = true  // now everyone must wait for semaphore
 		defer {
 			Task {
 				// Set a token to wait for semaphores, this way we can call DB simultaneous with regular queries but wait when there are transactions.
 				// also closing the DB will wait for a whole transaction.
-                if nestedTransaction == false {
-                    inTransaction = false
-                }
+				if nestedTransaction == false {
+					inTransaction = false
+				}
 				
 				// must be done in this order, waiting transactions may start un-ordered. Does that matter?
 				await semaphore.signal(token: token)
@@ -654,7 +656,7 @@ public actor Database {
 	private var debounceTime: UInt64 = .shortDelay
 	
 	// allow to listen to db-level changes of each row
-	private func callListeners(_ tableName: String, _ operation: SQLiteOperation, _ rowId: sqlite_int64 ) async {
+	private func callListeners(_ tableName: String, _ operation: SQLiteOperation, _ rowId: sqlite_int64) async {
 		
 		if rowChangeObservers[tableName] != nil || tableChangeObservers[tableName] != nil {
 			let id = UInt64(bitPattern: rowId)

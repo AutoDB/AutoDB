@@ -24,12 +24,12 @@ public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwne
 	
 	/// The backing value
 	var value: TableType { get set }
-
+	
 	/// Read or modify the value, fires change-tracking when the value changed.
 	/// The default implementation is a get-modify-set on `value` (same guarantees as mutating `value` directly), StoredModel conformers get a truly atomic version.
 	@discardableResult
 	func withValue<R>(_ body: (inout TableType) throws -> R) rethrows -> R
-
+	
 	var valueIdentifier: ObjectIdentifier { get }
 	
 	/// Id is owned by the Value, it can not be changed after init.
@@ -91,7 +91,7 @@ public extension Model {
 		value = copy
 		return result
 	}
-
+	
 	/// Call this when value is changed for automatic change-tracking, like so: var value: TableType { didSet { didSet(oldValue) }}
 	func didSet(_ oldValue: TableType) {
 		// check if the value actually have changed
@@ -285,15 +285,15 @@ public extension Model {
 	}
 	
 	func didChange() {
-        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
-            Task.immediate {
-                await AutoDBManager.shared.objectHasChanged(self)
-            }
-        } else {
-            Task {
-                await AutoDBManager.shared.objectHasChanged(self)
-            }
-        }
+		if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
+			Task.immediate {
+				await AutoDBManager.shared.objectHasChanged(self)
+			}
+		} else {
+			Task {
+				await AutoDBManager.shared.objectHasChanged(self)
+			}
+		}
 	}
 	
 	/// Refresh all objects currently in use, if changed by external process - this will bring in fresh values from DB.
@@ -443,7 +443,7 @@ public extension Model {
 		}
 	}
 	
-    /// Synchronous delete, spawns deletion and ignores errors
+	/// Synchronous delete, spawns deletion and ignores errors
 	func delete(token: AutoId? = nil) {
 		Task {
 			try? await delete(token: token)

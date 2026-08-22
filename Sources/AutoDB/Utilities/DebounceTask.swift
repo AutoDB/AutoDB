@@ -30,4 +30,3 @@ public actor Debounce {
 		debounceTasks[id] = nil
 	}
 }
-

@@ -19,14 +19,14 @@ public enum ColumnType: Int32, Sendable {
 	/*
 	 case json   //also data but with jsonEncoding - use a better format and convert to built in support in the future if that happens.
 	 //we also need optional types
-	 
+	
 	 Having a bool for nullable makes cases smaller!
 	 case integerOpt
 	 case realOpt
 	 case textOpt
 	 case blobOpt
 	 case jsonOpt
-	 
+	
 	 case error
 	 */
 	
@@ -41,20 +41,20 @@ public enum ColumnType: Int32, Sendable {
 	
 	internal func definition() -> String {
 		switch self {
-			case .integer: return "INTEGER"
-			case .real: return "DOUBLE"
-			case .text: return "TEXT"
-			case .blob: return "BLOB"
+		case .integer: return "INTEGER"
+		case .real: return "DOUBLE"
+		case .text: return "TEXT"
+		case .blob: return "BLOB"
 		}
 	}
 	
 	// we don't need to encode default values into the database.
 	internal func defaultValue() -> SQLValue {
 		switch self {
-			case .integer: return .integer(0)
-			case .real: return .double(0)
-			case .text: return .text("")
-			case .blob: return .data(Data())
+		case .integer: return .integer(0)
+		case .real: return .double(0)
+		case .text: return .text("")
+		case .blob: return .data(Data())
 		}
 	}
 }
@@ -97,7 +97,7 @@ struct TableInfo: Sendable {
 			// get the names for each keyPath
 			SQLIndex(columnNames: keyPaths, unique: false, table: name)
 		}
-		
+
 		let uniqueIndicies: [SQLIndex] = T.uniqueIndices.compactMap { keyPaths in
 			// get the names for each keyPath
 			SQLIndex(columnNames: keyPaths, unique: true, table: name)
@@ -112,7 +112,7 @@ struct TableInfo: Sendable {
 			// get the names for each keyPath
 			SQLIndex(columnNames: keyPaths, unique: false, table: name)
 		}
-		
+
 		let uniqueIndicies: [SQLIndex] = T.uniqueIndices.compactMap { keyPaths in
 			// get the names for each keyPath
 			SQLIndex(columnNames: keyPaths, unique: true, table: name)

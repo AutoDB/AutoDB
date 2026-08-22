@@ -6,20 +6,20 @@
 //
 
 #if canImport(OSLog)
-import OSLog
+	import OSLog
 #else
-public final class Logger {
-	public init(subsystem: String, category: String) {}
-	public func info(_ message: String) {
-		print(message)
+	public final class Logger {
+		public init(subsystem: String, category: String) {}
+		public func info(_ message: String) {
+			print(message)
+		}
+		public func debug(_ message: String) {
+			print(message)
+		}
+		public func error(_ message: String) {
+			print(message)
+		}
 	}
-	public func debug(_ message: String) {
-		print(message)
-	}
-	public func error(_ message: String) {
-		print(message)
-	}
-}
 #endif
 import CoreFoundation
 
@@ -28,7 +28,7 @@ public actor AutoLog {
 	private static let log = AutoLog()
 	private static let subsystem = Bundle.main.bundleIdentifier ?? "AutoDB-noBundle"
 	private static let autoDB = Logger(subsystem: subsystem, category: "AutoDB")
-	static let dateFormat = Date.FormatStyle().locale(Locale(identifier: "sv_SE"))	// regular standard date format for easy sorting (basically a simpler form of ISO8601).
+	static let dateFormat = Date.FormatStyle().locale(Locale(identifier: "sv_SE"))  // regular standard date format for easy sorting (basically a simpler form of ISO8601).
 	
 	/// default location is the temporaryDirectory
 	var logURL: URL = FileManager.default.temporaryDirectory.appendingPathComponent("Auto.log")
@@ -40,7 +40,7 @@ public actor AutoLog {
 	public static func setup(appGroup: String? = nil) {
 		notUsed = false
 		Task {
-
+			
 			await log.setup(appGroup: appGroup)
 		}
 	}
@@ -83,7 +83,8 @@ public actor AutoLog {
 	}
 	
 	public func listLogs(maxLines: Int = 200) async -> [String] {
-		let slize = (try? Data(contentsOf: logURL))
+		let slize =
+			(try? Data(contentsOf: logURL))
 			.flatMap { String(data: $0, encoding: .utf8) }?
 			.components(separatedBy: .newlines) ?? []
 		
@@ -91,7 +92,7 @@ public actor AutoLog {
 		
 		let array = slize.suffix(maxLines)
 		if let lastLine = slize.last, lastLine.isEmpty || lastLine == "" {
-			return Array(array.dropLast().reversed()) 	// typically ends with a newline
+			return Array(array.dropLast().reversed())  // typically ends with a newline
 		}
 		return Array(array.reversed())
 	}
@@ -141,4 +142,3 @@ public actor AutoLog {
 		log("Error [\(Date.now.formatted(dateFormat))]: \(subsystem):\(function)\(line): \(message)\n")
 	}
 }
-

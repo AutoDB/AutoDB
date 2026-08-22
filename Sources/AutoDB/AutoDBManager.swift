@@ -1,6 +1,6 @@
 //
 //  AutoDBManager.swift
-//  
+//
 //
 //  Created by Olof Thorén on 2021-07-05.
 //
@@ -45,35 +45,35 @@ extension UInt64 {
 	}
 	
 	private var tables = [ObjectIdentifier: TableInfo]()
-    var lookupTable = LookupTable()
+	var lookupTable = LookupTable()
 	var cachedObjects = [ObjectIdentifier: WeakDictionary<AutoId, AnyObject>]()
 	private var createdObjects = [ObjectIdentifier: Set<AutoId>]()
 	private var modelCacheIdentifiersByTableIdentifier = [ObjectIdentifier: Set<ObjectIdentifier>]()
 	
 	var databases = [ObjectIdentifier: Database]()
 	var sharedDatabases = [SettingsKey: Database]()
-
+	
 	#if os(Android)
 	#else
-	// keep track of low memory warnings, save any unsaved objects to release memory.
-	private let lowMemoryEventSource: DispatchSourceMemoryPressure
-	
-	private init() {
-		lowMemoryEventSource = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical])
-		lowMemoryEventSource.setEventHandler { [weak self] in
-			guard let self else { return }
+		// keep track of low memory warnings, save any unsaved objects to release memory.
+		private let lowMemoryEventSource: DispatchSourceMemoryPressure
+		
+		private init() {
+			lowMemoryEventSource = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical])
+			lowMemoryEventSource.setEventHandler { [weak self] in
+				guard let self else { return }
+				Task {
+					try? await self.saveAllChanges()
+				}
+			}
 			Task {
-				try? await self.saveAllChanges()
+				await self._init()
 			}
 		}
-		Task {
-			await self._init()
+		
+		private func _init() async {
+			lowMemoryEventSource.resume()
 		}
-	}
-	
-	private func _init() async {
-		lowMemoryEventSource.resume()
-	}
 	#endif
 	
 	/// Only use this when testing, may create dublicate objects when live objects are saved.
@@ -82,14 +82,14 @@ extension UInt64 {
 		try await db.execute(token: token, "DELETE FROM \(table.tableName)")
 		let typeID = ObjectIdentifier(T.self)
 		clearCachedState(for: typeID)
-
+		
 		if let relatedModelTypeIDs = modelCacheIdentifiersByTableIdentifier[typeID] {
 			for modelTypeID in relatedModelTypeIDs {
 				clearCachedState(for: modelTypeID)
 			}
 		}
 	}
-
+	
 	private func clearCachedState(for typeID: ObjectIdentifier) {
 		cachedObjects[typeID] = nil
 		createdObjects[typeID] = nil
@@ -108,19 +108,19 @@ extension UInt64 {
 		Self.appDefaults[key] = settings
 	}
 	
-	 /// To ask for a common setting, e.g. when creating settings at startup:
-	 /// AutoDBManager.shared.setAppSettingsSync(backupDBSettings, for: .regular)
-	 /// AutoDBManager.shared.setAppSettingsSync(cacheDBSettings, for: .cache)
+	/// To ask for a common setting, e.g. when creating settings at startup:
+	/// AutoDBManager.shared.setAppSettingsSync(backupDBSettings, for: .regular)
+	/// AutoDBManager.shared.setAppSettingsSync(cacheDBSettings, for: .cache)
 	public func appSettings(for key: SettingsKey) -> AutoDBSettings {
 		
 		if let settings = Self.appDefaults[key] {
 			return settings
 		} else {
 			switch key {
-				case .cache:
-					Self.appDefaults[key] = AutoDBSettings.cache()
-				default:
-					Self.appDefaults[key] = AutoDBSettings()
+			case .cache:
+				Self.appDefaults[key] = AutoDBSettings.cache()
+			default:
+				Self.appDefaults[key] = AutoDBSettings()
 			}
 		}
 		
@@ -231,8 +231,8 @@ extension UInt64 {
 				path += "/"
 			}
 			#if os(macOS)
-			let appName = Bundle.main.infoDictionary?["CFBundleName"] as? String ?? Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String ?? "AutoDBApp"
-			path += appName + "/"
+				let appName = Bundle.main.infoDictionary?["CFBundleName"] as? String ?? Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String ?? "AutoDBApp"
+				path += appName + "/"
 			#endif
 			
 			path += settings.path
@@ -248,18 +248,17 @@ extension UInt64 {
 			values.isExcludedFromBackup = true
 			var url = URL(fileURLWithPath: path)
 			try? url.setResourceValues(values)
-            for suffix in ["-shm", "-wal"] {
-                url = URL(fileURLWithPath: path.appending(suffix))
-                try? url.setResourceValues(values)
-            }
+			for suffix in ["-shm", "-wal"] {
+				url = URL(fileURLWithPath: path.appending(suffix))
+				try? url.setResourceValues(values)
+			}
 		}
 		return db
 	}
-    
-    func lookupObjectsCount(_ tableName: ObjectIdentifier) async -> Int {
+	
+	func lookupObjectsCount(_ tableName: ObjectIdentifier) async -> Int {
 		lookupTable.changedObjects[tableName]?.count ?? 0
 	}
-	
 	
 	// Mark this object as changed by placing it in the array - we avoid storage variables on the objects themselves.
 	func objectHasChanged<T: Model>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
@@ -309,7 +308,6 @@ extension UInt64 {
 		}
 	}
 	
-	
 	// MARK: cached objects
 	
 	/// Get a cached object - to check if init has run, or if this is a temp-object etc
@@ -318,7 +316,7 @@ extension UInt64 {
 		guard var objects = cachedObjects[typeID] else {
 			return nil
 		}
-
+		
 		return objects[id] as? T
 	}
 	
@@ -353,7 +351,7 @@ extension UInt64 {
 					return nil
 				}
 				if let item = $0.value.unbox as? T {
-				
+					
 					if let filter, !filter(item) {
 						return nil
 					} else {
@@ -376,7 +374,7 @@ extension UInt64 {
 			cachedObjects[typeID]?[object.id] = object
 		}
 	}
-
+	
 	private func registerModelCacheIdentifier(_ modelTypeID: ObjectIdentifier, tableTypeID: ObjectIdentifier) {
 		if modelCacheIdentifiersByTableIdentifier[tableTypeID] == nil {
 			modelCacheIdentifiersByTableIdentifier[tableTypeID] = [modelTypeID]
@@ -395,7 +393,7 @@ extension UInt64 {
 			for (id, fetchedValue) in fetched {
 				cache[id]?.value = fetchedValue
 			}
-			
+		
 		}
 		 */
 	}
@@ -432,7 +430,7 @@ extension UInt64 {
 	func setOptimization<T: Model>(_ t: T, identifier: ObjectIdentifier? = nil, _ opt: Optimizations) async {
 		let semaphore = Semaphore()
 		await semaphore.wait()
-		defer { Task { await semaphore.signal() }}
+		defer { Task { await semaphore.signal() } }
 		
 		let typeID = identifier ?? ObjectIdentifier(T.self)
 		var optimize = optimization[typeID] ?? Optimizations()
@@ -448,7 +446,7 @@ extension UInt64 {
 	
 	static func fetchId<T: Table>(token: AutoId? = nil, _ id: UInt64, _ identifier: ObjectIdentifier? = nil) async throws -> T? {
 		try await shared.fetchId(token: token, id)
-    }
+	}
 	
 	/// Fetch an object with known id, throw missingId if no object was found.
 	func fetchId<T: Model>(token: AutoId? = nil, _ id: UInt64, _ typeIDIn: ObjectIdentifier? = nil) async throws -> T {
@@ -537,7 +535,7 @@ extension UInt64 {
 	func fetchQueryRelations<T: Table>(token: AutoId? = nil, _ whereQuery: String, values: [SQLValue], refreshData: Bool = false) async throws -> [(T, [AnyRelation])] {
 		
 		let typeID = ObjectIdentifier(T.self)
-        try await setupDB(token: token, T.self, typeID)
+		try await setupDB(token: token, T.self, typeID)
 		let decoder = try await getDecoder(T.self)
 		let table = decoder.tableInfo
 		
@@ -604,10 +602,12 @@ extension UInt64 {
 	public func query<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
 		let database = try await setupDB(token: token, classType)
 		
-		let values = try sqlArguments ?? arguments?.map {
-			// we must cast or somehow find out which SQL-type each argument is!
-			try SQLValue.fromAny($0)
-		}
+		let values =
+			try sqlArguments
+			?? arguments?.map {
+				// we must cast or somehow find out which SQL-type each argument is!
+				try SQLValue.fromAny($0)
+			}
 		return try await database.query(token: token, query, sqlArguments: values ?? [])
 	}
 	
@@ -616,10 +616,12 @@ extension UInt64 {
 	public func execute<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Int {
 		
 		let database = try await setupDB(token: token, classType)
-		let values = try sqlArguments ?? arguments?.map {
-			// we must cast or somehow find out which SQL-type each argument is!
-			try SQLValue.fromAny($0)
-		}
+		let values =
+			try sqlArguments
+			?? arguments?.map {
+				// we must cast or somehow find out which SQL-type each argument is!
+				try SQLValue.fromAny($0)
+			}
 		return try await database.execute(token: token, query, sqlArguments: values ?? [])
 	}
 	
@@ -657,7 +659,7 @@ extension UInt64 {
 	
 	// MARK: - direct database access, these methods must be locked.
 	
-	public func transaction<T: Table, R: Sendable>(_ classType: T.Type, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R) ) async throws -> R {
+	public func transaction<T: Table, R: Sendable>(_ classType: T.Type, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
 		let database = try await setupDB(classType)
 		return try await database.transaction(action)
 	}
@@ -761,7 +763,7 @@ extension UInt64 {
 				anyError = error
 			}
 		}
-
+		
 		if let bucket = lookupTable.changedObjects[typeID] as? ChangedModelBucket<T> {
 			try await bucket.saveChanges(token: token)
 		}
@@ -790,7 +792,6 @@ extension UInt64 {
 			}
 		}
 	}
-	
 	
 	// MARK: - change callbacks just subscribe to an AsyncSequence
 	
@@ -848,21 +849,21 @@ extension UInt64 {
 	}
 	
 	nonisolated
-	public static func questionMarks(_ count: Int) -> String {
+		public static func questionMarks(_ count: Int) -> String
+	{
 		
 		count.questionMarks
 	}
 }
 
 public extension Int {
-	var questionMarks: String
-	{
+	var questionMarks: String {
 		if self == 0 {
-			return "''";	//this will make your clause look like this: ... AND column IN ('') - which is always false (unless column can be the empty string), NOT IN is always true.
+			return "''";  //this will make your clause look like this: ... AND column IN ('') - which is always false (unless column can be the empty string), NOT IN is always true.
 		}
-		let questionMarks = "".padding(toLength: self*2, withPad: "?,", startingAt: 0)
+		let questionMarks = "".padding(toLength: self * 2, withPad: "?,", startingAt: 0)
 		
-		let indexRange = questionMarks.startIndex ..< questionMarks.index(questionMarks.endIndex, offsetBy: -1)
+		let indexRange = questionMarks.startIndex..<questionMarks.index(questionMarks.endIndex, offsetBy: -1)
 		let substring = questionMarks[indexRange]
 		
 		return String(substring)
@@ -870,10 +871,8 @@ public extension Int {
 	
 	/// How many groups of questions marks for a multi-insert, then specify columnCount.
 	/// We want the format to be "INSERT OR REPLACE INTO table (column1, column2) VALUES (?,?),(?,?),(?,?)", and then add an array with four values. Here self = 3, columnCount = 2
-	func questionMarksForQueriesWithColumns(_ columnCount: Int) -> String
-	{
-		if (self == 0)
-		{
+	func questionMarksForQueriesWithColumns(_ columnCount: Int) -> String {
+		if (self == 0) {
 			//NSLog(@"AutoDB ERROR, asking for 0 objects (%@) questionMarksForQueriesWithObjects:", self);
 			return "()"
 		}
@@ -881,7 +880,7 @@ public extension Int {
 		let questionObject = "(\(columnCount.questionMarks)),"
 		let questionMarks = "".padding(toLength: questionObject.count * self, withPad: questionObject, startingAt: 0)
 		
-		let indexRange = questionMarks.startIndex ..< questionMarks.index(questionMarks.endIndex, offsetBy: -1)
+		let indexRange = questionMarks.startIndex..<questionMarks.index(questionMarks.endIndex, offsetBy: -1)
 		let substring = questionMarks[indexRange]
 		
 		return String(substring)

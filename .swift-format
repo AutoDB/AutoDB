@@ -1,4 +1,5 @@
 {
+	"_comment_": "copy to new projects (cd into project first): cp /Users/olof/Library/Mobile\ Documents/com\~apple\~CloudDocs/extDev/_shared/swift-format.json .swift-format",
 	"rules": {
 		"NoAccessLevelOnExtensionDeclaration": false,
 	},
