@@ -12,7 +12,7 @@ class AnyChangedModelBucket: @unchecked Sendable {
 	
 	func removeValue(forKey id: AutoId) {}
 	
-	func saveChanges(token: AutoId?) async throws {}
+	func saveChanges() async throws {}
 }
 
 final class ChangedModelBucket<T: Model>: AnyChangedModelBucket, @unchecked Sendable {
@@ -30,12 +30,12 @@ final class ChangedModelBucket<T: Model>: AnyChangedModelBucket, @unchecked Send
 		values.removeValue(forKey: id)
 	}
 	
-	override func saveChanges(token: AutoId?) async throws {
+	override func saveChanges() async throws {
 		let pendingValues = Array(values.values)
 		guard pendingValues.isEmpty == false else {
 			return
 		}
-		try await T.saveList(token: token, pendingValues)
+		try await T.saveList(pendingValues)
 	}
 }
 

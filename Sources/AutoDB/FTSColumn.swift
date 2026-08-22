@@ -36,6 +36,8 @@ actor FTSHandler {
 	/// this table's FTS column is locked by semaphore when searching and setting up - note that we only use one semaphore per table even if you have multiple FTS columns.
 	var columnLock = [ObjectIdentifier: Semaphore]()
 	var ftsTables = [ObjectIdentifier: [String: FTSTableInfo]]()  // note that each table can have multiple FTS columns
+	/// callbacks registered before setup() created the table entry
+	private var pendingCallbacks = [ObjectIdentifier: [String: TextCallbackSignature]]()
 	
 	// return true if this is the first time called
 	func setup<TargetTableType: TableModel>(_ type: TargetTableType.Type, _ column: String, _ typeID: ObjectIdentifier, _ targetTableName: String) async throws -> Bool {
@@ -48,6 +50,10 @@ actor FTSHandler {
 		}
 		let tableName = "\(targetTableName)\(column)Table"
 		ftsTables[typeID]?[column] = FTSTableInfo(tableName: tableName, targetTableName: targetTableName)
+		if let pending = pendingCallbacks[typeID]?[column] {
+			ftsTables[typeID]?[column]?.textCallback = pending
+			pendingCallbacks[typeID]?[column] = nil
+		}
 		
 		// first FTS-column in the table creates the table's semaphore
 		if columnLock[typeID] == nil {
@@ -66,7 +72,7 @@ actor FTSHandler {
 		// UNINDEXED is used to prevent the id from being inserted into the FTS-index
 		let sqlStatement = "CREATE VIRTUAL TABLE IF NOT EXISTS `\(tableName)` USING FTS5(id UNINDEXED, text, tokenize='unicode61 remove_diacritics 0');"
 		do {
-			try await TargetTableType.query(token: nil, sqlStatement, nil)
+			try await TargetTableType.query(sqlStatement, nil)
 		} catch {
 			throw error
 		}
@@ -77,28 +83,41 @@ actor FTSHandler {
 				DELETE FROM `\(tableName)` WHERE `\(tableName)`.id = OLD.id;
 			END;
 			"""
-		try await TargetTableType.query(token: nil, deleteTrigger, nil)
+		try await TargetTableType.query(deleteTrigger, nil)
 		
 		let updateTrigger = """
 			CREATE TRIGGER IF NOT EXISTS `\(tableName)Update` AFTER UPDATE ON `\(targetTableName)` BEGIN
 				DELETE FROM `\(tableName)` WHERE `\(tableName)`.id = OLD.id;
 			END;
 			"""
-		try await TargetTableType.query(token: nil, updateTrigger, nil)
+		try await TargetTableType.query(updateTrigger, nil)
 		
 		let insertTrigger = """
 			CREATE TRIGGER IF NOT EXISTS `\(tableName)Insert` AFTER INSERT ON `\(targetTableName)` BEGIN
 				DELETE FROM `\(tableName)` WHERE `\(tableName)`.id = NEW.id;
 			END;
 			"""
-		try await TargetTableType.query(token: nil, insertTrigger, nil)
-		try await TargetTableType.query(token: nil, "PRAGMA trusted_schema=1;", nil)
+		try await TargetTableType.query(insertTrigger, nil)
+		try await TargetTableType.query("PRAGMA trusted_schema=1;", nil)
 		
 		return true
 	}
 	
+	/// Register the callback that provides index text for changed ids. May be called before setup() has created
+	/// the table entry (owners are often set while the setup-task is still running) - then it is stashed and applied by setup().
 	func setTextCallback(_ typeID: ObjectIdentifier, _ column: String, _ callback: @escaping TextCallbackSignature) {
-		ftsTables[typeID]?[column]?.textCallback = callback
+		if ftsTables[typeID]?[column] == nil {
+			pendingCallbacks[typeID, default: [:]][column] = callback
+		} else {
+			ftsTables[typeID]?[column]?.textCallback = callback
+		}
+	}
+	
+	/// The generic read-the-column fallback only fills a void - it must never overwrite an owner-provided callback (registration order is not deterministic).
+	func setDefaultTextCallback(_ typeID: ObjectIdentifier, _ column: String, _ callback: @escaping TextCallbackSignature) {
+		if ftsTables[typeID]?[column]?.textCallback == nil && pendingCallbacks[typeID]?[column] == nil {
+			ftsTables[typeID]?[column]?.textCallback = callback
+		}
 	}
 }
 
@@ -186,7 +205,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 		let textCallback: TextCallbackSignature = { ids in
 			let questionMarks = AutoDBManager.questionMarks(ids.count)
 			var result = [AutoId: String]()
-			for row in (try? await T.query(token: nil, "SELECT id, `\(column)` FROM `\(targetTableName)` WHERE id IN (\(questionMarks))", ids)) ?? [] {
+			for row in (try? await T.query("SELECT id, `\(column)` FROM `\(targetTableName)` WHERE id IN (\(questionMarks))", ids)) ?? [] {
 				if let id = row["id"]?.uint64Value, let text = row[column]?.stringValue {
 					result[id] = text
 				}
@@ -194,7 +213,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 			return result
 		}
 
-		await FTSHandler.shared.setTextCallback(typeID, column, textCallback)
+		await FTSHandler.shared.setDefaultTextCallback(typeID, column, textCallback)
 	}
 	
 	/// insert missing text into the index
@@ -230,20 +249,23 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 			try await TargetTableType.query("DELETE FROM `\(tableInfo.tableName)`")
 		}
 		
+		// a NULL id in the index poisons the NOT IN below (three-valued logic makes it never match), remove any such rows
+		try await TargetTableType.query("DELETE FROM `\(tableInfo.tableName)` WHERE id IS NULL")
+		
 		let limit = 20000  // any limit will do, just make it small enough to not take noticable RAM/CPU per fetch, while big enough to handle most updates in one go.
 		let query = "SELECT id FROM `\(tableInfo.targetTableName)` WHERE id NOT in (SELECT id FROM `\(tableInfo.tableName)`) LIMIT \(limit)"
 		let ids = try await TargetTableType.query(query).flatMap { $0.values.compactMap { $0.uint64Value } }
 		if ids.isEmpty {
 			return
 		}
-		if let changeList = await textCallback(ids) {
+		if let changeList = await textCallback(ids), changeList.isEmpty == false {
 			
 			// turn changeList into an id, text array by mapping SQLValues since we know what to use. TODO: allow other transforms than removeDiacritics
 			let args = changeList.map { item in
 				[SQLValue.uinteger(item.key), SQLValue.text(removeDiacritics(item.value))]
 			}.flatMap { $0 }
 			
-			let questionMarks = AutoDBManager.questionMarksForQueriesWithObjects(ids.count, 2)
+			let questionMarks = AutoDBManager.questionMarksForQueriesWithObjects(changeList.count, 2)
 			try await TargetTableType.query("INSERT OR REPLACE INTO `\(tableInfo.tableName)` (id, text) VALUES \(questionMarks)", sqlArguments: args)
 		}
 		if ids.count == limit {

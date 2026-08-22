@@ -30,7 +30,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 	}()
 
 	/// We return a list of migrations that has been done, if the auto-conversions are not suitable, just supply your own functions.
-	func setup<T: Table>(token: AutoId? = nil, _ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> (TableInfo, [MigrationState]?) {
+	func setup<T: Table>(_ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> (TableInfo, [MigrationState]?) {
 		let instance = classType.init()
 		let tableName = classType.tableName
 		
@@ -55,21 +55,21 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		
 		var columnsInDB: [Column] = []
 		let query = "PRAGMA table_info('\(tableName)')"
-		for row in try await db.query(token: token, query) {
+		for row in try await db.query(query) {
 			columnsInDB.append(try Column(row: row, tableName: tableName))
 		}
 		
 		if columnsInDB.isEmpty {
 			// table does not exist. Create it!
-			try await db.execute(token: token, tableInfo.createTableSyntax())
+			try await db.execute(tableInfo.createTableSyntax())
 			
 			for statement in tableInfo.createIndexStatements(instance) {
-				try await db.execute(token: token, statement)
+				try await db.execute(statement)
 			}
 			return (tableInfo, [.createdTable])
 		}
 		
-		let indicesInDB: [SQLIndex] = try await db.query(token: token, "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?", [tableName]).compactMap { row in
+		let indicesInDB: [SQLIndex] = try await db.query("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?", [tableName]).compactMap { row in
 			guard let sql = row["sql"]?.stringValue else { return nil }
 			
 			return try SQLIndex(definition: sql)
@@ -103,14 +103,14 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		nonisolated(unsafe) var migrations: [MigrationState] = []
 		
 		// Don't do FTS directly in tables, better to have more fine-grained controls to have joined columns etc, we solve that by having a dedicated type.
-		try await db.transaction { db, token in
+		try await db.transaction { db in
 			
 			var addedIndices = addedIndices
 			var changeIndiciesFail = false
 			// drop indices if needed
 			for indexToDrop in changedIndices {
 				do {
-					try await db.query(token: token, "DROP INDEX `\(indexToDrop.name)`")
+					try await db.query("DROP INDEX `\(indexToDrop.name)`")
 				} catch {
 					print("ERROR: could not drop index: \(error)")
 					changeIndiciesFail = true
@@ -124,7 +124,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 					throw TableError.impossibleUrlMigration
 				}
 				
-				try await db.query(token: token, "ALTER TABLE `\(tableName)` ADD COLUMN \(columnToAdd.definition())")
+				try await db.query("ALTER TABLE `\(tableName)` ADD COLUMN \(columnToAdd.definition())")
 				migrations.append(.newColumn(columnToAdd))
 			}
 			
@@ -134,22 +134,22 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				
 				let tempTableName = "_\(tableName)TempAuto"
 				// if previous run was failing, drop that table
-				_ = try? await db.query(token: token, "DROP TABLE IF EXISTS `\(tempTableName)`")
-				try await db.query(token: token, tableInfo.createTableSyntax(tempTableName))
+				_ = try? await db.query("DROP TABLE IF EXISTS `\(tempTableName)`")
+				try await db.query(tableInfo.createTableSyntax(tempTableName))
 				
 				let columnNames = tableInfo.columns.map { $0.name }
 				let fieldList = "`\(columnNames.joined(separator: "`,`"))`"
-				try await db.query(token: token, "INSERT OR REPLACE INTO `\(tempTableName)` (\(fieldList)) SELECT \(fieldList) FROM `\(tableName)`")
+				try await db.query("INSERT OR REPLACE INTO `\(tempTableName)` (\(fieldList)) SELECT \(fieldList) FROM `\(tableName)`")
 				
 				if changedColumns.isEmpty {
-					try await db.query(token: token, "DROP TABLE `\(tableName)`")
-					try await db.query(token: token, "ALTER TABLE `\(tempTableName)` RENAME TO `\(tableName)`")
+					try await db.query("DROP TABLE `\(tableName)`")
+					try await db.query("ALTER TABLE `\(tempTableName)` RENAME TO `\(tableName)`")
 				} else {
 					
 					// let the old db use the temp-name
-					try await db.query(token: token, "ALTER TABLE `\(tempTableName)` RENAME TO `\(tempTableName)2`")
-					try await db.query(token: token, "ALTER TABLE `\(tableName)` RENAME TO `\(tempTableName)`")
-					try await db.query(token: token, "ALTER TABLE `\(tempTableName)2` RENAME TO `\(tableName)`")
+					try await db.query("ALTER TABLE `\(tempTableName)` RENAME TO `\(tempTableName)2`")
+					try await db.query("ALTER TABLE `\(tableName)` RENAME TO `\(tempTableName)`")
+					try await db.query("ALTER TABLE `\(tempTableName)2` RENAME TO `\(tableName)`")
 					
 					// Now we can convert all values that need special handling (e.g. converting dates to strings)
 					migrations.append(.changes(oldTableName: tempTableName, columns: changedColumns))
@@ -158,7 +158,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 				// re-add all indices
 				for indexToAdd in targetIndices {
 					do {
-						try await addIndex(db, indexToAdd, token, tableName)
+						try await addIndex(db, indexToAdd, tableName)
 					} catch {
 						print("ERROR: could not add index: \(error)")
 						migrations.append(.failedIndex(index: indexToAdd, error: error))
@@ -171,7 +171,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 			// add new indices if needed
 			for indexToAdd in addedIndices {
 				do {
-					try await addIndex(db, indexToAdd, token, tableName)
+					try await addIndex(db, indexToAdd, tableName)
 				} catch {
 					print("ERROR: could not add index: \(error)")
 					migrations.append(.failedIndex(index: indexToAdd, error: error))
@@ -183,17 +183,17 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 	}
 	
 	/// Adding an index can fail if there are duplicate values, so we catch that error and delete the duplicates before trying again. Note that this can cause data loss, so we log it and report it in the migration array.
-	func addIndex(_ db: Database, _ indexToAdd: SQLIndex, _ token: AutoId, _ tableName: String) async throws {
+	func addIndex(_ db: Database, _ indexToAdd: SQLIndex, _ tableName: String) async throws {
 		do {
-			try await db.query(token: token, indexToAdd.definition(tableName: tableName))
+			try await db.query(indexToAdd.definition(tableName: tableName))
 		} catch Database.Error.uniqueConstraintFailed {
 			
 			// delete duplicate values
 			let innerQ = "SELECT a.id FROM `\(tableName)` a, `\(tableName)` b WHERE \(indexToAdd.columnNames.map { "a.\($0) = b.\($0)" }.joined(separator: " AND ")) AND a.id != b.id"
-			try await db.query(token: token, "DELETE FROM `\(tableName)` WHERE id IN (\(innerQ))")
+			try await db.query("DELETE FROM `\(tableName)` WHERE id IN (\(innerQ))")
 			
 			// try again
-			try await db.query(token: token, indexToAdd.definition(tableName: tableName))
+			try await db.query(indexToAdd.definition(tableName: tableName))
 			
 		} catch {
 			throw error

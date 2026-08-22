@@ -213,6 +213,35 @@ Details worth knowing:
 - The token flows into `Task { }` spawned inside the closure, but intentionally **not** into `Task.detached` - detached work waits for the transaction to finish, just like before.
 - The same applies to migrations: queries inside your `migration(_:_:_:)` implementation no longer need to forward the token.
 
+## Removing explicit tokens from your code
+
+The `token:` parameters are deprecated: explicit tokens still work exactly as before (and win over the ambient one), but every call site that passes one now gets a compiler warning, and the parameters are removed in the next major version. The `migration(_:_:)` protocol requirement has already dropped its token parameter. These regex find/replace pairs (Xcode: Find navigator with "Regular Expression", or any editor with ICU/PCRE regex) clean up the call sites:
+
+1. **Token argument followed by other arguments** - `fetchId(token: token, 1)` → `fetchId(1)`, `db.query(token: token, "SELECT ...")` → `db.query("SELECT ...")`:
+   - Find: `token:\s*[\w.]+,\s*`
+   - Replace: *(empty)*
+
+2. **Token as the only argument** - `save(token: token)` → `save()`, `delete(token: token)` → `delete()`:
+   - Find: `\(token:\s*[\w.]+\)`
+   - Replace: `()`
+
+3. **Leftover empty parens before the trailing closure** (from step 2 hitting `transaction(token: token) { ... }` - scoped to `transaction`, a bare `\(\)\s*\{` would also mangle every `func foo() {`):
+   - Find: `transaction\(\)\s*\{`
+   - Replace: `transaction {`
+
+4. **Unused closure/function parameters** - after 1-3 the `token` parameter of `transaction { db, token in ... }` closures and your `migration(_ token:...)` implementations is unused; silence the warning with:
+   - Find: `\{\s*(\w+),\s*token\s+in`
+   - Replace: `{ $1, _ in`
+   - (The `migration` protocol signature itself must keep its token parameter until the next major version - just stop forwarding it.)
+
+⚠️ Before you run these, check the exceptions - a plain `token:` text search finds anything the regexes miss (expressions like `token: t ?? other`):
+
+- **Don't remove tokens you generated yourself** for your own `Semaphore` instances - only tokens that originate from AutoDB's `transaction`/`migration` closures.
+- **`create(token: someToken)` without an id uses the token as the new object's id** (legacy behavior). If you rely on that, pass the id explicitly instead: `create(someToken)`.
+- **Tokens deliberately handed to *other tasks*** (e.g. passed into `Task.detached` or stored for later) keep working only as explicit tokens - the task-local does not follow them. If you pass a token into detached work so it can join the transaction, keep it explicit.
+
+Then build: the compiler flags any now-unused `token` variables, which is your checklist of what's left.
+
 ## Deadlocks with transactions
 
 Transactions are guarded by semaphores; with the ambient token the common deadlocks (forgetting to forward the token) are gone, but a deadlock is still possible if the transaction *waits* for work that itself waits for the transaction (e.g. awaiting a `Task.detached` DB call from inside the closure). See `TransactionTests.deadlockSemaphore()` for how to discover these with the watchdog. 

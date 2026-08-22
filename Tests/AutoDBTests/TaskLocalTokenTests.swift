@@ -16,7 +16,7 @@ import Foundation
 struct MigNoToken: Table {
 	var id: AutoId = 1
 	var plain = "plain"
-
+	
 	static var createTableSQL: String {
 		"""
 		CREATE TABLE IF NOT EXISTS "MigNoToken" (
@@ -25,8 +25,8 @@ struct MigNoToken: Table {
 			PRIMARY KEY (`id`));
 		"""
 	}
-
-	static func migration(_ token: AutoId?, _ db: isolated Database, _ state: MigrationState) async {
+	
+	static func migration(_ db: isolated Database, _ state: MigrationState) async {
 		if case let .changes(oldTableName, _) = state {
 			// note: no token forwarded anywhere in here - previously this would deadlock
 			do {
@@ -55,7 +55,7 @@ actor TokenBox {
 }
 
 class TaskLocalTokenTests: @unchecked Sendable {
-
+	
 	/// wait for a flag with a deadline, so a deadlock regression fails the test instead of hanging CI forever
 	private func waitFor(_ flag: DoneFlag, seconds: TimeInterval = 10) async throws {
 		let deadline = Date().addingTimeInterval(seconds)
@@ -63,7 +63,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 			try await Task.sleep(for: .milliseconds(20))
 		}
 	}
-
+	
 	@Test func taskLocalInheritance() async throws {
 		await SemaphoreToken.$current.withValue(7) {
 			#expect(SemaphoreToken.current == 7)
@@ -77,12 +77,12 @@ class TaskLocalTokenTests: @unchecked Sendable {
 		// restored after the scope
 		#expect(SemaphoreToken.current == nil)
 	}
-
+	
 	@Test func nilTokenInsideTransaction() async throws {
 		_ = try await TransClass.db()
 		let flag = DoneFlag()
 		let work = Task {
-			try await TransClass.transaction { db, _ in
+			try await TransClass.transaction { db in
 				// none of these forward the token - previously each would deadlock
 				try await db.query("SELECT 1")
 				let item = await TransClass.create(77)
@@ -100,17 +100,18 @@ class TaskLocalTokenTests: @unchecked Sendable {
 			work.cancel()
 		}
 	}
-
+	
 	@Test func nestedTransactionReusesAmbientToken() async throws {
 		// this exact shape used to be the deadlockSemaphore example in TransactionTests -
 		// a nested transaction without a forwarded token now picks up the outer token from the task-local
 		let db = try await TransClass.db()
 		let flag = DoneFlag()
 		let work = Task {
-			try? await db.transaction { db, outerToken in
-				try await db.transaction { db, innerToken in
+			try? await db.transaction { db in
+				let outerToken = SemaphoreToken.current
+				try await db.transaction { db in
 					// reuses the outer lock token, nests only the savepoint
-					#expect(innerToken == outerToken)
+					#expect(SemaphoreToken.current == outerToken)
 					try await db.execute("INSERT OR REPLACE INTO TransClass (id, integer) VALUES (78, 5)")
 				}
 				// roll back the outer - must also roll back the (released) inner savepoint
@@ -127,17 +128,20 @@ class TaskLocalTokenTests: @unchecked Sendable {
 			work.cancel()
 		}
 	}
-
+	
 	@Test func explicitTokenWinsOverAmbient() async throws {
+		// deliberately uses the deprecated token-taking API - this is the compatibility test
+		// for users who still pass tokens explicitly, so the deprecation warning here is expected.
 		let db = try await TransClass.db()
 		let explicit = AutoId.generateId()
 		try await SemaphoreToken.$current.withValue(AutoId.generateId()) {
 			try await db.transaction(token: explicit) { db, token in
 				#expect(token == explicit)
+				#expect(SemaphoreToken.current == explicit)
 			}
 		}
 	}
-
+	
 	@Test func debounceDoesNotInheritToken() async throws {
 		// delayed work must never inherit a transaction token - it could re-enter a still-open transaction's lock
 		let box = TokenBox()
@@ -149,14 +153,14 @@ class TaskLocalTokenTests: @unchecked Sendable {
 		}
 		#expect(await box.value == 0, "debounced action saw an inherited token")
 	}
-
+	
 	@Test func migrationWithoutForwardingToken() async throws {
 		// create an "old" table for MigNoToken before its own setup runs, then trigger migration
 		let db = try await MigFirst.db()
 		_ = try? await db.execute("DROP TABLE MigNoToken")
 		try await db.execute(MigNoToken.createTableSQL)
 		try await db.execute("INSERT INTO MigNoToken (id, plain_old) VALUES (1, 'migrated value')")
-
+		
 		let flag = DoneFlag()
 		let work = Task {
 			// triggers setupDB -> migration inside a transaction; the migration uses no tokens at all

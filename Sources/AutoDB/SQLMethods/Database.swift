@@ -38,7 +38,7 @@
 //  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //  SOFTWARE.
 
-// Note: token: AutoId? = nil parameters are kept for compatibility; when nil the ambient SemaphoreToken task-local is used instead (bound by transaction). Step 2 (next major) deprecates the parameters, see Documentation/upgradeTODO.md.
+// Note: the token: AutoId? parameters are deprecated - the ambient SemaphoreToken task-local (bound by transaction) carries the token instead. The deprecated variants live in Deprecated.swift and are removed in the next major, see Documentation/upgradeTODO.md.
 
 import Foundation
 #if canImport(Darwin)
@@ -239,7 +239,18 @@ public actor Database {
 	
 	var gentleClose: Task<Void, Swift.Error>?
 	var harshClose: Task<Void, Swift.Error>?
-	public func close(_ token: AutoId? = nil, waitSec: Double = 10) async {
+	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
+	public func close(_ token: AutoId?, waitSec: Double = 10) async {
+		await _close(token, waitSec: waitSec)
+	}
+	
+	/// Gently close the database - if a transaction is running, wait for it to finish first.
+	public func close(waitSec: Double = 10) async {
+		// deliberately no ambient-token fallback: a close from inside a transaction should wait for it, not close the DB mid-transaction
+		await _close(nil, waitSec: waitSec)
+	}
+	
+	private func _close(_ token: AutoId?, waitSec: Double) async {
 		gentleClose?.cancel()
 		harshClose?.cancel()
 		
@@ -366,18 +377,26 @@ public actor Database {
 	// MARK: - Query methods
 	
 	@discardableResult
-	public func query(token: AutoId? = nil, _ queryString: String, _ arguments: [Sendable] = []) async throws -> [Row] {
+	public func query(_ queryString: String, _ arguments: [Sendable] = []) async throws -> [Row] {
 		let values = try arguments.map {
 			// we must cast or somehow find out which SQL-type each argument is!
 			try SQLValue.fromAny($0)
 		}
-		return try await query(token: token, queryString, sqlArguments: values)
+		return try await query(queryString, sqlArguments: values)
+	}
+	
+	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
+	@discardableResult
+	public func query(token: AutoId?, _ queryString: String, _ arguments: [Sendable] = []) async throws -> [Row] {
+		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
+			try await query(queryString, arguments)
+		}
 	}
 	
 	@discardableResult
-	public func query(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue]?) async throws -> [Row] {
-		// explicit token wins, else fall back to the ambient transaction token
-		let token = token ?? SemaphoreToken.current
+	public func query(_ query: String, sqlArguments: [SQLValue]?) async throws -> [Row] {
+		// the ambient transaction token, if we are inside a transaction
+		let token = SemaphoreToken.current
 		// only take semaphore if in transaction - other times we can run queries in parallel (as much as being an actor allows)
 		let hasSemaphore = inTransaction || token != nil
 		if hasSemaphore {
@@ -388,6 +407,14 @@ public actor Database {
 		
 		let statement = try preparedStatement(query, sqlArguments ?? [])
 		return try rowsByExecutingPreparedStatement(statement, from: query)
+	}
+	
+	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
+	@discardableResult
+	public func query(token: AutoId?, _ query: String, sqlArguments: [SQLValue]?) async throws -> [Row] {
+		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
+			try await self.query(query, sqlArguments: sqlArguments)
+		}
 	}
 	
 	private func preparedStatement(_ query: String, _ sqlArguments: [SQLValue]) throws -> PreparedStatement {
@@ -531,23 +558,31 @@ public actor Database {
 	
 	/// Execute a query with parameters, returning amount of affected rows. Will throw an error if the query returns rows.
 	@discardableResult
-	public func execute(token: AutoId? = nil, _ queryString: String, _ arguments: [Sendable]?) async throws -> Int {
+	public func execute(_ queryString: String, _ arguments: [Sendable]?) async throws -> Int {
 		let values = try arguments?.map {
 			// we must cast or somehow find out which SQL-type each argument is!
 			try SQLValue.fromAny($0)
 		}
-		return try await execute(token: token, queryString, sqlArguments: values ?? [])
+		return try await execute(queryString, sqlArguments: values ?? [])
+	}
+	
+	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
+	@discardableResult
+	public func execute(token: AutoId?, _ queryString: String, _ arguments: [Sendable]?) async throws -> Int {
+		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
+			try await execute(queryString, arguments)
+		}
 	}
 	
 	/// Execute a query with parameters, returning amount of affected rows. Will throw an error if the query returns rows.
 	@discardableResult
-	public func execute(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue] = []) async throws -> Int {
-		// explicit token wins, else fall back to the ambient transaction token
-		let token = token ?? SemaphoreToken.current
-
+	public func execute(_ query: String, sqlArguments: [SQLValue] = []) async throws -> Int {
+		// the ambient transaction token, if we are inside a transaction
+		let token = SemaphoreToken.current
+		
 		if sqlArguments.isEmpty {
 			// no arguments, just run the query
-			return try await execute(token: token, query)
+			return try await execute(query)
 		}
 		
 		// only take semaphore if in transaction - other times we can run queries in parallel (as much as being an actor allows)
@@ -576,11 +611,19 @@ public actor Database {
 		return Int(affectedRows)
 	}
 	
+	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
+	@discardableResult
+	public func execute(token: AutoId?, _ query: String, sqlArguments: [SQLValue] = []) async throws -> Int {
+		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
+			try await self.execute(query, sqlArguments: sqlArguments)
+		}
+	}
+	
 	/// Execute a query with no parameters returning  amount of affected rows. Will throw an error if the query returns rows.
 	@discardableResult
-	public func execute(token: AutoId? = nil, _ query: String) async throws -> Int {
-		// explicit token wins, else fall back to the ambient transaction token
-		let token = token ?? SemaphoreToken.current
+	public func execute(_ query: String) async throws -> Int {
+		// the ambient transaction token, if we are inside a transaction
+		let token = SemaphoreToken.current
 		let hasSemaphore = inTransaction || token != nil
 		if hasSemaphore {
 			await semaphore.wait(token: token)
@@ -612,16 +655,36 @@ public actor Database {
 		return Int(affectedRows)
 	}
 	
+	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
+	@discardableResult
+	public func execute(token: AutoId?, _ query: String) async throws -> Int {
+		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
+			try await execute(query)
+		}
+	}
+	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// The transaction token is carried as an ambient task-local (SemaphoreToken.current) for the duration of the closure,
-	/// so all db-access inside the transaction re-enters the lock automatically - no need to forward the token explicitly.
-	/// Passing the token explicitly is still supported and always wins over the ambient one.
+	/// so all db-access inside the transaction re-enters the lock automatically.
 	/// Note: the task-local does not flow into Task.detached - detached work inside the closure waits for the transaction to finish (by design).
+	public func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database) async throws -> R)) async throws -> R {
+		try await _transaction { db, _ in
+			try await action(db)
+		}
+	}
+	
+	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - use transaction { db in ... } and remove all token arguments, see 'Removing explicit tokens' in Documentation.md")
 	public func transaction<R: Sendable>(token: AutoId? = nil, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
+		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
+			try await _transaction(action)
+		}
+	}
+	
+	private func _transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
 		
 		// note that we can have transactions inside transactions, as long as we reuse the token:
-		// explicit token wins; else reuse an ambient (outer-transaction) token; else start fresh
-		let token = token ?? SemaphoreToken.current ?? AutoId.generateId()
+		// reuse an ambient (outer-transaction) token; else start fresh
+		let token = SemaphoreToken.current ?? AutoId.generateId()
 		let transactionID = AutoId.generateId()
 		await semaphore.wait(token: token)
 		let nestedTransaction = inTransaction
@@ -643,13 +706,13 @@ public actor Database {
 		// bind the ambient token so the closure (and everything it calls) can re-enter without forwarding it.
 		// The deferred signal above captures the resolved local, so it is unaffected by this scope having exited.
 		return try await SemaphoreToken.$current.withValue(token) {
-			try await execute(token: token, "SAVEPOINT \"\(transactionID)\"")
+			try await execute("SAVEPOINT \"\(transactionID)\"")
 			do {
 				let result: R = try await action(self, token)
-				try await execute(token: token, "RELEASE SAVEPOINT \"\(transactionID)\"")
+				try await execute("RELEASE SAVEPOINT \"\(transactionID)\"")
 				return result
 			} catch {
-				try await execute(token: token, "ROLLBACK TO SAVEPOINT \"\(transactionID)\"")
+				try await execute("ROLLBACK TO SAVEPOINT \"\(transactionID)\"")
 				throw error
 			}
 		}
@@ -657,8 +720,8 @@ public actor Database {
 	
 	// MARK: - change callbacks
 	
-	// allow the use of ChangeObserver elsewhere, access should not be restricted to this actor.
-	private nonisolated(unsafe) var rowChangeObservers: [String: RowChangeObserver] = [:]
+	// all access goes through this actor (registration methods and callListeners), so plain isolation suffices
+	private var rowChangeObservers: [String: RowChangeObserver] = [:]
 	public func rowChangeObserver(_ tableName: String) -> RowChangeObserver {
 		if let listener = rowChangeObservers[tableName] {
 			return listener
@@ -698,8 +761,8 @@ public actor Database {
 		}
 	}
 	
-	// allow the use of ChangeObservers elsewhere, access should not be restricted to this actor.
-	private nonisolated(unsafe) var tableChangeObservers: [String: TableChangeObserver] = [:]
+	// all access goes through this actor (registration methods and callListeners), so plain isolation suffices
+	private var tableChangeObservers: [String: TableChangeObserver] = [:]
 	
 	public func tableChangeObserver(_ tableName: String) -> TableChangeObserver {
 		if let listener = tableChangeObservers[tableName] {

@@ -116,13 +116,13 @@ public extension Model {
 	}
 	
 	/// sometimes object's inits must be sync. Force-wait in that case, this causes hang by design.
-	static func create(token: AutoId? = nil, _ id: AutoId? = nil) -> Self {
+	static func create(_ id: AutoId? = nil) -> Self {
 		
 		let semaphore = DispatchSemaphore(value: 0)
 		
 		let store = Store<Self>()
 		Task(priority: .userInitiated) {
-			store.item = await create(token: token, id)
+			store.item = await create(id)
 			semaphore.signal()
 		}
 		semaphore.wait()
@@ -131,7 +131,7 @@ public extension Model {
 	}
 	
 	/// When you are in async mode, wait regularly
-	static func create(token: AutoId? = nil, _ id: AutoId? = nil) async -> Self {
+	static func create(_ id: AutoId? = nil) async -> Self {
 		// get encoder or setup db if not done
 		let typeID = ObjectIdentifier(Self.self)
 		guard let encoder = try? await AutoDBManager.shared.getEncoder(TableType.self, typeID) else {
@@ -140,7 +140,7 @@ public extension Model {
 		
 		// don't let two threads create the same object at the same time.
 		// reuse an ambient transaction token so creation inside transactions can re-enter (an explicit token wins)
-		let semToken = token ?? SemaphoreToken.current ?? AutoId.generateId()
+		let semToken = SemaphoreToken.current ?? AutoId.generateId()
 		await encoder.semaphore.wait(token: semToken)
 		defer { Task { await encoder.semaphore.signal(token: semToken) } }
 		
@@ -149,7 +149,7 @@ public extension Model {
 				return item
 			} else {
 				do {
-					return try await fetchId(token: semToken, id, typeID)
+					return try await fetchId(id, typeID)
 				} catch {
 					//print("error fetching id: \(error)")
 				}
@@ -159,7 +159,7 @@ public extension Model {
 		// no id or not in db, create a new object.
 		// note: an explicitly passed token doubles as the default id (legacy behavior), but an ambient token must not - every object created inside one transaction needs a unique id.
 		var value = TableType()
-		value.id = id ?? token ?? AutoId.generateId()
+		value.id = id ?? AutoId.generateId()
 		let item = Self(value)
 		
 		// set in cache so it won't be created twice
@@ -204,9 +204,7 @@ public extension Model {
 				}
 			}
 			let opt = Optimizations(relationPaths: relationPaths)
-			Task(priority: .userInitiated) {
-				await AutoDBManager.shared.setOptimization(self, opt)
-			}
+			AutoDBManager.shared.setOptimization(self, opt)
 		}
 		
 		setOwnerOnInnerRelations()
@@ -230,9 +228,7 @@ public extension Model {
 				}
 			}
 			let opt = Optimizations(innerRelations: innerRelations)
-			Task(priority: .userInitiated) {
-				await AutoDBManager.shared.setOptimization(self, opt)
-			}
+			AutoDBManager.shared.setOptimization(self, opt)
 		}
 	}
 	
@@ -259,26 +255,26 @@ public extension Model {
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// The transaction token is carried as an ambient task-local for the duration of the closure, so all db-access inside re-enters the lock automatically - no need to forward the token.
 	/// Passing the token explicitly is still supported and always wins over the ambient one. Note: Task.detached inside the closure does not inherit the token and waits for the transaction (by design).
-	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
+	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database) async throws -> R)) async throws -> R {
 		try await db().transaction(action)
 	}
 	
 	// MARK: - fetch shortcuts
 	
-	static func fetchId(token: AutoId? = nil, _ id: AutoId, _ typeID: ObjectIdentifier? = nil) async throws -> Self {
+	static func fetchId(_ id: AutoId, _ typeID: ObjectIdentifier? = nil) async throws -> Self {
 		
-		try await AutoDBManager.shared.fetchId(token: token, id, typeID)
+		try await AutoDBManager.shared.fetchId(id, typeID)
 	}
 	
-	static func fetchIds(token: AutoId? = nil, _ ids: [AutoId], _ identifier: ObjectIdentifier? = nil) async throws -> [Self] where Self: AnyObject {
+	static func fetchIds(_ ids: [AutoId], _ identifier: ObjectIdentifier? = nil) async throws -> [Self] where Self: AnyObject {
 		if ids.isEmpty {
 			return []
 		}
-		return try await AutoDBManager.shared.fetchIds(token: token, ids, identifier)
+		return try await AutoDBManager.shared.fetchIds(ids, identifier)
 	}
 	
-	static func fetchQuery(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Self] where Self: AnyObject {
-		try await AutoDBManager.shared.fetchQuery(token: token, query, arguments: arguments, sqlArguments: sqlArguments)
+	static func fetchQuery(_ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Self] where Self: AnyObject {
+		try await AutoDBManager.shared.fetchQuery(query, arguments: arguments, sqlArguments: sqlArguments)
 	}
 	
 	/// Tell the manager to save at a later time
@@ -317,69 +313,69 @@ public extension Model {
 	// MARK: - db queries
 	
 	@discardableResult
-	static func query(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Row] {
-		try await AutoDBManager.shared.query(token: token, TableType.self, query, arguments)
+	static func query(_ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Row] {
+		try await AutoDBManager.shared.query(TableType.self, query, arguments)
 	}
 	
 	// this cannot have the same signature
 	@discardableResult
-	static func query(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
-		try await AutoDBManager.shared.query(token: token, TableType.self, query, sqlArguments: sqlArguments)
+	static func query(_ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
+		try await AutoDBManager.shared.query(TableType.self, query, sqlArguments: sqlArguments)
 	}
 	
 	/// Execute a query without returning any rows, like INSERT or UPDATE.
-	static func execute(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws {
-		try await AutoDBManager.shared.execute(token: token, TableType.self, query, arguments)
+	static func execute(_ query: String = "", _ arguments: [Sendable]? = nil) async throws {
+		try await AutoDBManager.shared.execute(TableType.self, query, arguments)
 	}
 	
 	/// Execute a query without returning any rows, like INSERT or UPDATE.
-	static func execute(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws {
-		try await AutoDBManager.shared.execute(token: token, TableType.self, query, sqlArguments: sqlArguments)
+	static func execute(_ query: String = "", sqlArguments: [SQLValue]? = nil) async throws {
+		try await AutoDBManager.shared.execute(TableType.self, query, sqlArguments: sqlArguments)
 	}
 	
 	/// Execute a query without returning any rows, like INSERT or UPDATE. Returns the amount of affected rows. Since Swift 6 has a bug with @discardableResult we need to have two versions of this method.
-	static func executeAffectedRows(token: AutoId? = nil, _ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> Int {
-		return try await AutoDBManager.shared.execute(token: token, TableType.self, query, sqlArguments: sqlArguments)
+	static func executeAffectedRows(_ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> Int {
+		return try await AutoDBManager.shared.execute(TableType.self, query, sqlArguments: sqlArguments)
 	}
 	
 	/// A non-throwable query, returns nil instead of throwing
 	@discardableResult
-	static func queryNT(token: AutoId? = nil, _ query: String = "", arguments: [Sendable]? = nil) async -> [Row]? {
-		try? await AutoDBManager.shared.query(token: token, TableType.self, query, arguments)
+	static func queryNT(_ query: String = "", arguments: [Sendable]? = nil) async -> [Row]? {
+		try? await AutoDBManager.shared.query(TableType.self, query, arguments)
 	}
 	
 	// MARK: - common queries
 	
 	/// return the first value of the first row of the result,
 	/// throws fetchError if the value is nil
-	static func valueQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> Val {
-		if let value: Val = try await AutoDBManager.shared.valueQuery(token: token, TableType.self, query, arguments) {
+	static func valueQuery<Val: SQLColumnWrappable>(_ query: String = "", _ arguments: [Sendable]? = nil) async throws -> Val {
+		if let value: Val = try await AutoDBManager.shared.valueQuery(TableType.self, query, arguments) {
 			return value
 		}
 		throw AutoError.fetchError
 	}
 	
 	///return an array with all values in the result for a (the first) column.
-	static func groupConcatQuery<Val: SQLColumnWrappable>(token: AutoId? = nil, _ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
-		try await AutoDBManager.shared.groupConcatQuery(token: token, TableType.self, query, arguments)
+	static func groupConcatQuery<Val: SQLColumnWrappable>(_ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
+		try await AutoDBManager.shared.groupConcatQuery(TableType.self, query, arguments)
 	}
 	
 	// MARK: - saving
 	
 	/// When you don't need to wait for the save procedure
-	func save(token: AutoId? = nil) {
+	func save() {
 		Task.detached {
-			try? await self.save(token: token)
+			try? await self.save()
 		}
 	}
 	
 	/// Tell the manager to save this object
-	func save(token: AutoId? = nil) async throws {
-		try await [self].save(token: token)
+	func save() async throws {
+		try await [self].save()
 	}
 	
-	static func saveChanges(token: AutoId? = nil) async throws {
-		try await AutoDBManager.shared.saveChanges(token: token, Self.self)
+	static func saveChanges() async throws {
+		try await AutoDBManager.shared.saveChanges(Self.self)
 	}
 	
 	static func saveChangesLater() {
@@ -388,19 +384,19 @@ public extension Model {
 		}
 	}
 	
-	static func saveChangesDetached(token: AutoId? = nil) {
+	static func saveChangesDetached() {
 		Task.detached {
-			try? await AutoDBManager.shared.saveChanges(token: token, Self.self)
+			try? await AutoDBManager.shared.saveChanges(Self.self)
 		}
 	}
 	
-	static func saveAllChanges(token: AutoId? = nil) async throws {
-		try await AutoDBManager.shared.saveAllChanges(token: token)
+	static func saveAllChanges() async throws {
+		try await AutoDBManager.shared.saveAllChanges()
 	}
 	
-	static func saveAllChangesDetacted(token: AutoId? = nil) {
+	static func saveAllChangesDetacted() {
 		Task.detached {
-			try? await AutoDBManager.shared.saveAllChanges(token: token)
+			try? await AutoDBManager.shared.saveAllChanges()
 		}
 	}
 	
@@ -408,7 +404,7 @@ public extension Model {
 	static func didSave(_ objects: [Self]) async throws {}
 	
 	/// All save functions ends up here, where we encode the objects to SQL queries, store them, remove from isChanged and call did/will save.
-	static func saveList(token: AutoId? = nil, _ objects: [Self]) async throws {
+	static func saveList(_ objects: [Self]) async throws {
 		guard objects.isEmpty == false else { return }
 		let list = objects.map(\.value)
 		
@@ -418,13 +414,13 @@ public extension Model {
 		
 		// note that we do these in two steps, since creating objects may fail, and we don't want to save the updated objects twice.
 		if updated.isEmpty == false {
-			try await TableType.saveList(token: token, updated, onlyUpdated: true)
+			try await TableType.saveList(updated, onlyUpdated: true)
 			//remove all changed objects
 			await AutoDBManager.shared.removeFromChanged(updated.map(\.id), ObjectIdentifier(self))
 		}
 		
 		if created.isEmpty == false {
-			try await TableType.saveList(token: token, created, onlyUpdated: false)
+			try await TableType.saveList(created, onlyUpdated: false)
 			//remove all changed objects
 			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(self))
 		}
@@ -446,21 +442,21 @@ public extension Model {
 	}
 	
 	/// Synchronous delete, spawns deletion and ignores errors
-	func delete(token: AutoId? = nil) {
+	func delete() {
 		Task {
 			// don't inherit an ambient transaction token - a fire-and-forget delete should wait for the transaction, not race into it. An explicit token still wins.
 			try? await SemaphoreToken.detached {
-				try await delete(token: token)
+				try await delete()
 			}
 		}
 	}
 	
-	func delete(token: AutoId? = nil) async throws {
-		try await Self.deleteIds(token: token, [id])
+	func delete() async throws {
+		try await Self.deleteIds([id])
 	}
 	
-	static func deleteIds(token: AutoId? = nil, _ ids: [AutoId]) async throws {
-		try await AutoDBManager.shared.delete(token: token, ids, ObjectIdentifier(TableType.self))
+	static func deleteIds(_ ids: [AutoId]) async throws {
+		try await AutoDBManager.shared.delete(ids, ObjectIdentifier(TableType.self))
 	}
 	
 	/// delete when calling saveChanges, or after x seconds
@@ -484,25 +480,25 @@ public extension Model {
 public extension Collection where Element: Model {
 	
 	/// Shorthand to saveList() - When you don't need to wait for the save procedure
-	func save(token: AutoId? = nil) where Self: Sendable {
+	func save() where Self: Sendable {
 		Task.detached {
-			try? await self.save(token: token)
+			try? await self.save()
 		}
 	}
 	
 	/// Shorthand to saveList()
-	func save(token: AutoId? = nil) async throws {
+	func save() async throws {
 		// Do some compiler-type magic to be allowed to call...
 		if let list = (self as? [Self.Element]) ?? (Array(self) as? [Self.Element]) {
-			try await Element.saveList(token: token, list)
+			try await Element.saveList(list)
 		} else {
 			throw AutoError.missingSetup
 		}
 	}
 	
-	func delete(token: AutoId? = nil) async throws {
+	func delete() async throws {
 		let ids = self.map(\.id)
-		try await Element.deleteIds(token: token, ids)
+		try await Element.deleteIds(ids)
 	}
 	
 	/// Convert an array with AutoModels to a dictionary

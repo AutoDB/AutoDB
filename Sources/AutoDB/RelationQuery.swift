@@ -193,7 +193,7 @@ protocol ObserverSubject {
 			let iterator = listener.makeAsyncIterator()
 			listenerTask = Task { [weak self] in
 				let iterator = iterator
-
+				
 				// long-lived listener: scrub any inherited transaction token, it would otherwise be pinned (stale) for this object's whole lifetime
 				await SemaphoreToken.detached {
 					while let operation = await iterator.next() {
@@ -236,7 +236,7 @@ protocol ObserverSubject {
 		}
 		
 		private func fetchWindow(limit: Int, offset: Int) async throws -> [AutoType] {
-			try await AutoType.fetchQuery(token: nil, String(format: query, arguments: [limit, offset]), arguments, sqlArguments: nil)
+			try await AutoType.fetchQuery(String(format: query, arguments: [limit, offset]), arguments, sqlArguments: nil)
 		}
 		
 		@discardableResult

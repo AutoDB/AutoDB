@@ -16,7 +16,7 @@ struct MigFirst: Table {
 
 struct MigIndex: Table {
 	var id: AutoId = 1
-	var toInt = 1	// a type converted from String to Int
+	var toInt = 1  // a type converted from String to Int
 	var plain = "plain"
 	
 	static var uniqueIndices: [[String]] { [["toInt"]] }
@@ -24,32 +24,32 @@ struct MigIndex: Table {
 	
 	// create table with an extra column
 	static var createTableSQL: String {
-  	"""
-  	CREATE TABLE IF NOT EXISTS "MigIndex" (
-  	 `id` INTEGER NOT NULL DEFAULT 1,
-  	 `plain` TEXT NOT NULL DEFAULT 'plain',
-  	 `toInt` INTEGER NOT NULL DEFAULT 67,
-  	 PRIMARY KEY (`id`));
-  	"""
+		"""
+		CREATE TABLE IF NOT EXISTS "MigIndex" (
+		 `id` INTEGER NOT NULL DEFAULT 1,
+		 `plain` TEXT NOT NULL DEFAULT 'plain',
+		 `toInt` INTEGER NOT NULL DEFAULT 67,
+		 PRIMARY KEY (`id`));
+		"""
 	}
 }
 
 struct MigChangedIndex: Table {
 	static let tableName = "MigChangedIndex"
-
+	
 	var id: AutoId = 1
 	var toInt = 1
 	var plain = "plain"
-
+	
 	static var uniqueIndices: [[String]] { [["toInt"]] }
 	static var indices: [[String]] { [["plain", "toInt"]] }
 }
 
 struct Mig: Table {
 	var id: AutoId = 1
-	var toInt = 1	// a type converted from String to Int
+	var toInt = 1  // a type converted from String to Int
 	var plain = "plain"
-
+	
 	static var uniqueIndices: [[String]] { [["toInt"]] }
 	static var indices: [[String]] { [["plain"]] }
 	
@@ -64,8 +64,7 @@ struct Mig: Table {
 		"""
 	}
 	
-	
-	static func migration(_ token: AutoId?, _ db: isolated Database, _ state: MigrationState) async {
+	static func migration(_ db: isolated Database, _ state: MigrationState) async {
 		
 		if case let .changes(oldTableName, columns) = state {
 			do {
@@ -75,16 +74,17 @@ struct Mig: Table {
 					if changedColumn.name == "plain_old" {
 						print("renaming plain_old to plain")
 						// we can't fetch OLD values with out new data structure, we have to use plain SQL-methods, but since we only want the id and the changed columns this is fairly straight forward.
-						let oldValues = try await db.query(token: token, "SELECT id, plain_old FROM `\(oldTableName)`")
+						let oldValues = try await db.query("SELECT id, plain_old FROM `\(oldTableName)`")
 						for oldValue in oldValues {
 							guard let old = oldValue["plain_old"]?.stringValue,
-								  let id = oldValue["id"]?.uint64Value else {
+								let id = oldValue["id"]?.uint64Value
+							else {
 								print("failed db!")
 								// throw some error
 								throw Database.Error.queryError(query: "SELECT id, plain_old FROM `\(oldTableName)`", description: "This can't happen, but somehow plain_old is null")
 							}
 							// normally you would also do some sort of type-conversion here, otherwise just renaming is unnecessary and moving data from old table to new is automatic (if names are the same).
-							try await db.execute(token: token, "UPDATE Mig SET plain = ? WHERE id = ?", [old, id])
+							try await db.execute("UPDATE Mig SET plain = ? WHERE id = ?", [old, id])
 							
 							// if only renaming, you would rather do something like this instead, keeping data inside SQLite makes things much faster:
 							// let query = "UPDATE Mig as tb1 SET plain = (SELECT plain_old FROM `\(oldTableName)` as tb2 WHERE tb1.id = tb2.id) WHERE EXISTS (SELECT plain_old FROM `\(oldTableName)` as tb2 WHERE tb1.id = tb2.id);"
@@ -92,7 +92,7 @@ struct Mig: Table {
 						
 						// note that columns with the same name is moved, but we need to do type-conversions (moving from Int to String is automatic, but the other way fails unless the String is "67" or similar).
 						// Similarly, enums backed by plain numbers or strings can be auto-converted, Structs are also fine if keys have been removed, only optionals been added and nothing renamed.
-						let newValues = try await db.query(token: token, "SELECT id, toInt FROM Mig")
+						let newValues = try await db.query("SELECT id, toInt FROM Mig")
 						for newValue in newValues {
 							
 							guard let id = newValue["id"]?.uint64Value else {
@@ -106,12 +106,11 @@ struct Mig: Table {
 							let old = newValue["toInt"]?.intValue ?? 67
 							
 							// normally you would also do some sort of type-conversion here, otherwise just renaming is unnecessary and moving data from old table to new is automatic (if names are the same).
-							try await db.execute(token: token, "UPDATE Mig SET toInt = ? WHERE id = ?", [old, id])
+							try await db.execute("UPDATE Mig SET toInt = ? WHERE id = ?", [old, id])
 						}
 					}
 				}
-			}
-			catch {
+			} catch {
 				print("failed converting column: \(error)")
 			}
 		}
@@ -143,7 +142,6 @@ class MigrationTests {
 		#expect(first?.toInt == 67)
 	}
 	
-	
 	// also test changing index!
 	// 1. changedIndices does not work: it only addds, does not drop old.
 	// let changedIndices = Set(indicesInDB).subtracting(targetIndices)
@@ -157,30 +155,31 @@ class MigrationTests {
 		print("now:")
 		let first = try await MigIndex.fetchId(1)
 		#expect(first.toInt == 2)
-
+		
 		let indices = try await db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'MigIndex'")
 			.compactMap { $0["name"]?.stringValue }
 		#expect(indices.contains("removeThisIndex") == false)
 		#expect(indices.contains("MigIndex_plain_index"))
 		#expect(indices.contains("MigIndex_toInt_index"))
 	}
-
+	
 	@Test func rebuildChangedIndexes() async throws {
 		let db = try await MigFirst.db()
 		_ = try? await db.execute("DROP TABLE MigChangedIndex")
-		try await db.execute("""
-		CREATE TABLE IF NOT EXISTS "MigChangedIndex" (
-		 `id` INTEGER NOT NULL DEFAULT 1,
-		 `plain` TEXT NOT NULL DEFAULT 'plain',
-		 `toInt` INTEGER NOT NULL DEFAULT 67,
-		 PRIMARY KEY (`id`));
-		""")
+		try await db.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS "MigChangedIndex" (
+			 `id` INTEGER NOT NULL DEFAULT 1,
+			 `plain` TEXT NOT NULL DEFAULT 'plain',
+			 `toInt` INTEGER NOT NULL DEFAULT 67,
+			 PRIMARY KEY (`id`));
+			""")
 		try await db.execute("INSERT INTO MigChangedIndex (id, plain, toInt) VALUES (1, 'some test value', 2)")
 		try await db.execute("CREATE INDEX MigChangedIndex_plain_index ON MigChangedIndex (plain)")
-
+		
 		let first = try await MigChangedIndex.fetchId(1)
 		#expect(first.toInt == 2)
-
+		
 		let indices = try await db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'MigChangedIndex'")
 			.compactMap { $0["name"]?.stringValue }
 		#expect(indices.contains("MigChangedIndex_plain_index") == false)

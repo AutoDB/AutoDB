@@ -62,7 +62,7 @@ public final class OneRelation<AutoType: TableModel>: Codable, RelationToOne, @u
 		if let _object {
 			return _object
 		}
-		_object = try await AutoType.fetchId(token: nil, id, nil)
+		_object = try await AutoType.fetchId(id, nil)
 		
 		if let _object {
 			return _object
@@ -101,7 +101,7 @@ public final class OneRelation<AutoType: TableModel>: Codable, RelationToOne, @u
 		let ids: [AutoId] = list.map(\.id)
 		
 		var fail = false
-		let objects: [AutoId: AutoType] = try await autoType.fetchIds(token: nil, ids, typeID).dictionary()
+		let objects: [AutoId: AutoType] = try await autoType.fetchIds(ids, typeID).dictionary()
 		for relation in list {
 			if let obj = objects[relation.id] {
 				relation._object = obj

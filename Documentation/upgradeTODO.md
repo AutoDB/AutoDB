@@ -117,12 +117,39 @@ unchanged.** Release-note the one behavior change that cannot be scrubbed librar
 `Task {}` spawned inside a transaction closure now inherits the token (previously its nil-token queries
 blocked until commit). Apps can restore the old behavior with `SemaphoreToken.detached { }`.
 
-## Step 2 — deprecate the token parameters (next major)
+Users can strip their explicit token call sites already in step 1 — a regex find/replace recipe with the
+exceptions to watch for (self-generated tokens, `create(token:)`-as-id, tokens handed to detached tasks)
+is in `Documentation.md` under "Removing explicit tokens from your code". Doing this early makes their
+codebases ready for the step-2 deprecations with zero further edits.
 
-Only after the step-1 gate passes.
+## Step 2 — deprecate the token parameters ✅ (shipped early - few users have transactions)
 
-- Deprecate every `token:` parameter (Model, Table, TableModel, AutoDBManager, Database) — the task-local
-  becomes the only mechanism; internals read `SemaphoreToken.current` at the gates.
-- Drop the `token` parameter from the `transaction` closure signature and from the
-  `Table.migration(_:_:_:)` protocol requirement (source-breaking for implementors — release notes + fix-it).
-- Remove the deprecated parameters entirely in the major after that.
+- Every public `token:`-taking function is split: a clean token-less implementation plus a deprecated
+  overload (all collected in `Sources/AutoDB/Deprecated.swift`) that binds the token via
+  `SemaphoreToken.$current.withValue` and forwards. Calls without tokens get no warning; calls passing
+  tokens get a deprecation warning pointing at the regex recipe in Documentation.md.
+- Internals no longer thread tokens at all — the gates (`Database.query/execute`, `Model.create`,
+  `Table.saveList`, `ManyRelation`) read `SemaphoreToken.current` directly.
+- `transaction` closures are now `(db)` instead of `(db, token)`; the old closure shape is a deprecated
+  overload (closure arity disambiguates).
+- Source-breaking (accepted): `Table.migration(_:_:)` dropped its token parameter (a deprecated protocol
+  requirement can't warn implementors, so it was removed outright), and `Table.create(_:)` protocol
+  requirement lost its token. `create(token: t)` with no id keeps assigning `id == t` via the deprecated
+  wrapper only — the clean `create()` always generates a fresh id.
+- Also fixed while testing: FTS text-callback registration is now order-independent (an owner-provided
+  `FTSCallbackOwner` callback can no longer be overwritten by the generic column-reading fallback, and
+  callbacks registered before FTS setup finishes are stashed and applied); `populateIndex` no longer
+  inserts NULL rows when the callback returns nothing (a NULL id poisoned the `NOT IN` repopulation query
+  permanently), and purges any existing NULL rows.
+- Concurrency fixes (crash in the wild: dictionary corruption during object creation): the manager's
+  `Optimizations` cache was a `nonisolated(unsafe)` dictionary read lock-free from any thread while the
+  actor wrote it (and its "lock" was a freshly created local Semaphore, guarding nothing) - it is now a
+  `Locked` value; `setOptimization` also finally persists `innerRelations`, so the reflection result is
+  actually cached. Same treatment for `AutoDBManager.appDefaults` (nonisolated setter vs actor reader).
+  `Database`'s observer dictionaries dropped their `nonisolated(unsafe)` - all access already went through
+  the actor, now compiler-enforced. The new `Utilities/Locked.swift` (tiered: Mutex → os_unfair_lock /
+  pthread_mutex → NSLock) is shared infrastructure; ModelStorage is refactored on top of it.
+
+## Step 3 — remove the deprecated variants (next major)
+
+- Delete `Sources/AutoDB/Deprecated.swift`.

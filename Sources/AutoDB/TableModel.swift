@@ -14,20 +14,20 @@ public protocol TableModel: Sendable, Hashable {
 	static func tableChangeObserver() async throws -> TableChangeObserver
 	
 	/// Fetch one object, throw missingId if no object was found
-	static func fetchId(token: AutoId?, _ id: AutoId, _ identifier: ObjectIdentifier?) async throws -> Self
-	static func fetchIds(token: AutoId?, _ ids: [AutoId], _ identifier: ObjectIdentifier?) async throws -> [Self]
+	static func fetchId(_ id: AutoId, _ identifier: ObjectIdentifier?) async throws -> Self
+	static func fetchIds(_ ids: [AutoId], _ identifier: ObjectIdentifier?) async throws -> [Self]
 	
 	/// Fetch all objects matching this query.
-	static func fetchQuery(token: AutoId?, _ query: String, _ arguments: [Sendable]?, sqlArguments: [SQLValue]?) async throws -> [Self]
+	static func fetchQuery(_ query: String, _ arguments: [Sendable]?, sqlArguments: [SQLValue]?) async throws -> [Self]
 	
 	/// a general query with arguments of unknown type
 	@discardableResult
-	static func query(token: AutoId?, _ query: String, _ arguments: [Sendable]?) async throws -> [Row]
+	static func query(_ query: String, _ arguments: [Sendable]?) async throws -> [Row]
 	
 	// this cannot have the same signature
 	/// a general query with arguments of converted types
 	@discardableResult
-	static func query(token: AutoId?, _ query: String, sqlArguments: [SQLValue]?) async throws -> [Row]
+	static func query(_ query: String, sqlArguments: [SQLValue]?) async throws -> [Row]
 	
 	// MARK: - saving
 	

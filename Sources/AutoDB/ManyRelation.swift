@@ -113,9 +113,9 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 	
 	/// Only perform initial fetch, use when first loading or fetching from DB - to never fetch more than needed but always have some data
 	@discardableResult
-	public func firstFetch(_ token: AutoId? = nil) async throws -> [AutoType] {
-		// explicit token wins, else fall back to the ambient transaction token
-		let token = token ?? SemaphoreToken.current
+	public func firstFetch() async throws -> [AutoType] {
+		// the ambient transaction token, if we are inside a transaction (also bound by fetch() for re-entry)
+		let token = SemaphoreToken.current
 		await semaphore.wait(token: token)
 		defer { Task { await semaphore.signal(token: token) } }
 		
@@ -125,7 +125,7 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		
 		let end = min(ids.count, initial)
 		let idsToFetch = Array(ids[0..<end])
-		_items = try await AutoType.fetchIds(token: token, idsToFetch, nil).sortById(idsToFetch)
+		_items = try await AutoType.fetchIds(idsToFetch, nil).sortById(idsToFetch)
 		hasMore = _items?.count == initial  // make sure to compare the actually fetched items in case there are missmatches
 		
 		return items
@@ -140,7 +140,10 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		defer { Task { await semaphore.signal(token: token) } }
 		
 		if _items == nil {
-			return try await firstFetch(token)
+			// bind the token so firstFetch() can re-enter our semaphore
+			return try await SemaphoreToken.$current.withValue(token) {
+				try await firstFetch()
+			}
 		} else if !hasMore {
 			return items
 		}
@@ -150,7 +153,7 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		let start = _items?.count ?? 0
 		let end = min(ids.count, start + fetchStep)
 		let idsToFetch = Array(ids[start..<end])
-		let fetched = try await AutoType.fetchIds(token: token, idsToFetch, nil).sortById(idsToFetch)
+		let fetched = try await AutoType.fetchIds(idsToFetch, nil).sortById(idsToFetch)
 		hasMore = ids.count > end
 		_items?.append(contentsOf: fetched)
 		

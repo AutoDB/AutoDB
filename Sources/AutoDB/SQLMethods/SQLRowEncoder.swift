@@ -96,8 +96,8 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 		values.removeAll()
 	}
 	
-	/// Insert encoded values into DB. The dbSemaphore re-entry token to allow us to call db-methods in a recursive manner.
-	func commit(_ dbSemaphoreToken: AutoId? = nil, update: Bool) async throws {
+	/// Insert encoded values into DB. Inside transactions the ambient SemaphoreToken lets us call db-methods in a recursive manner.
+	func commit(update: Bool) async throws {
 		try commitRow()
 		
 		// if we have too many objects must split.
@@ -108,7 +108,7 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 			let args = allValues[0..<slice]
 			allValues.removeFirst(slice)
 			let objectCount = slice / table.columns.count
-			try await database.query(token: dbSemaphoreToken, queryString(objectCount, update), Array(args))
+			try await database.query(queryString(objectCount, update), Array(args))
 		}
 	}
 	

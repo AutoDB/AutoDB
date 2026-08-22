@@ -22,21 +22,21 @@ class TransactionTests: @unchecked Sendable {
 	@Test func testTransaction() async throws {
 		
 		try await TransClass.db().setDebug()
-		try? await TransClass.transaction { db, token in
+		try? await TransClass.transaction { db in
 			print("in transaction")
 			
-			let first = await TransClass.create(token: token, 1)
+			let first = await TransClass.create(1)
 			first.integer = 2
-			try await first.save(token: token)
+			try await first.save()
 			
 			#expect(first.integer == 2)
 			Task.detached {
 				do {
 					let db = try await TransClass.db()
 					self.threadBlocker = 1
-					try await db.transaction({ db, token in
+					try await db.transaction({ db in
 						// first transaction is now gone.
-						let found = try? await TransClass.fetchId(token: token, 1)
+						let found = try? await TransClass.fetchId(1)
 						#expect(found == nil)
 						self.threadBlocker = 2
 					})
@@ -50,7 +50,7 @@ class TransactionTests: @unchecked Sendable {
 				try await Task.sleep(for: .milliseconds(4))
 			}
 			
-			// the detached Task  
+			// the detached Task
 			throw TestError.transaction
 		}
 		print("outside transaction")
@@ -84,11 +84,11 @@ class TransactionTests: @unchecked Sendable {
 		let db = try await TransClass.db()
 		await db.semaphoreWatchdog(1)
 		do {
-			try await db.transaction { db, token in
+			try await db.transaction { db in
 				print("will deadlock now:")
 				let detached = Task.detached {
 					let db = try await TransClass.db()
-					try await db.transaction { db, token in
+					try await db.transaction { db in
 						print("this will never happen")
 					}
 				}
@@ -97,7 +97,7 @@ class TransactionTests: @unchecked Sendable {
 			}
 		} catch {
 			print("caught error: \(error)")
-
+			
 		}
 	}
 }
