@@ -138,17 +138,18 @@ public extension Model {
 			fatalError("Could not setup DB")
 		}
 		
-		// don't let two threads create the same object at the same time
-		let token = token ?? AutoId.generateId()
-		await encoder.semaphore.wait(token: token)
-		defer { Task { await encoder.semaphore.signal(token: token) } }
+		// don't let two threads create the same object at the same time.
+		// reuse an ambient transaction token so creation inside transactions can re-enter (an explicit token wins)
+		let semToken = token ?? SemaphoreToken.current ?? AutoId.generateId()
+		await encoder.semaphore.wait(token: semToken)
+		defer { Task { await encoder.semaphore.signal(token: semToken) } }
 		
 		if let id {
 			if let item = await AutoDBManager.shared.cached(Self.self, id, typeID) {
 				return item
 			} else {
 				do {
-					return try await fetchId(token: token, id, typeID)
+					return try await fetchId(token: semToken, id, typeID)
 				} catch {
 					//print("error fetching id: \(error)")
 				}
@@ -156,8 +157,9 @@ public extension Model {
 		}
 		
 		// no id or not in db, create a new object.
+		// note: an explicitly passed token doubles as the default id (legacy behavior), but an ambient token must not - every object created inside one transaction needs a unique id.
 		var value = TableType()
-		value.id = id ?? token
+		value.id = id ?? token ?? AutoId.generateId()
 		let item = Self(value)
 		
 		// set in cache so it won't be created twice
@@ -255,8 +257,8 @@ public extension Model {
 	}
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
-	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
-	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are inside the transaction / holding the lock.
+	/// The transaction token is carried as an ambient task-local for the duration of the closure, so all db-access inside re-enters the lock automatically - no need to forward the token.
+	/// Passing the token explicitly is still supported and always wins over the ambient one. Note: Task.detached inside the closure does not inherit the token and waits for the transaction (by design).
 	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
 		try await db().transaction(action)
 	}
@@ -446,7 +448,10 @@ public extension Model {
 	/// Synchronous delete, spawns deletion and ignores errors
 	func delete(token: AutoId? = nil) {
 		Task {
-			try? await delete(token: token)
+			// don't inherit an ambient transaction token - a fire-and-forget delete should wait for the transaction, not race into it. An explicit token still wins.
+			try? await SemaphoreToken.detached {
+				try await delete(token: token)
+			}
 		}
 	}
 	

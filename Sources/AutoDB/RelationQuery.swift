@@ -72,10 +72,13 @@ protocol ObserverSubject {
 			
 			self.owner = owner
 			Task {
-				await ensureListening()
-				if performInitialFetch {
-					// Imagine a thousend objects loaded in a list, don't fetch anything here unless you know what you are doing.
-					_ = try? await self.fetchItems()
+				// don't inherit a transaction token (we may be created while decoding inside a transaction) - the fetch should wait for the transaction, not join it
+				await SemaphoreToken.detached {
+					await ensureListening()
+					if performInitialFetch {
+						// Imagine a thousend objects loaded in a list, don't fetch anything here unless you know what you are doing.
+						_ = try? await self.fetchItems()
+					}
 				}
 			}
 		}
@@ -91,7 +94,10 @@ protocol ObserverSubject {
 				if let _items { return _items }
 				_items = []
 				Task {
-					_ = try? await fetchItems()
+					// don't inherit a transaction token from whoever read this property - the fetch should wait for the transaction, not join it
+					await SemaphoreToken.detached {
+						_ = try? await fetchItems()
+					}
 				}
 				return []
 			}
@@ -187,10 +193,13 @@ protocol ObserverSubject {
 			let iterator = listener.makeAsyncIterator()
 			listenerTask = Task { [weak self] in
 				let iterator = iterator
-				
-				while let operation = await iterator.next() {
-					// must be weak inside the listener
-					try? await self?.listenerCallback(operation)
+
+				// long-lived listener: scrub any inherited transaction token, it would otherwise be pinned (stale) for this object's whole lifetime
+				await SemaphoreToken.detached {
+					while let operation = await iterator.next() {
+						// must be weak inside the listener
+						try? await self?.listenerCallback(operation)
+					}
 				}
 			}
 		}

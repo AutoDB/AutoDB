@@ -77,6 +77,8 @@ class TransactionTests: @unchecked Sendable {
 	}
 	
 	// This is an example of how the watchdog works, it can kill the app if there is a deadlock - but can only know that based on time. So be certain you have no tasks running longer than this!
+	// Note: a nested transaction no longer deadlocks by itself (it reuses the ambient SemaphoreToken task-local, see TaskLocalTokenTests),
+	// so to demonstrate a real deadlock we must *wait* for detached work - which doesn't inherit the token and therefore waits for us.
 	//@Test
 	func deadlockSemaphore() async throws {
 		let db = try await TransClass.db()
@@ -84,13 +86,18 @@ class TransactionTests: @unchecked Sendable {
 		do {
 			try await db.transaction { db, token in
 				print("will deadlock now:")
-				try await db.transaction { db, token in
-					print("this will never happen")
+				let detached = Task.detached {
+					let db = try await TransClass.db()
+					try await db.transaction { db, token in
+						print("this will never happen")
+					}
 				}
+				// awaiting detached work that itself waits for our transaction -> deadlock
+				try await detached.value
 			}
 		} catch {
 			print("caught error: \(error)")
-			
+
 		}
 	}
 }

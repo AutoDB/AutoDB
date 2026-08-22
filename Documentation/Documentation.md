@@ -190,10 +190,10 @@ The 1.0 contract for FTS is:
 Transactions are supported, wrap your code in a closure where no calls may throw errors. If it does, DB-state is rolled back to its initial state. Like this:
 
 ```
-try? await TransClass.transaction { _, token in
-	let first = await TransClass.create(token: token, 1)
+try? await TransClass.transaction { _, _ in
+	let first = await TransClass.create(1)
 	first.integer = 2
-	try await first.save(token: token)
+	try await first.save()
 	
 	#expect(first.integer == 2)
 	
@@ -205,11 +205,17 @@ try? await TransClass.transaction { _, token in
 // All other calls to db will await until this point where the transaction is done.
 ```
 
-The transaction `token` is part of the current public contract. Pass it through all AutoDB calls made inside the transaction closure to avoid deadlocks.
+The transaction token is carried automatically for the duration of the closure (as a task-local, `SemaphoreToken.current`), so all AutoDB calls made inside the transaction - directly or indirectly - re-enter the lock without deadlocking. You no longer need to forward the `token` closure parameter; passing it explicitly remains supported and always takes precedence, so existing code keeps working unchanged.
+
+Details worth knowing:
+
+- A nested `transaction` call inside the closure reuses the outer token and only nests the savepoint - rolling back the outer transaction also rolls back the inner one.
+- The token flows into `Task { }` spawned inside the closure, but intentionally **not** into `Task.detached` - detached work waits for the transaction to finish, just like before.
+- The same applies to migrations: queries inside your `migration(_:_:_:)` implementation no longer need to forward the token.
 
 ## Deadlocks with transactions
 
-Transactions can deadlock since they are guarded by semaphores. See `TransactionTests.deadlockSemaphore()` for detailed info and how to discover these. 
+Transactions are guarded by semaphores; with the ambient token the common deadlocks (forgetting to forward the token) are gone, but a deadlock is still possible if the transaction *waits* for work that itself waits for the transaction (e.g. awaiting a `Task.detached` DB call from inside the closure). See `TransactionTests.deadlockSemaphore()` for how to discover these with the watchdog. 
 
 ## Write to DB in bulk
 

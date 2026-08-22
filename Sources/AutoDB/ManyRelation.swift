@@ -103,7 +103,10 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		self.owner = owner
 		if initFetch {
 			Task {
-				try? await firstFetch()
+				// don't inherit a transaction token - the initial fetch should wait for any open transaction, not join it
+				try? await SemaphoreToken.detached {
+					try await firstFetch()
+				}
 			}
 		}
 	}
@@ -111,6 +114,8 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 	/// Only perform initial fetch, use when first loading or fetching from DB - to never fetch more than needed but always have some data
 	@discardableResult
 	public func firstFetch(_ token: AutoId? = nil) async throws -> [AutoType] {
+		// explicit token wins, else fall back to the ambient transaction token
+		let token = token ?? SemaphoreToken.current
 		await semaphore.wait(token: token)
 		defer { Task { await semaphore.signal(token: token) } }
 		
@@ -129,7 +134,8 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 	/// Continuesly fetch as long as there are more data
 	@discardableResult
 	public func fetch() async throws -> [AutoType] {
-		let token = AutoId.generateId()
+		// reuse an ambient transaction token if there is one, else use a fresh one for our own re-entry
+		let token = SemaphoreToken.current ?? AutoId.generateId()
 		await semaphore.wait(token: token)
 		defer { Task { await semaphore.signal(token: token) } }
 		

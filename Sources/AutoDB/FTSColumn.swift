@@ -120,12 +120,15 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	public init(_ column: String) {
 		self.column = column
 		Task {
-			// TODO: better handling of the setupError
-			do {
-				try await setup(TargetTableType.self)
-			} catch {
-				print("FTSColumn setup error: \(error)")
-				setupError = error
+			// don't inherit a transaction token (we may be constructed while decoding inside a transaction) - setup should wait for the transaction, not join it
+			await SemaphoreToken.detached {
+				// TODO: better handling of the setupError
+				do {
+					try await setup(TargetTableType.self)
+				} catch {
+					print("FTSColumn setup error: \(error)")
+					setupError = error
+				}
 			}
 		}
 	}

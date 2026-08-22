@@ -13,3 +13,5 @@ After editing a file run swift format, run:
 ```bash
 git diff --name-only --diff-filter=ACMR | grep '\.swift$' | xargs swift-format -i --configuration .swift-format
 ```
+
+Always use Swift testing when writing unit tests.

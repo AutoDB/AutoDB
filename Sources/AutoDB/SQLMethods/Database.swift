@@ -38,7 +38,7 @@
 //  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //  SOFTWARE.
 
-// TODO: replace token: AutoId? = nil with TaskLocal
+// Note: token: AutoId? = nil parameters are kept for compatibility; when nil the ambient SemaphoreToken task-local is used instead (bound by transaction). Step 2 (next major) deprecates the parameters, see Documentation/upgradeTODO.md.
 
 import Foundation
 #if canImport(Darwin)
@@ -128,7 +128,7 @@ public actor Database {
 	}
 	
 	/// If you never have long queries but afraid of getting deadlocks, set the watchdog to detect those. Will kill the app if transactions takes too long, so it shows up in Crashlytics or Apple's "crash" pane - then you will know.
-	/// Deadlocks can happen if you create a new transaction inside another, or call a Database's queries without the transaction's token.
+	/// Deadlocks should no longer happen inside transactions (the token is carried as a task-local), but can still be caused e.g. by Task.detached work that a transaction waits for.
 	public func semaphoreWatchdog(_ timeInterval: TimeInterval) async {
 		await semaphore.setWatchDogTimeout(timeInterval)
 	}
@@ -196,7 +196,10 @@ public actor Database {
 				}
 				let autoDB = Unmanaged<Database>.fromOpaque(ctx).takeUnretainedValue()
 				Task {
-					await autoDB.callListeners(tableNameStr, operation, rowid)
+					// the hook fires inside sqlite3_step on the transaction's task - scrub any inherited token so listener work never re-enters the transaction's lock
+					await SemaphoreToken.detached {
+						await autoDB.callListeners(tableNameStr, operation, rowid)
+					}
 				}
 				
 			}, Unmanaged<Database>.passUnretained(self).toOpaque())
@@ -373,6 +376,8 @@ public actor Database {
 	
 	@discardableResult
 	public func query(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue]?) async throws -> [Row] {
+		// explicit token wins, else fall back to the ambient transaction token
+		let token = token ?? SemaphoreToken.current
 		// only take semaphore if in transaction - other times we can run queries in parallel (as much as being an actor allows)
 		let hasSemaphore = inTransaction || token != nil
 		if hasSemaphore {
@@ -537,7 +542,9 @@ public actor Database {
 	/// Execute a query with parameters, returning amount of affected rows. Will throw an error if the query returns rows.
 	@discardableResult
 	public func execute(token: AutoId? = nil, _ query: String, sqlArguments: [SQLValue] = []) async throws -> Int {
-		
+		// explicit token wins, else fall back to the ambient transaction token
+		let token = token ?? SemaphoreToken.current
+
 		if sqlArguments.isEmpty {
 			// no arguments, just run the query
 			return try await execute(token: token, query)
@@ -572,6 +579,8 @@ public actor Database {
 	/// Execute a query with no parameters returning  amount of affected rows. Will throw an error if the query returns rows.
 	@discardableResult
 	public func execute(token: AutoId? = nil, _ query: String) async throws -> Int {
+		// explicit token wins, else fall back to the ambient transaction token
+		let token = token ?? SemaphoreToken.current
 		let hasSemaphore = inTransaction || token != nil
 		if hasSemaphore {
 			await semaphore.wait(token: token)
@@ -604,12 +613,15 @@ public actor Database {
 	}
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
-	/// ⚠️  Must use token for all db-access inside transactions, otherwise will deadlock. ⚠️
-	/// Why? Since async/await and actors does not and can not deal with threads, there is no other way of knowing if you are holding the lock. We could send around the AutoDB and only allow access when locked - but that would basically be the same thing.
+	/// The transaction token is carried as an ambient task-local (SemaphoreToken.current) for the duration of the closure,
+	/// so all db-access inside the transaction re-enters the lock automatically - no need to forward the token explicitly.
+	/// Passing the token explicitly is still supported and always wins over the ambient one.
+	/// Note: the task-local does not flow into Task.detached - detached work inside the closure waits for the transaction to finish (by design).
 	public func transaction<R: Sendable>(token: AutoId? = nil, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
 		
-		// note that we can have transactions inside transactions, as long as we reuse the token
-		let token = token ?? AutoId.generateId()
+		// note that we can have transactions inside transactions, as long as we reuse the token:
+		// explicit token wins; else reuse an ambient (outer-transaction) token; else start fresh
+		let token = token ?? SemaphoreToken.current ?? AutoId.generateId()
 		let transactionID = AutoId.generateId()
 		await semaphore.wait(token: token)
 		let nestedTransaction = inTransaction
@@ -628,14 +640,18 @@ public actor Database {
 		}
 		if isClosed { throw Error.databaseIsClosed }
 		
-		try await execute(token: token, "SAVEPOINT \"\(transactionID)\"")
-		do {
-			let result: R = try await action(self, token)
-			try await execute(token: token, "RELEASE SAVEPOINT \"\(transactionID)\"")
-			return result
-		} catch {
-			try await execute(token: token, "ROLLBACK TO SAVEPOINT \"\(transactionID)\"")
-			throw error
+		// bind the ambient token so the closure (and everything it calls) can re-enter without forwarding it.
+		// The deferred signal above captures the resolved local, so it is unaffected by this scope having exited.
+		return try await SemaphoreToken.$current.withValue(token) {
+			try await execute(token: token, "SAVEPOINT \"\(transactionID)\"")
+			do {
+				let result: R = try await action(self, token)
+				try await execute(token: token, "RELEASE SAVEPOINT \"\(transactionID)\"")
+				return result
+			} catch {
+				try await execute(token: token, "ROLLBACK TO SAVEPOINT \"\(transactionID)\"")
+				throw error
+			}
 		}
 	}
 	

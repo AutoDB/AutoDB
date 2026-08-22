@@ -704,15 +704,18 @@ extension UInt64 {
 		if deleteLaterTask != nil {
 			return
 		}
-		deleteLaterTask = Task {
-			do {
-				// TODO: Think: should we leave this to the app instead and just wait for saveAllChanges to be called?
-				try await Task.sleep(nanoseconds: .seconds(10))
-				try await saveAllChanges()
-			} catch {
-				// stopped or failing.
+		// bind nil around the Task creation - task-locals are captured when the Task is created, so this delayed save never inherits a transaction token and can't re-enter a still-open transaction's lock
+		SemaphoreToken.$current.withValue(nil) {
+			deleteLaterTask = Task {
+				do {
+					// TODO: Think: should we leave this to the app instead and just wait for saveAllChanges to be called?
+					try await Task.sleep(nanoseconds: .seconds(10))
+					try await saveAllChanges()
+				} catch {
+					// stopped or failing.
+				}
+				deleteLaterTask = nil
 			}
-			deleteLaterTask = nil
 		}
 	}
 	
@@ -781,14 +784,17 @@ extension UInt64 {
 		let typeID = ObjectIdentifier(T.self)
 		debounceTasks[typeID]?.cancel()
 		
-		debounceTasks[typeID] = Task {
-			try await Task.sleep(nanoseconds: .seconds(3))
-			debounceTasks[typeID] = nil
-			do {
-				try await saveChanges(T.self)
-			} catch {
-				print("saveChangesLater(\(classType)) error: \(error)")
-				throw error
+		// bind nil around the Task creation - task-locals are captured when the Task is created, so this delayed save never inherits a transaction token and can't re-enter a still-open transaction's lock
+		debounceTasks[typeID] = SemaphoreToken.$current.withValue(nil) {
+			Task {
+				try await Task.sleep(nanoseconds: .seconds(3))
+				debounceTasks[typeID] = nil
+				do {
+					try await saveChanges(T.self)
+				} catch {
+					print("saveChangesLater(\(classType)) error: \(error)")
+					throw error
+				}
 			}
 		}
 	}

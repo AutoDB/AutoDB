@@ -33,6 +33,7 @@ class Example {
 ```
 
  For reccurring tasks, where you need re-entry to your actor - use a token. If you own a semaphore with a token you can access the restricted area as much as you like.
+ Inside transactions the token is also carried as an ambient task-local (see SemaphoreToken) - explicit tokens win, the task-local is the fallback when nil.
  There are people who think that this can be done with a NSReccuringLock - that is not the case with async/await with actors. *usually* it will work fine but since an actor may run on different threads it may not (those locks know you own them by checking the currentThread - this is not how you do things with actors).
 
  ```
@@ -112,7 +113,7 @@ public actor Semaphore {
 			return
 		} else if counter < allowedWorkers {
 			if let token {
-				reEntryTokens[token] = reEntryTokens[token] ?? 0 + 1
+				reEntryTokens[token] = (reEntryTokens[token] ?? 0) + 1
 			}
 			counter += 1
 			return

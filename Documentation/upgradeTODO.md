@@ -80,3 +80,49 @@ Only after the step-1 gate passes.
   `withValue { $0.name = "x" }` is the recommended idiom when competing writers are possible; push it in docs.
 - `ModelStorage.mutate` detects change via `Equatable` on the Table, same cost profile as the existing
   `didSet(oldValue)` comparison.
+
+---
+
+# Upgrade plan: ambient transaction token (remove explicit token threading)
+
+## Goal
+
+~104 functions thread a `token: AutoId?` parameter so the `Semaphore` can recognize re-entrant access
+inside transactions/migrations. Replace the *need* for that with a `@TaskLocal` (`SemaphoreToken.current`):
+bound by `Database.transaction` for the duration of the closure, it flows through async calls, actor hops
+and `Task {}` — and deliberately not into `Task.detached` (detached work waits for the transaction, as before).
+
+## Step 1 — ambient fallback (current release) ✅
+
+Non-breaking. Explicit `token:` parameters stay and always win; the task-local is only the fallback when nil.
+
+- `SemaphoreToken` (`Utilities/SemaphoreToken.swift`): the task-local + `detached { }` helper that binds nil.
+- `Database.transaction` resolves `token ?? SemaphoreToken.current ?? generateId()` and binds it with
+  `withValue` around the savepoint + action. Nested nil-token transactions reuse the outer token
+  (this also fixed the latent deadlock where a migration triggered inside a transaction started a nested
+  transaction without forwarding the token).
+- Fallback resolution at the gate points only (`Database.query/execute`, `Model.create`, `Table.saveList`,
+  `ManyRelation`), resolved once into a local so the deferred `Task { signal(token:) }` releases are
+  unaffected by the withValue scope having exited. `Database.close` deliberately has NO fallback —
+  a nil-token close inside a transaction must keep waiting for it, not join it and close mid-transaction.
+- Delayed/stored/fire-and-forget Tasks (debounce saves, deleteLater, RelationQuery listener + setOwner +
+  items getter, ManyRelation.setOwner, FTSColumn.init, sync deletes, sqlite update-hook) scrub any inherited
+  token, preserving the old semantics: their queries wait for open transactions instead of joining them.
+- Fixed an operator-precedence bug in `Semaphore.wait` (`?? 0 + 1` → `(... ?? 0) + 1`), previously benign.
+- Tests: `TaskLocalTokenTests` (nil-token calls inside transactions, nested transactions, migration without
+  token, explicit-token precedence, debounce scrubbing, detached non-inheritance).
+
+**Rollout gate: do not start step 2 until downstream users are on this release and their test suites pass
+unchanged.** Release-note the one behavior change that cannot be scrubbed library-side: an app's own
+`Task {}` spawned inside a transaction closure now inherits the token (previously its nil-token queries
+blocked until commit). Apps can restore the old behavior with `SemaphoreToken.detached { }`.
+
+## Step 2 — deprecate the token parameters (next major)
+
+Only after the step-1 gate passes.
+
+- Deprecate every `token:` parameter (Model, Table, TableModel, AutoDBManager, Database) — the task-local
+  becomes the only mechanism; internals read `SemaphoreToken.current` at the gates.
+- Drop the `token` parameter from the `transaction` closure signature and from the
+  `Table.migration(_:_:_:)` protocol requirement (source-breaking for implementors — release notes + fix-it).
+- Remove the deprecated parameters entirely in the major after that.

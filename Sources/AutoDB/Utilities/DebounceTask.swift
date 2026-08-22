@@ -17,8 +17,11 @@ public actor Debounce {
 		
 		let debounceTask = Task {
 			try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-			if !Task.isCancelled {
-				await action()
+			if Task.isCancelled == false {
+				// don't inherit a transaction token from the caller - delayed actions must never re-enter a still-open transaction's lock
+				await SemaphoreToken.detached {
+					await action()
+				}
 				remove(id)
 			}
 		}
