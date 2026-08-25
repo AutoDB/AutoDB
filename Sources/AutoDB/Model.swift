@@ -116,12 +116,15 @@ public extension Model {
 	}
 	
 	/// sometimes object's inits must be sync. Force-wait in that case, this causes hang by design.
+	/// Note: blocking on async work cannot fully avoid priority inversions (DispatchSemaphore has no ownership, so the kernel cannot donate priority into the task chain) - prefer the async create whenever possible.
 	static func create(_ id: AutoId? = nil) -> Self {
 		
 		let semaphore = DispatchSemaphore(value: 0)
 		
 		let store = Store<Self>()
-		Task(priority: .userInitiated) {
+		// run at least at the calling thread's priority, so the blocked thread never waits on deliberately lower-priority work - and start executing inline when the OS supports it
+		let priority = max(Task.currentPriority.rawValue, TaskPriority.userInitiated.rawValue)
+		Task.immediatePort(priority: TaskPriority(rawValue: priority)) {
 			store.item = await create(id)
 			semaphore.signal()
 		}

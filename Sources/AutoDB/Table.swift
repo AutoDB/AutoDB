@@ -5,9 +5,9 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	typealias ColumnKeyPath = PartialKeyPath<Self>
 	var allKeyPaths: [String: ColumnKeyPath] { get }
 	
-	// To construct tables we must create empty objects, since Swift doesn't allow meta programming
+	// Never call init() directly, always use async create() instead. The framework needs to be able to create empty objects, since Swift doesn't allow meta programming (yet?).
 	init()
-	// Sometimes you know the id, then the object needs to be returned or created. and inserted into DB at next save
+	// If using an id of an existing object, it will be returned from db. Otherwise inserted into DB at next save.
 	static func create(_ id: AutoId?) async -> Self
 	/// The unique id that identifies this object
 	var id: AutoId { get set }
@@ -38,7 +38,7 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	*/
 }
 
-/// When using classes we must loop through every value and check equallity - Note that structs handle this automatically.
+/// When using classes we must loop through every value and check equallity - Note that structs handle this automatically. Note that this is an experiment, Table's should always be value types like structs.
 public extension Table where Self: AnyObject {
 	
 	static func == (lhs: Self, rhs: Self) -> Bool {
@@ -110,13 +110,14 @@ public extension Table {
 		return item
 	}
 	
-	/// sync version of create, if you must
-	
+    /// synchronized version of create, if you cannot use async/await. This will block the calling thread until the object is created. Always prefer async create.
 	static func create(_ id: AutoId? = nil) -> Self {
 		let semaphore = DispatchSemaphore(value: 0)
 		
 		let store = Store<Self>()
-		Task {
+		// run at least at the calling thread's priority, so the blocked thread never waits on deliberately lower-priority work - and start executing inline when the OS supports it
+		let priority = max(Task.currentPriority.rawValue, TaskPriority.userInitiated.rawValue)
+		Task.immediatePort(priority: TaskPriority(rawValue: priority)) {
 			store.item = await create(id)
 			semaphore.signal()
 		}
@@ -124,8 +125,6 @@ public extension Table {
 		
 		return store.item!
 	}
-	
-	// awakeFromFetch isn't a good idea for structs... func awakeFromFetch() {}
 	
 	/// Get this class AutoDB which allows direct SQL-access. You may setup db and override the class' settings, the first time you call this
 	@discardableResult

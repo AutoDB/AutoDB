@@ -57,7 +57,7 @@ class Example {
 import Foundation
 
 public actor Semaphore {
-	private var updateWaiters = [() -> ()]()
+	private var updateWaiters = [(priority: TaskPriority, resume: () -> Void)]()
 	private var counter: Int = 0
 	private var allowedWorkers: Int
 	private var reEntryTokens: [AutoId: Int] = [:]
@@ -120,9 +120,8 @@ public actor Semaphore {
 		}
 		
 		await withCheckedContinuation { continuation in
-			updateWaiters.append({
-				continuation.resume()
-			})
+			// remember the waiter's priority so signal() can wake the most urgent one first
+			updateWaiters.append((Task.currentPriority, { continuation.resume() }))
 		}
 		
 		// try taking the semaphore again, it should work this time
@@ -147,8 +146,14 @@ public actor Semaphore {
 		if updateWaiters.isEmpty || counter > allowedWorkers {
 			return
 		}
-		let waiter = updateWaiters.removeFirst()
-		waiter()
+		// wake the highest-priority waiter first (FIFO among equals), to keep priority inversions short.
+		// Note: we park waiters in continuations, so the runtime cannot escalate the current holder - this ordering is the best we can do.
+		var index = 0
+		for i in updateWaiters.indices where updateWaiters[i].priority > updateWaiters[index].priority {
+			index = i
+		}
+		let waiter = updateWaiters.remove(at: index)
+		waiter.resume()
 	}
 	
 	/// A shorthand if you just want to call a closure
