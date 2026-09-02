@@ -111,11 +111,12 @@ public struct AutoDBSettings: Sendable, Hashable {
 	}
 	
 	// Common settings for all tables to be stored in the app-folder and allow for being backed up.
-	public init(path: String = "AutoDB/AutoDB.db", iCloudBackup: Bool = true, inAppFolder: Bool = true, inCacheFolder: Bool = false) {
+	public init(path: String = "AutoDB/AutoDB.db", iCloudBackup: Bool = true, inAppFolder: Bool = true, inCacheFolder: Bool = false, autoCloseDelay: Double? = AutoDBManager.defaultWaitTime) {
 		self.path = path
 		self.iCloudBackup = iCloudBackup
 		self.inAppFolder = inAppFolder
 		self.inCacheFolder = inCacheFolder
+		self.autoCloseDelay = autoCloseDelay
 	}
 	
 	/// the path or fileName inside your app's supportDirectory or cachesDirectory
@@ -126,6 +127,8 @@ public struct AutoDBSettings: Sendable, Hashable {
 	let inAppFolder: Bool
 	/// Is the path relative to the cache folder - so the system may remove it whenever the user is low on disc-space?
 	let inCacheFolder: Bool
+	/// Auto-close the connection after this many seconds of non-use (it reopens transparently on the next access), nil keeps it open until closed manually.
+	let autoCloseDelay: Double?
 	
 	/// Should this get its own unique actor to issue queries from, or share with other tables with the same DB-file? If you have a lot of writes it is usually FASTER to share (one actor are better at scheduling than many SQLite connectors who uses locks with busy/retries). In normal usage you won't see any difference so there is typically no need to split them up. It may improve performance in some esotheric situations, so the option is available. Measure!
 	// let shareDB: Bool // this was a bad idea and is always worse. Don't do it.

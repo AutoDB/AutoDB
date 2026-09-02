@@ -247,6 +247,7 @@ extension UInt64 {
 		}
 		print("sqlite3 \"\(path)\"")
 		let db = try Database(path)
+		await db.setAutoClose(after: settings.autoCloseDelay)
 		
 		// exclude from backup if desired
 		if settings.iCloudBackup == false {
@@ -697,15 +698,51 @@ extension UInt64 {
 		// lookupTable.removeDeleted(typeID, Set(ids))
 	}
 	
+	// MARK: - debounce delays
+
+	/// The standard wait for all debounced work: idle auto-close, saveChangesLater, saveAllChangesLater and deleteLater.
+	public static let defaultWaitTime: Double = 3
+
+	/// how long saveChangesLater / saveAllChangesLater coalesces changes before saving
+	public private(set) var saveLaterDelay: Double = AutoDBManager.defaultWaitTime
+	/// how long deleteLater waits before performing the delete
+	public private(set) var deleteLaterDelay: Double = AutoDBManager.defaultWaitTime
+
+	/// Change how long saveChangesLater / saveAllChangesLater waits before saving. Takes effect for saves scheduled after the change.
+	public func setSaveLaterDelay(_ seconds: Double) {
+		saveLaterDelay = seconds
+	}
+
+	/// Change how long deleteLater waits before performing the delete. Takes effect for deletes scheduled after the change.
+	public func setDeleteLaterDelay(_ seconds: Double) {
+		deleteLaterDelay = seconds
+	}
+
+	/// margin added on top of a debounce delay when holding a connection open for it, so the flush wins the race against the idle auto-close despite timer jitter
+	private static let keepOpenMargin: Double = 0.5
+
+	/// postpone auto-close of this type's database while delayed work waits to run
+	private func keepDatabaseOpen(_ typeID: ObjectIdentifier, for seconds: Double) async {
+		await databases[typeID]?.keepOpen(for: seconds + Self.keepOpenMargin)
+	}
+
+	/// postpone auto-close of every database while delayed work waits to run
+	private func keepAllDatabasesOpen(for seconds: Double) async {
+		for db in sharedDatabases.values {
+			await db.keepOpen(for: seconds + Self.keepOpenMargin)
+		}
+	}
+
 	/// wait while the task exists, cancel if needed.
 	var deleteLaterTask: Task<Void, Never>?
 	
 	/// coalesce multiple objects to be deleted at the next saveChanges.
-	func deleteLater(_ ids: [AutoId], _ typeID: ObjectIdentifier) {
+	func deleteLater(_ ids: [AutoId], _ typeID: ObjectIdentifier) async {
 		guard ids.isEmpty == false else {
 			return
 		}
-		
+
+		await keepDatabaseOpen(typeID, for: deleteLaterDelay)
 		lookupTable.setDeleteLater(ids, typeID)
 		if deleteLaterTask != nil {
 			return
@@ -715,7 +752,7 @@ extension UInt64 {
 			deleteLaterTask = Task {
 				do {
 					// TODO: Think: should we leave this to the app instead and just wait for saveAllChanges to be called?
-					try await Task.sleep(nanoseconds: .seconds(10))
+					try await Task.sleep(nanoseconds: .seconds(deleteLaterDelay))
 					try await saveAllChanges()
 				} catch {
 					// stopped or failing.
@@ -729,6 +766,15 @@ extension UInt64 {
 	
 	public func saveAllChanges() async throws {
 		var anyError: Error? = nil
+		// delete objects waiting for deletion first, just like the typed saveChanges - otherwise a lone deleteLater is never carried out
+		for (typeID, ids) in lookupTable.deleteLater where ids.isEmpty == false {
+			do {
+				try await delete(Array(ids), typeID)
+				lookupTable.removeDeleteLater(typeID, ids)
+			} catch {
+				anyError = error
+			}
+		}
 		let buckets = Array(lookupTable.changedObjects.values)
 		for bucket in buckets {
 			do {
@@ -742,10 +788,11 @@ extension UInt64 {
 		}
 	}
 	
-	/// coalesce all changes and save later, typically used when multiple changes are made to the same object, and you only care that the last save is executed.
+	/// coalesce all changes and save later, typically used when multiple changes are made to the same object, and you only care that the last save is executed. Waits saveLaterDelay seconds (3 by default, see setSaveLaterDelay).
 	nonisolated public func saveAllChangesLater() {
 		Task {
-			await Debounce.shared.debounce() {
+			await self.keepAllDatabasesOpen(for: self.saveLaterDelay)
+			await Debounce.shared.debounce(delay: self.saveLaterDelay) {
 				do {
 					try await self.saveAllChanges()
 				} catch {
@@ -784,16 +831,17 @@ extension UInt64 {
 	// temporary storage for tasks
 	var debounceTasks: [ObjectIdentifier: Task<Void, Error>] = [:]
 	
-	/// coalesce changes for this class type and save later, typically used when multiple changes are made to the same object, and you only care that the last save is executed. Each call postpones the save for 3 seconds.
+	/// coalesce changes for this class type and save later, typically used when multiple changes are made to the same object, and you only care that the last save is executed. Each call postpones the save by saveLaterDelay seconds (3 by default, see setSaveLaterDelay).
 	public func saveChangesLater<T: Model>(_ classType: T.Type) async {
-		
+
 		let typeID = ObjectIdentifier(T.self)
 		debounceTasks[typeID]?.cancel()
-		
+		await keepDatabaseOpen(typeID, for: saveLaterDelay)
+
 		// bind nil around the Task creation - task-locals are captured when the Task is created, so this delayed save never inherits a transaction token and can't re-enter a still-open transaction's lock
 		debounceTasks[typeID] = SemaphoreToken.$current.withValue(nil) {
 			Task {
-				try await Task.sleep(nanoseconds: .seconds(3))
+				try await Task.sleep(nanoseconds: .seconds(saveLaterDelay))
 				debounceTasks[typeID] = nil
 				do {
 					try await saveChanges(T.self)
@@ -836,6 +884,13 @@ extension UInt64 {
 	public func open() async {
 		for db in sharedDatabases {
 			try? await db.value.open()
+		}
+	}
+
+	/// Change the idle auto-close delay for all databases, nil disables auto-close.
+	public func setAutoClose(after delay: Double?) async {
+		for db in sharedDatabases {
+			await db.value.setAutoClose(after: delay)
 		}
 	}
 	

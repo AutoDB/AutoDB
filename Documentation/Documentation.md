@@ -124,6 +124,36 @@ Many DB-engines force you to use their own query language, but AutoDB allows you
 
 # Features
 
+## Connection lifecycle and auto-close
+
+You never need to open or close the database yourself. Every `Database` closes automatically after `AutoDBManager.defaultWaitTime` (3 seconds) of non-use - releasing its file handle, checkpointing the WAL and freeing SQLite's page cache - and reopens transparently on the next access. Reopening costs a few milliseconds at most, so this is invisible in practice.
+
+Change the delay per database (or disable auto-close) via settings or at runtime:
+
+```swift
+// per database, through settings:
+AutoDBSettings(path: "myApp.db", autoCloseDelay: 60)	// close after a minute of non-use
+AutoDBSettings(path: "myApp.db", autoCloseDelay: nil)	// never auto-close
+
+// at runtime, for all databases:
+await AutoDBManager.shared.setAutoClose(after: 60)
+// or for a single one:
+try await MyTable.db().setAutoClose(after: nil)
+```
+
+Manual closing takes precedence: a DB closed with `close()` or `closeNow()` stays closed (queries throw `databaseIsClosed`) until you call `open()` - it is never auto-reopened. Auto-close also never interrupts work: it waits out running transactions and gives them a fresh idle window. In-memory databases never auto-close, since closing one would discard all their data.
+
+Auto-close is aware of scheduled work: `saveChangesLater`, `saveAllChangesLater` and `deleteLater` hold the affected connection open until their flush has run (whatever the configured delays are), so the DB never closes just to reopen for a pending save. If you schedule delayed DB work of your own, you can do the same with `db.keepOpen(for: seconds)` - a floor that postpones auto-close but never delays a manual close.
+
+## Debounce delays
+
+The debounced conveniences `saveChangesLater`, `saveAllChangesLater` and `deleteLater` all wait `AutoDBManager.defaultWaitTime` (3 seconds) by default before doing their work. Tune them at runtime:
+
+```swift
+await AutoDBManager.shared.setSaveLaterDelay(1)		// saveChangesLater / saveAllChangesLater
+await AutoDBManager.shared.setDeleteLaterDelay(5)	// deleteLater
+```
+
 ## FastTextSearch
 
 The system supports FTS-columns, which is a powerful way to search for text. Create a FTSColumn like tihs:
