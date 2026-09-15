@@ -94,6 +94,7 @@ final class HookOnlyModel: Model, @unchecked Sendable {
 	}
 }
 
+@Suite(.serialized)
 class TaskLocalTokenTests: @unchecked Sendable {
 	
 	/// wait for a flag with a deadline, so a deadlock regression fails the test instead of hanging CI forever
