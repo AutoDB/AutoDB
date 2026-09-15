@@ -132,6 +132,17 @@ public extension Table {
 		return try await AutoDBManager.shared.setupDB(self, nil)
 	}
 	
+	/// The table's columns as AutoDB created them: name, SQL type, Swift type and nullability. Sets the table up first.
+	static func columns() async throws -> [Column] {
+		try await AutoDBManager.shared.columns(Self.self)
+	}
+	
+	/// This value with the row's columns decoded over it: columns the row lacks keep their values, a NULL clears an optional.
+	/// For partial rows that come from outside the database (sync, imports).
+	func updated(with row: Row) async throws -> Self {
+		try await AutoDBManager.shared.decode(row, into: self)
+	}
+	
 	/// migration info, to get a callback when migration is done simply call: `_ = try await table.db()` which will wait until migration is complete.
 	static func migrationState() async -> MigrationTableState {
 		return await AutoDBManager.shared.migrationState(self, nil)
@@ -242,8 +253,6 @@ public extension Table {
 	/// All save functions ends up here, where we encode the objects to SQL queries, store them, remove from isChanged and call did/will save.
 	static func saveList(_ objects: [Self], onlyUpdated: Bool?) async throws {
 		
-		// explicit token wins, else fall back to the ambient transaction token
-		let token = SemaphoreToken.current
 		let typeID = ObjectIdentifier(self)
 		
 		// don't re-save deleted items
@@ -253,9 +262,9 @@ public extension Table {
 		
 		try await willSave(objects)
 		
-		let encoder = try await AutoDBManager.shared.getEncoder(Self.self, typeID)
-		await encoder.semaphore.wait(token: token)
-		defer { Task { await encoder.semaphore.signal(token: token) } }
+		// a fresh encoder per save: the row buffers are ours alone, so no lock is needed here - the database serializes the statements,
+		// and inside a transaction the ambient token lets them through
+		let encoder = try await AutoDBManager.shared.rowEncoder(Self.self, typeID)
 		
 		// separate insert and update, otherwise update will overwrite existing objects.
 		let updated: [Self]

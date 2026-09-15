@@ -54,6 +54,46 @@ actor TokenBox {
 	}
 }
 
+/// a Model whose awakeFromInit saves itself and creates a sibling of the same type - both re-enter the encoder semaphore that create() holds
+final class SelfSavingModel: Model, @unchecked Sendable {
+	struct Value: Table {
+		static let tableName = "SelfSavingModel"
+		var id: AutoId = 0
+		var counter = 0
+	}
+	var value: Value
+	init(_ value: Value) {
+		self.value = value
+	}
+	
+	func awakeFromInit() async {
+		// user code that used to deadlock outside transactions: create() holds this type's encoder semaphore while we run
+		value.counter = 1
+		try? await save()
+		if value.id != 91 {
+			_ = await Self.create(91)
+		}
+	}
+}
+
+/// overrides awakeFromInit WITHOUT repeating any framework work - create() and register() must still cache it and set its relation owners
+final class HookOnlyModel: Model, @unchecked Sendable {
+	struct Value: Table {
+		static let tableName = "HookOnlyModel"
+		var id: AutoId = 0
+		var children = ManyRelation<Child>(initFetch: true)
+		var awoken = false
+	}
+	var value: Value
+	init(_ value: Value) {
+		self.value = value
+	}
+	
+	func awakeFromInit() async {
+		value.awoken = true
+	}
+}
+
 class TaskLocalTokenTests: @unchecked Sendable {
 	
 	/// wait for a flag with a deadline, so a deadlock regression fails the test instead of hanging CI forever
@@ -173,5 +213,57 @@ class TaskLocalTokenTests: @unchecked Sendable {
 		if flag.done == false {
 			work.cancel()
 		}
+	}
+	
+	@Test func awakeFromInitReentersCreateLock() async throws {
+		// outside any transaction, awakeFromInit saving or creating the same type used to deadlock on the encoder semaphore held by create()
+		try await AutoDBManager.shared.truncateTable(SelfSavingModel.Value.self)
+		let flag = DoneFlag()
+		let work = Task {
+			let item = await SelfSavingModel.create(90)
+			#expect(item.value.counter == 1)
+			// the token bound around awakeFromInit must not leak out of create()
+			#expect(SemaphoreToken.current == nil)
+			flag.done = true
+		}
+		try await waitFor(flag)
+		#expect(flag.done, "awakeFromInit re-entering create()'s semaphore deadlocked")
+		if flag.done {
+			let saved = try await SelfSavingModel.Value.fetchId(90)
+			#expect(saved.counter == 1)
+			let sibling = try await SelfSavingModel.Value.fetchId(91)
+			#expect(sibling.counter == 1)
+		} else {
+			work.cancel()
+		}
+	}
+	
+	@Test func overrideKeepsCachingAndRelationOwners() async throws {
+		try await AutoDBManager.shared.truncateTable(HookOnlyModel.Value.self)
+		let item = await HookOnlyModel.create(93)
+		#expect(item.value.awoken, "awakeFromInit override was not called")
+		// the framework work must happen even though the override does not repeat it
+		#expect(item.value.children.owner != nil, "relation owner not set by create()")
+		let again = await HookOnlyModel.create(93)
+		#expect(again === item, "object not cached by create()")
+		try await item.save()
+		let fetched = try await HookOnlyModel.fetchId(93)
+		#expect(fetched === item, "fetch did not return the cached instance")
+	}
+	
+	@Test func registerManuallyCreatedObject() async throws {
+		try await AutoDBManager.shared.truncateTable(HookOnlyModel.Value.self)
+		var value = HookOnlyModel.Value()
+		value.id = 94
+		let item = HookOnlyModel(value)
+		await item.register()
+		#expect(item.value.awoken, "register() did not call awakeFromInit")
+		#expect(item.value.children.owner != nil, "register() did not set relation owners")
+		let again = await HookOnlyModel.create(94)
+		#expect(again === item, "registered object not found in cache")
+		// not marked as created, so the save goes through INSERT OR REPLACE and works although create() never saw this object
+		try await item.save()
+		let saved = try await HookOnlyModel.Value.fetchId(94)
+		#expect(saved.awoken)
 	}
 }

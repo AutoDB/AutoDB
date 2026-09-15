@@ -59,12 +59,16 @@ class SQLRowDecoder: Decoder {
 	var defaultValues: [String: AnyDecodable] = [:]
 	let decodePlans: [String: DecodePlan]
 	let tableInfo: TableInfo
+	/// decoding over a base value: keys absent from the row keep the base's value (a NULL still clears an optional)
+	let hasBase: Bool
 	var usedKeys: [String] = []
 	
-	init<TableClass: Table>(_ classType: TableClass.Type, _ tableInfo: TableInfo, _ values: [String: SQLValue]? = nil) {
+	/// `base` supplies the values for keys a partial row lacks (a row from outside the database decoded over an existing value); without it the type's defaults do
+	init<TableClass: Table>(_ classType: TableClass.Type, _ tableInfo: TableInfo, _ values: [String: SQLValue]? = nil, base: TableClass? = nil) {
 		self.tableInfo = tableInfo
+		self.hasBase = base != nil
 		var plans: [String: DecodePlan] = [:]
-		let base = TableClass.init()
+		let base = base ?? TableClass.init()
 		for (key, path) in base.allKeyPaths {
 			// remove underscores from all properties, perhaps we can make this work in the future. - What is this and why are you doing it?
 			let key = key.deleteUnderscorePrefix()
@@ -113,7 +117,7 @@ class SQLRowDecoder: Decoder {
 		return nil
 	}
 	
-	private func normalizedKey(_ key: String) -> String {
+	func normalizedKey(_ key: String) -> String {
 		key.deleteUnderscorePrefix()
 	}
 	
@@ -292,17 +296,22 @@ class SQLRowDecoder: Decoder {
 		func decodeIfPresent<T>(_ type: T.Type, forKey key: KeyType) throws -> T? where T: Decodable {
 			if let item = dec.getValue(type, key.stringValue) {
 				return item
-			} else {
-				return nil
 			}
+			// over a base value an absent key keeps the base's value, while a NULL in the row clears the optional
+			if dec.hasBase, dec.values[dec.normalizedKey(key.stringValue)] == nil {
+				return dec.getDefaultValue(type, key.stringValue)
+			}
+			return nil
 		}
 		
 		func decodeIfPresent(_ type: String.Type, forKey key: KeyType) throws -> String? {
 			if let item = dec.getValue(type, key.stringValue) {
 				return item
-			} else {
-				return nil
 			}
+			if dec.hasBase, dec.values[dec.normalizedKey(key.stringValue)] == nil {
+				return dec.getDefaultValue(type, key.stringValue)
+			}
+			return nil
 		}
 	}
 }

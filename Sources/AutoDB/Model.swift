@@ -38,8 +38,8 @@ public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwne
 	/// If this object needs to be saved at some point in the future
 	func didChange() async
 	
-	/// Called after calling the create() method, default implementation calls setOwnerOnRelations and caches object to make all future fetches return the same object (when saved)
-	/// Call this method if you create objects in other ways.
+	/// Called at the end of create() (and register()), after the object has been cached and its relations wired up. Override freely - there is nothing to forward, the default does nothing.
+	/// If you construct objects in other ways, call register() on them - not this method.
 	func awakeFromInit() async
 	
 	/// called when created from DB
@@ -135,43 +135,44 @@ public extension Model {
 	
 	/// When you are in async mode, wait regularly
 	static func create(_ id: AutoId? = nil) async -> Self {
-		// get encoder or setup db if not done
+		// setup db if not done
 		let typeID = ObjectIdentifier(Self.self)
-		guard let encoder = try? await AutoDBManager.shared.getEncoder(TableType.self, typeID) else {
+		guard let db = try? await TableType.db() else {
 			fatalError("Could not setup DB")
 		}
+		let creationLock = await AutoDBManager.shared.creationLock(typeID)
 		
-		// don't let two threads create the same object at the same time.
-		// reuse an ambient transaction token so creation inside transactions can re-enter (an explicit token wins)
-		let semToken = SemaphoreToken.current ?? AutoId.generateId()
-		await encoder.semaphore.wait(token: semToken)
-		defer { Task { await encoder.semaphore.signal(token: semToken) } }
-		
-		if let id {
-			if let item = await AutoDBManager.shared.cached(Self.self, id, typeID) {
-				return item
-			} else {
-				do {
-					return try await fetchId(id, typeID)
-				} catch {
-					//print("error fetching id: \(error)")
+		// Lock order: the database's transaction slot first, then this type's creation lock (two tasks must not create the same object at the same time).
+		// Holding the lock while waiting for an open transaction deadlocked with a create or save of this type inside it.
+		// Inside a transaction, or nested, the ambient token re-enters both. excludingTransactions binds the token for the body, so user code in
+		// awakeFromInit can save() or create() this type too (same pattern as ManyRelation.fetch). A Task { } spawned in there inherits the token -
+		// wrap fire-and-forget work in SemaphoreToken.detached if it should wait for us instead.
+		return await db.excludingTransactions {
+			let token = SemaphoreToken.current
+			await creationLock.wait(token: token)
+			defer { Task { await creationLock.signal(token: token) } }
+			
+			if let id {
+				if let item = await AutoDBManager.shared.cached(Self.self, id, typeID) {
+					return item
+				}
+				if let item = try? await fetchId(id, typeID) {
+					return item
 				}
 			}
+			
+			// no id or not in db, create a new object.
+			var value = TableType()
+			value.id = id ?? AutoId.generateId()
+			let item = Self(value)
+			
+			// mark as new so the first save inserts (a plain INSERT, which fails if the row exists - we just checked that it doesn't)
+			await AutoDBManager.shared.setCreated(value.id, ObjectIdentifier(TableType.self))
+			
+			// cache (so it won't be created twice), wire up relations and call awakeFromInit - the same path as manually registered objects.
+			await item.register()
+			return item
 		}
-		
-		// no id or not in db, create a new object.
-		// note: an explicitly passed token doubles as the default id (legacy behavior), but an ambient token must not - every object created inside one transaction needs a unique id.
-		var value = TableType()
-		value.id = id ?? AutoId.generateId()
-		let item = Self(value)
-		
-		// set in cache so it won't be created twice
-		await AutoDBManager.shared.cacheObject(item, typeID)
-		await AutoDBManager.shared.setCreated(value.id, ObjectIdentifier(TableType.self))
-		
-		await item.awakeFromInit()
-		
-		return item
 	}
 	
 	private subscript(checkedMirrorDescendant key: String) -> Any {
@@ -238,15 +239,22 @@ public extension Model {
 	/// called when created from DB
 	func awakeFromFetch() {}
 	
-	func awakeFromInit() {
-		Task {
-			await awakeFromInit()
-		}
-	}
+	/// Hook for conformers, does nothing by default - create() and register() take care of caching and relation owners before calling it.
+	func awakeFromInit() async {}
 	
-	func awakeFromInit() async {
+	/// Register an object you constructed yourself instead of via create(): caches it (so fetches return this instance), wires up its relations and then calls awakeFromInit().
+	/// Lives only in the extension so it cannot be overridden - the framework part always runs. Not needed after create(), which does this already.
+	func register() async {
 		await AutoDBManager.shared.cacheObject(self)
 		setOwnerOnRelations()
+		await awakeFromInit()
+	}
+	
+	/// register() for when you cannot await
+	func register() {
+		Task {
+			await register()
+		}
 	}
 	
 	/// Get this class AutoDB which allows direct SQL-access. You may setup db and override the class' settings, the first time you call this

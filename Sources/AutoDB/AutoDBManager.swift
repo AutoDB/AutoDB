@@ -31,6 +31,22 @@ extension UInt64 {
 		return enc
 	}
 	
+	/// A fresh encoder for one save: the table's encoding comes from the cached template, the row buffers are the caller's alone - so saves need no lock.
+	func rowEncoder<T: Table>(_ classType: T.Type, _ typeID: ObjectIdentifier? = nil) async throws -> SQLRowEncoder {
+		SQLRowEncoder(template: try await getEncoder(classType, typeID))
+	}
+	
+	private var creationLocks = [ObjectIdentifier: Semaphore]()
+	/// the lock create() holds so two tasks never create the same object at the same time - one per type, taken after the database's transaction slot
+	func creationLock(_ typeID: ObjectIdentifier) -> Semaphore {
+		if let lock = creationLocks[typeID] {
+			return lock
+		}
+		let lock = Semaphore()
+		creationLocks[typeID] = lock
+		return lock
+	}
+	
 	var decoders = [ObjectIdentifier: SQLRowDecoder]()
 	/// get the cached decoder for this class, or create one
 	func getDecoder<T: Table>(_ classType: T.Type) async throws -> SQLRowDecoder {
@@ -42,6 +58,20 @@ extension UInt64 {
 		let dec = SQLRowDecoder(T.self, table)
 		decoders[ObjectIdentifier(T.self)] = dec
 		return dec
+	}
+	
+	/// The table's columns as AutoDB created them: name, SQL type, Swift type and nullability. Sets the table up first.
+	public func columns<T: Table>(_ type: T.Type) async throws -> [Column] {
+		_ = try await setupDB(T.self)
+		return await tableInfo(T.self).columns
+	}
+	
+	/// `base` with the row's columns decoded over it. Columns the row lacks keep base's values, a NULL clears an optional.
+	/// For partial rows that come from outside the database (sync, imports).
+	public func decode<T: Table>(_ row: Row, into base: T) async throws -> T {
+		_ = try await setupDB(T.self)
+		let decoder = SQLRowDecoder(T.self, await tableInfo(T.self), row, base: base)
+		return try T(from: decoder)
 	}
 	
 	private var tables = [ObjectIdentifier: TableInfo]()
@@ -144,47 +174,71 @@ extension UInt64 {
 		return .isMigrating
 	}
 	
+	/// one lock per table for its first-time setup, taken inside the database's transaction slot (see setupDB)
+	private var setupLocks = [ObjectIdentifier: Semaphore]()
+	private func setupLock(_ typeID: ObjectIdentifier) -> Semaphore {
+		if let lock = setupLocks[typeID] {
+			return lock
+		}
+		let lock = Semaphore()
+		setupLocks[typeID] = lock
+		return lock
+	}
+	
+	/// The Database for these settings, created once. The setup semaphore only guards this - opening the file - never table work.
+	private func sharedDatabase(for key: SettingsKey, _ settings: AutoDBSettings) async throws -> Database {
+		// in theory you could have multiple actors for the same file, but that is always a bad idea.
+		if let db = sharedDatabases[key] {
+			return db
+		}
+		// many threads will go here at the same time at startup, they need to wait.
+		await setupSemaphore.wait()
+		defer { Task { await setupSemaphore.signal() } }
+		if let db = sharedDatabases[key] {
+			return db
+		}
+		let database = try await initDB(settings)
+		sharedDatabases[key] = database
+		return database
+	}
+	
 	/// Setup database for this class, attach to file defined in settings. Settings defaults to .main, implement autoDBSettings in each Table to specify location or use the cache.
+	///
+	/// Lock order: the database's transaction slot first (`excludingTransactions`), then this table's own setup lock. The table's queries - PRAGMA, CREATE, a copy for changed columns - wait for an open transaction otherwise.
+	/// Inside a transaction the ambient token re-enters both, so a first-time setup from inside a transaction is fine, and other tables are never held back by this one.
 	@discardableResult
 	func setupDB<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier? = nil) async throws -> Database {
 		let typeID = typeID ?? ObjectIdentifier(table)
 		if let db = databases[typeID] {
 			return db
 		}
+		let settingsKey = table.autoDBSettings
+		let tableSettings = appSettings(for: settingsKey)
+		let database = try await sharedDatabase(for: settingsKey, tableSettings)
+		let lock = setupLock(typeID)
 		
-		// many threads will go here at the same time at startup, they need to wait.
-		await setupSemaphore.wait()
-		do {
-			if let db = databases[typeID] {
-				await setupSemaphore.signal()
+		return try await database.excludingTransactions {
+			let token = SemaphoreToken.current
+			await lock.wait(token: token)
+			defer { Task { await lock.signal(token: token) } }
+			// set up meanwhile by whoever held the lock
+			if let db = await self.databases[typeID] {
 				return db
 			}
-			let database: Database
-			let settingsKey = table.autoDBSettings
-			let tableSettings = appSettings(for: settingsKey)
-			
-			// in theory you could have multiple actors for the same file, but that is always a bad idea.
-			if let db = sharedDatabases[settingsKey] {
-				database = db
-			} else {
-				database = try await initDB(tableSettings)
-				sharedDatabases[settingsKey] = database
-			}
-			
-			// setup table and perform migrations
-			let (encoder, migrations) = try await SQLTableEncoder().setup(table, database, tableSettings)
+			return try await self.setUpTable(table, typeID, database, tableSettings)
+		}
+	}
+	
+	/// the table's first-time setup: create or migrate it and register it. Runs with the table's setup lock held, inside the transaction slot.
+	private func setUpTable<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier, _ database: Database, _ settings: AutoDBSettings) async throws -> Database {
+		do {
+			let (encoder, migrations) = try await SQLTableEncoder().setup(table, database, settings)
 			tables[typeID] = encoder
 			
 			if let migrations, migrations.isEmpty == false {
-				// NOTE! This will deadlock if other tables are not setup.
-				
-				// we must wait until migrations take place, we do that using a transaction. All queries will wait until the transaction is done.
+				// migrations run inside a transaction so a failure rolls the table back. The table is registered first: a migration callback's own queries on it must hit the fast path, not set it up again.
 				try? await database.transaction { db in
-					
-					await setDatabase(db, typeID)
-					// release the setupSemaphore so other tables can be created, this will allow other's to queue onto the db, but the transaction-semaphore will force them to wait until we are done.
-					await setupSemaphore.signal()
-					
+					await self.setDatabase(db, typeID)
 					for migration in migrations {
 						await TableType.migration(database, migration)
 						
@@ -195,11 +249,10 @@ extension UInt64 {
 				}
 			} else {
 				databases[typeID] = database
-				await setupSemaphore.signal()
 			}
 			return database
+			
 		} catch {
-			await setupSemaphore.signal()
 			if case Database.Error.databaseIsClosed = error {
 				print("database is closed error, perhaps switching DB-path during migrations? \(error)")
 			} else {
@@ -699,40 +752,40 @@ extension UInt64 {
 	}
 	
 	// MARK: - debounce delays
-
+	
 	/// The standard wait for all debounced work: idle auto-close, saveChangesLater, saveAllChangesLater and deleteLater.
 	public static let defaultWaitTime: Double = 3
-
+	
 	/// how long saveChangesLater / saveAllChangesLater coalesces changes before saving
 	public private(set) var saveLaterDelay: Double = AutoDBManager.defaultWaitTime
 	/// how long deleteLater waits before performing the delete
 	public private(set) var deleteLaterDelay: Double = AutoDBManager.defaultWaitTime
-
+	
 	/// Change how long saveChangesLater / saveAllChangesLater waits before saving. Takes effect for saves scheduled after the change.
 	public func setSaveLaterDelay(_ seconds: Double) {
 		saveLaterDelay = seconds
 	}
-
+	
 	/// Change how long deleteLater waits before performing the delete. Takes effect for deletes scheduled after the change.
 	public func setDeleteLaterDelay(_ seconds: Double) {
 		deleteLaterDelay = seconds
 	}
-
+	
 	/// margin added on top of a debounce delay when holding a connection open for it, so the flush wins the race against the idle auto-close despite timer jitter
 	private static let keepOpenMargin: Double = 0.5
-
+	
 	/// postpone auto-close of this type's database while delayed work waits to run
 	private func keepDatabaseOpen(_ typeID: ObjectIdentifier, for seconds: Double) async {
 		await databases[typeID]?.keepOpen(for: seconds + Self.keepOpenMargin)
 	}
-
+	
 	/// postpone auto-close of every database while delayed work waits to run
 	private func keepAllDatabasesOpen(for seconds: Double) async {
 		for db in sharedDatabases.values {
 			await db.keepOpen(for: seconds + Self.keepOpenMargin)
 		}
 	}
-
+	
 	/// wait while the task exists, cancel if needed.
 	var deleteLaterTask: Task<Void, Never>?
 	
@@ -741,7 +794,7 @@ extension UInt64 {
 		guard ids.isEmpty == false else {
 			return
 		}
-
+		
 		await keepDatabaseOpen(typeID, for: deleteLaterDelay)
 		lookupTable.setDeleteLater(ids, typeID)
 		if deleteLaterTask != nil {
@@ -833,11 +886,11 @@ extension UInt64 {
 	
 	/// coalesce changes for this class type and save later, typically used when multiple changes are made to the same object, and you only care that the last save is executed. Each call postpones the save by saveLaterDelay seconds (3 by default, see setSaveLaterDelay).
 	public func saveChangesLater<T: Model>(_ classType: T.Type) async {
-
+		
 		let typeID = ObjectIdentifier(T.self)
 		debounceTasks[typeID]?.cancel()
 		await keepDatabaseOpen(typeID, for: saveLaterDelay)
-
+		
 		// bind nil around the Task creation - task-locals are captured when the Task is created, so this delayed save never inherits a transaction token and can't re-enter a still-open transaction's lock
 		debounceTasks[typeID] = SemaphoreToken.$current.withValue(nil) {
 			Task {
@@ -886,7 +939,7 @@ extension UInt64 {
 			try? await db.value.open()
 		}
 	}
-
+	
 	/// Change the idle auto-close delay for all databases, nil disables auto-close.
 	public func setAutoClose(after delay: Double?) async {
 		for db in sharedDatabases {

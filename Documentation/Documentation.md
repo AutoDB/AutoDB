@@ -92,6 +92,8 @@ Unsupported without a manual migration callback:
 
 `save()` persists immediately. `didChange()` marks a model as dirty for a later `saveChanges()` or `saveAllChanges()` flush. Dirty buckets retain models until they are persisted, so batched writes reduce disk churn by temporarily keeping those models alive.
 
+A save takes no lock of its own: every save encodes its rows into its own buffer and the database serializes the statements. Outside a transaction a save waits for an open transaction to end like any other write; inside one it joins the transaction through the ambient token. See [Deadlocks with transactions](#deadlocks-with-transactions) for the lock order this rests on.
+
 ### `RelationQuery`
 
 `RelationQuery` is stable in 1.0 only on Observation-capable OS versions. Its public contract is incremental fetching with deterministic paging state: inserts and deletes refresh the visible window, and overlapping later pages rebuild from offset `0` so `items`, `offset`, and `hasMore` stay consistent. There is no older-OS fallback implementation in 1.0.
@@ -121,6 +123,20 @@ For enums:
 ## Plain SQL queries
 
 Many DB-engines force you to use their own query language, but AutoDB allows you to write plain SQL queries. This is useful for performance and opens upp the full power of SQL. It may seem as a good idea at first to build your own query language, but in the long run it only complicates things. SQL is also a universal language that you will benefit from knowing everywhere you go (and very easy to learn).
+
+## Rows from outside the database
+
+Two APIs let code that never sees your models - a sync layer, an importer - work with a table by column name alone:
+
+- `try await SomeTable.columns()` returns the `[Column]` AutoDB created the table from: `name`, `columnType` (`.integer/.real/.text/.blob`), `valueType` (the Swift type, unwrapped for optionals, the enum or OptionSet type for raw-value enums) and `mayBeNull`. Dates are `.real` with `valueType == Date.self`, Bool is `.integer`.
+- `try await value.updated(with: row)` decodes a partial `Row` (`[String: SQLValue]`) over an existing value. Columns the row lacks keep the value's own; a `.null` clears an optional; every conversion (Date from seconds, Bool from 0/1, raw-value enums, optionals) is the one the fetch path uses. For a `Model`, decode over `instance.value` and assign the result with `withValue { $0 = decoded }` - the id and whatever `awakeFromInit` set are kept, and no setter runs.
+
+```swift
+let row: Row = ["title": .text("From the other device"), "pauseDate": .null]
+let decoded = try await feed.value.updated(with: row)
+feed.withValue { $0 = decoded }
+try await feed.save()
+```
 
 # Features
 
@@ -242,6 +258,8 @@ Details worth knowing:
 - A nested `transaction` call inside the closure reuses the outer token and only nests the savepoint - rolling back the outer transaction also rolls back the inner one.
 - The token flows into `Task { }` spawned inside the closure, but intentionally **not** into `Task.detached` - detached work waits for the transaction to finish, just like before.
 - The same applies to migrations: queries inside your `migration(_:_:_:)` implementation no longer need to forward the token.
+- `create()` binds a token the same way while your `awakeFromInit()` runs, so the hook can save or create the same type - see [awakeFromInit](#awakefrominit) for the caveat about `Task { }`.
+- `Database.excludingTransactions { }` runs a closure while no transaction is open and lets none start until it returns, without being a transaction itself (plain queries from other tasks are not held back). It re-enters through the ambient token and binds one for the closure. `create()` uses it; take it yourself before any lock of your own that code inside a transaction may also need.
 
 ## Removing explicit tokens from your code
 
@@ -274,7 +292,14 @@ Then build: the compiler flags any now-unused `token` variables, which is your c
 
 ## Deadlocks with transactions
 
-Transactions are guarded by semaphores; with the ambient token the common deadlocks (forgetting to forward the token) are gone, but a deadlock is still possible if the transaction *waits* for work that itself waits for the transaction (e.g. awaiting a `Task.detached` DB call from inside the closure). See `TransactionTests.deadlockSemaphore()` for how to discover these with the watchdog. 
+Transactions are guarded by semaphores; with the ambient token the common deadlocks (forgetting to forward the token) are gone, but a deadlock is still possible if the transaction *waits* for work that itself waits for the transaction (e.g. awaiting a `Task.detached` DB call from inside the closure). See `TransactionTests.deadlockSemaphore()` for how to discover these with the watchdog.
+
+While a transaction is open, every query from another task waits for it. That makes one lock order mandatory for anything that holds a lock *and* queries: **the database's transaction slot first, your lock second.** Holding a lock while a query waits for the transaction hangs the moment the transaction's own task needs that lock - both tasks are then suspended in `await`, every thread is idle, and nothing in a stack sample points at the culprit. AutoDB follows the order itself:
+
+- saves hold no lock at all (each save has its own encoder buffers), so a save outside a transaction simply waits for it;
+- `create()` takes the type's creation lock only inside `Database.excludingTransactions`, so a `create(id)` that has to fetch waits for the transaction *before* it locks.
+
+- a table's first-time setup (`db()`, or the first query on it) runs inside `excludingTransactions` too, under a lock of its own per table. A setup outside a transaction waits for the transaction first; a transaction that reaches a fresh table sets it up from inside; and setting one table up never holds another table back. The process-wide setup semaphore only guards opening the database file.
 
 ## Write to DB in bulk
 
@@ -293,6 +318,57 @@ var value: PostTable {
 ## Caching
 
 Objects are cached with weak pointers, meaning that they will be deallocated when no one else is using them. During usage they will be returned when fetching from DB instead of recreated every time. 
+
+## awakeFromInit
+
+`awakeFromInit()` is called once at the end of `create()`, after the new object has been cached and its relations wired up. Override it to set defaults, derive values or do any other setup the object needs before it is handed out. The default does nothing and there is nothing to forward - caching and relation owners are handled by `create()` no matter what your override does:
+
+```swift
+func awakeFromInit() async {
+	// your own setup, nothing else is required
+}
+```
+
+It only runs for objects made by `create()`. Objects decoded from the database get the synchronous `awakeFromFetch()` instead, after they have been cached and their relations set up.
+
+### Objects you construct yourself
+
+If you build a model some other way than `create()`, call `register()` on it. It does what `create()` does after the lookup: caches the object so fetches return this instance, wires up its relations and then calls `awakeFromInit()`. `register()` is not part of the protocol, so it cannot be overridden and the framework part always runs. A registered object is not marked as new, so its first `save()` goes through `INSERT OR REPLACE` and overwrites any row with the same id instead of failing:
+
+```swift
+var value = MyModel.Value()
+value.id = someId
+let item = MyModel(value)
+await item.register()
+```
+
+### Saving and creating inside awakeFromInit
+
+`create()` holds the type's creation lock while `awakeFromInit` runs, so two tasks can never create the same object at the same time. The lock is taken inside `Database.excludingTransactions`, so a `create()` outside a transaction first waits for any open transaction and only then locks - the order that keeps it from deadlocking with a create or save of the type inside that transaction. To keep the lock from deadlocking your own code, the token holding it is bound as the ambient `SemaphoreToken.current` for the duration of the hook - inside a transaction that is the transaction token, otherwise a fresh one that lives only for this `create()` call. AutoDB calls made from `awakeFromInit` - `save()`, `create()` of the same type, queries - re-enter the lock instead of waiting on it, exactly like inside a transaction:
+
+```swift
+func awakeFromInit() async {
+	// both re-enter the lock that create() is holding
+	try? await save()
+	let sibling = await Self.create()
+}
+```
+
+**Caveat: `Task { }` inherits the token.** The ambient token follows the same rule as in transactions: it flows into `Task { }` but not into `Task.detached`. A `Task { }` started in `awakeFromInit` that saves or creates this type can therefore run while `create()` still holds the lock, re-enter it and write while `awakeFromInit` is still setting the object up - and if several such tasks re-enter at once, nothing keeps their writes apart. For fire-and-forget work, drop the token so the task waits for `create()` to finish like any other caller:
+
+```swift
+func awakeFromInit() async {
+	Task {
+		// don't join create()'s lock - wait for it like everyone else
+		await SemaphoreToken.detached {
+			try? await self.save()
+		}
+	}
+	// or use Task.detached, which never inherits task-locals
+}
+```
+
+AutoDB's own deferred paths already do this: the non-async `save()`, `saveChangesLater()`, `saveChangesDetached()` and `delete()` all run without the token, and `didChange()` only marks the object dirty without touching the database. Those are safe to call from `awakeFromInit` as they are: the rule only matters for tasks you spawn yourself.
 
 ## Migration
 

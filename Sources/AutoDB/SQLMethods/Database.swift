@@ -827,6 +827,17 @@ public actor Database {
 		}
 	}
 	
+	/// Runs `body` while no transaction is open on this database, and lets none start until it returns. Plain queries are not held back.
+	/// Re-entrant: inside a transaction (or a nested call) the ambient token is reused, and `body` runs with a token bound so everything it calls can re-enter. Take this *before* any other lock a transaction may also need - Model.create takes it before the type's creation lock.
+	public func excludingTransactions<R: Sendable>(_ body: @Sendable () async throws -> R) async rethrows -> R {
+		let token = SemaphoreToken.current ?? AutoId.generateId()
+		await semaphore.wait(token: token)
+		defer { Task { await semaphore.signal(token: token) } }
+		return try await SemaphoreToken.$current.withValue(token) {
+			try await body()
+		}
+	}
+	
 	private func _transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
 		
 		// note that we can have transactions inside transactions, as long as we reuse the token:

@@ -32,9 +32,6 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	public var codingPath: [CodingKey] = []
 	public var userInfo: [CodingUserInfoKey: Any] = [:]
 	
-	/// take this before starting to encode
-	let semaphore = Semaphore()
-	
 	init<TableClass: Table>(_ classType: TableClass.Type) async {
 		
 		tableClass = classType
@@ -45,6 +42,15 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 		table = await AutoDBManager.shared.tableInfo(classType)
 		maxQueryVariableCount = await database.maxQueryVariableCount
 		insertQuery = " INTO `\(table.name)` (\(table.columnNameString)) VALUES "
+	}
+	
+	/// A fresh encoder for one save: the table's encoding is shared with `template`, the row buffers are its own - so saves need no lock.
+	init(template: SQLRowEncoder) {
+		database = template.database
+		tableClass = template.tableClass
+		table = template.table
+		insertQuery = template.insertQuery
+		maxQueryVariableCount = template.maxQueryVariableCount
 	}
 	
 	func queryString(_ objectCount: Int, _ update: Bool) -> String {
