@@ -223,7 +223,7 @@ public actor Database {
 		var handle: OpaquePointer? = nil
 		var result: Int32 = SQLITE_ERROR
 		var coordinatorError: NSError?
-		let path = dbURL?.path() ?? ":memory:"
+		let path = dbURL?.path(percentEncoded: false) ?? ":memory:"
 		
 		if let dbURL {
 			NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: dbURL, options: .forMerging, error: &coordinatorError) { _ in
