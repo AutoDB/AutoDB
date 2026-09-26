@@ -7,6 +7,7 @@ var package = Package(
 	products: [
 		.library(
 			name: "AutoDB",
+			type: .static,
 			targets: ["AutoDB"]
 		)
 	],

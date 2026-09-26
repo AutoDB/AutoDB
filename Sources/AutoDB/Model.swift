@@ -117,6 +117,9 @@ public extension Model {
 	
 	/// sometimes object's inits must be sync. Force-wait in that case, this causes hang by design.
 	/// Note: blocking on async work cannot fully avoid priority inversions (DispatchSemaphore has no ownership, so the kernel cannot donate priority into the task chain) - prefer the async create whenever possible.
+	/// Never from async code: the wait blocks a thread of the cooperative pool while the creating task needs one of those threads to run. With as many
+	/// concurrent callers as the pool has threads (one per core) every thread waits and nothing can signal them - the process hangs with no CPU use.
+	@available(*, noasync, message: "blocks a thread of the cooperative pool and can hang the process, use await create()")
 	static func create(_ id: AutoId? = nil) -> Self {
 		
 		let semaphore = DispatchSemaphore(value: 0)

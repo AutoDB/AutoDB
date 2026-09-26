@@ -111,6 +111,8 @@ public extension Table {
 	}
 	
     /// synchronized version of create, if you cannot use async/await. This will block the calling thread until the object is created. Always prefer async create.
+	/// Never from async code: it blocks a thread of the cooperative pool, see Model.create(_:).
+	@available(*, noasync, message: "blocks a thread of the cooperative pool and can hang the process, use await create()")
 	static func create(_ id: AutoId? = nil) -> Self {
 		let semaphore = DispatchSemaphore(value: 0)
 		

@@ -301,6 +301,12 @@ While a transaction is open, every query from another task waits for it. That ma
 
 - a table's first-time setup (`db()`, or the first query on it) runs inside `excludingTransactions` too, under a lock of its own per table. A setup outside a transaction waits for the transaction first; a transaction that reaches a fresh table sets it up from inside; and setting one table up never holds another table back. The process-wide setup semaphore only guards opening the database file.
 
+### The synchronous create
+
+The non-async `create(_:)` (on `Model` and `Table`) blocks its thread with a `DispatchSemaphore` until a task has created the object. That task runs on Swift's cooperative thread pool, which has one thread per core. Called from async code, the blocked thread *is* a pool thread: with as many concurrent callers as the pool has threads, every thread waits for a task that no thread is left to run, and the process hangs with no CPU use. A stack sample shows every `com.apple.root.*.cooperative` thread in `semaphore_wait_trap` under `create(_:)`.
+
+Both are therefore `@available(*, noasync)`: calling them from an async function is an error in Swift 6 mode and a warning in Swift 5. The check only sees direct calls - not a sync wrapper around them, a sync closure like `map { }` or a sync function that async code calls. Mark such wrappers `noasync` too, and use `await create()` anywhere that can run on a task. The sync version is only for code that really is synchronous, off the pool (the main thread, a plain `Thread`, a dispatch queue).
+
 ## Write to DB in bulk
 
 It is smarter to save many objects in one go, to mark an object to be saved for later call `artist.didChange()`. Later you can then save all those objects by calling `Artist.saveChanges()`. Note that the system will keep a reference to all objects waiting to be saved.
