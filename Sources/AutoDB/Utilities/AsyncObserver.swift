@@ -120,14 +120,8 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 		var copy = self
 		let queue = Queue()
 		copy.queue = queue
-		let registrationSemaphore = DispatchSemaphore(value: 0)
-		Task {
-			// Register the queue before returning so the first event cannot be lost
-			// to a scheduling race between iterator creation and observation.
-			await copy.globalSender.addObserver(queue)
-			registrationSemaphore.signal()
-		}
-		registrationSemaphore.wait()
+		// synchronous: the queue is registered before we return, so the first event cannot be lost
+		globalSender.addObserver(queue)
 		return copy
 	}
 	
@@ -185,32 +179,52 @@ public struct AsyncObserver<Element: Sendable>: AsyncSequence, AsyncIteratorProt
 		}
 	}
 	
+	/// A weak reference to a queue, so a finished for-loop's queue can be released.
+	private struct WeakQueue: Sendable {
+		weak var value: Queue?
+	}
+	
 	/**
 	 Await something that will be created in the future. A basic queue with a producer that sends resources, and consumers that awaits them.
+	 Lock-based instead of an actor so registration can be synchronous from makeAsyncIterator.
 	 */
-	fileprivate actor Sender {
+	fileprivate final class Sender: Sendable {
 		
-		var isCancelled = false
-		var observers = WeakArray<Queue>([])  // figure out this type-error: 'WeakArray' requires that 'any AsyncObserverObject' be a class type (which it is...)
+		private struct State: Sendable {
+			var isCancelled = false
+			var observers = [WeakQueue]()
+		}
+		private let state = Locked(State())
+		
 		init() {}
 		
 		func addObserver(_ observer: Queue) {
-			if isCancelled { return }
-			observers.append(observer)
+			state.withLock {
+				if $0.isCancelled { return }
+				$0.observers.append(WeakQueue(value: observer))
+			}
 		}
 		
 		/// send to each registered observer
 		func sendResource(_ resource: Element?) async {
-			observers.cleanup()
-			for observer in observers {
-				await observer?.notify(resource)
+			let queues = state.withLock { state in
+				state.observers.removeAll { $0.value == nil }
+				return state.observers.compactMap(\.value)
+			}
+			for queue in queues {
+				await queue.notify(resource)
 			}
 		}
 		
 		func cancel() async {
-			isCancelled = true
-			await sendResource(nil)
-			observers.removeAll()
+			let queues = state.withLock { state in
+				state.isCancelled = true
+				defer { state.observers.removeAll() }
+				return state.observers.compactMap(\.value)
+			}
+			for queue in queues {
+				await queue.cancel()
+			}
 		}
 	}
 	

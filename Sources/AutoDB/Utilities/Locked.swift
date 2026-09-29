@@ -34,18 +34,16 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 	@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
 	private final class MutexBox<Value: Sendable>: LockBox<Value>, @unchecked Sendable {
 		private let mutex: Mutex<Value>
-
+		
 		init(_ value: Value) {
 			self.mutex = Mutex(value)
 		}
-
+		
 		override func withLock<R>(_ body: (inout Value) throws -> R) rethrows -> R {
 			// Mutex.withLock requires a sending result, so keep the caller's R outside the closure.
-			var result: R?
 			try mutex.withLock { value in
-				result = try body(&value)
+				try body(&value)
 			}
-			return result!
 		}
 	}
 #endif
@@ -56,18 +54,18 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 	private final class UnfairLockBox<Value: Sendable>: LockBox<Value>, @unchecked Sendable {
 		private let lock: os_unfair_lock_t
 		private var value: Value
-
+		
 		init(_ value: Value) {
 			self.lock = os_unfair_lock_t.allocate(capacity: 1)
 			self.lock.initialize(to: os_unfair_lock())
 			self.value = value
 		}
-
+		
 		deinit {
 			lock.deinitialize(count: 1)
 			lock.deallocate()
 		}
-
+		
 		override func withLock<R>(_ body: (inout Value) throws -> R) rethrows -> R {
 			os_unfair_lock_lock(lock)
 			defer { os_unfair_lock_unlock(lock) }
@@ -82,18 +80,18 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 	private final class PthreadMutexBox<Value: Sendable>: LockBox<Value>, @unchecked Sendable {
 		private let mutex: UnsafeMutablePointer<pthread_mutex_t>
 		private var value: Value
-
+		
 		init(_ value: Value) {
 			self.mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
 			pthread_mutex_init(mutex, nil)
 			self.value = value
 		}
-
+		
 		deinit {
 			pthread_mutex_destroy(mutex)
 			mutex.deallocate()
 		}
-
+		
 		override func withLock<R>(_ body: (inout Value) throws -> R) rethrows -> R {
 			pthread_mutex_lock(mutex)
 			defer { pthread_mutex_unlock(mutex) }
@@ -105,11 +103,11 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 	private final class NSLockBox<Value: Sendable>: LockBox<Value>, @unchecked Sendable {
 		private let lock = NSLock()
 		private var value: Value
-
+		
 		init(_ value: Value) {
 			self.value = value
 		}
-
+		
 		override func withLock<R>(_ body: (inout Value) throws -> R) rethrows -> R {
 			lock.lock()
 			defer { lock.unlock() }
@@ -123,13 +121,13 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 /// A lock-protected value that can be read and mutated synchronously from any thread or actor.
 /// Uses Synchronization.Mutex when the runtime has it, otherwise os_unfair_lock (Apple) or pthread_mutex (Linux/Android).
 public final class Locked<Value: Sendable>: Sendable {
-
+	
 	private let box: LockBox<Value>
-
+	
 	public init(_ value: Value) {
 		self.box = Self.makeBox(value)
 	}
-
+	
 	private static func makeBox(_ value: Value) -> LockBox<Value> {
 		#if canImport(Synchronization)
 			if #available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *) {
@@ -144,7 +142,7 @@ public final class Locked<Value: Sendable>: Sendable {
 			return NSLockBox(value)
 		#endif
 	}
-
+	
 	/// Read or mutate the value while holding the lock.
 	public func withLock<R>(_ body: (inout Value) throws -> R) rethrows -> R {
 		try box.withLock(body)

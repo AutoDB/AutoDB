@@ -12,16 +12,32 @@ concurrency:
 jobs:
   swift-package:
     runs-on: macos-26
+    timeout-minutes: 15
 
     steps:
       - name: Check out source
         uses: actions/checkout@v5
 
       - name: Show Swift version
-        run: swift --version
+        run: |
+          swift --version
+          xcodebuild -version
+          sw_vers
+          sysctl -n hw.ncpu
 
-      - name: Build package
-        run: swift build
+      - name: Build package and tests
+        run: swift build --build-tests
 
-      - name: Run tests
-        run: swift test
+      - name: Run tests with live output and hang diagnostics
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/autodb-test-logs"
+          bash scripts/ci-tests.sh "$(swift build --show-bin-path)" 2>&1 | tee "$RUNNER_TEMP/autodb-test-logs/tests.log"
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics
+          path: ${{ runner.temp }}/autodb-test-logs/
+          if-no-files-found: ignore
