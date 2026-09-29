@@ -112,9 +112,10 @@ public actor Database {
 	/// the file url for the DB
 	private var dbURL: URL?
 	
-	/// Why the connection is closed - a manually closed DB stays closed, an auto-closed one reopens transparently on the next access.
+	/// Why the connection is closed: reopensOnAccess (idle auto-close, or close(allowReopen: true)) reopens transparently on the next access,
+	/// closedUntilOpen (close(allowReopen: false), closeNow) stays closed until open() is called.
 	private enum CloseState {
-		case open, autoClosed, manuallyClosed
+		case open, reopensOnAccess, closedUntilOpen
 	}
 	private var closeState: CloseState = .open
 	public var isClosed: Bool { closeState != .open }
@@ -256,7 +257,7 @@ public actor Database {
 	
 	// MARK: - auto-close when idle
 	
-	/// Auto-close the connection after `delay` seconds of non-use; it reopens transparently on the next access. On by default with AutoDBManager.defaultWaitTime (3 seconds), pass nil to disable. A manually closed DB (close/closeNow) is never auto-reopened. Ignored for in-memory databases, since closing one discards all its data.
+	/// Auto-close the connection after `delay` seconds of non-use; it reopens transparently on the next access. On by default with AutoDBManager.defaultWaitTime (3 seconds), pass nil to disable. A DB closed with close(allowReopen: false) or closeNow() is never auto-reopened, close() with the default allowReopen reopens on access like an auto-close. Ignored for in-memory databases, since closing one discards all its data.
 	public func setAutoClose(after delay: TimeInterval?) {
 		guard let delay else {
 			idleDelay = nil
@@ -283,10 +284,10 @@ public actor Database {
 			keepOpenUntil = until
 		}
 	}
-
+	
 	private func startIdleWatcherIfNeeded() {
 		guard idleDelay != nil, closeState == .open, idleWatcher == nil, dbURL != nil else { return }
-        
+		
 		// bind nil around the Task creation so the watcher never inherits a transaction token and can't re-enter a still-open transaction's lock
 		idleWatcher = SemaphoreToken.$current.withValue(nil) {
 			Task { [weak self] in
@@ -318,12 +319,12 @@ public actor Database {
 			// don't close mid-transaction (and never queue on the semaphore here) - give it a fresh idle window instead
 			return idleDelay
 		}
-		closeDB(reason: .autoClosed)
+		closeDB(reason: .reopensOnAccess)
 		idleWatcher = nil
 		return nil
 	}
 	
-	/// Make sure the connection is usable before touching dbHandle: reopens an auto-closed DB, throws for a manually closed one.
+	/// Make sure the connection is usable before touching dbHandle: reopens a reopensOnAccess DB, throws for one closed until open().
 	/// Synchronous on purpose - there must be no suspension between this check and the caller's use of dbHandle.
 	private func ensureOpen() throws {
 		lastAccess = .now()
@@ -331,10 +332,10 @@ public actor Database {
 		switch closeState {
 		case .open:
 			return
-		case .manuallyClosed:
+		case .closedUntilOpen:
 			throw Error.databaseIsClosed
-		case .autoClosed:
-			// on throw the state stays autoClosed and the next access retries
+		case .reopensOnAccess:
+			// on throw the state stays reopensOnAccess and the next access retries
 			try reopen()
 			closeState = .open
 		}
@@ -345,17 +346,20 @@ public actor Database {
 	var gentleClose: Task<Void, Swift.Error>?
 	var harshClose: Task<Void, Swift.Error>?
 	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
-	public func close(_ token: AutoId?, waitSec: Double = 10) async {
-		await _close(waitSec: waitSec)
+	public func close(_ token: AutoId?, waitSec: Double = 10, allowReopen: Bool = true) async {
+		await _close(waitSec: waitSec, allowReopen: allowReopen)
 	}
 	
 	/// Gently close the database - if a transaction is running, wait for it to finish first.
-	public func close(waitSec: Double = 10) async {
+	/// allowReopen: the next access reopens it transparently, like an idle auto-close. Pass false to keep it closed (queries throw databaseIsClosed) until open() is called.
+	/// A DB that is already closed until open() is never made reopenable by a later close.
+	public func close(waitSec: Double = 10, allowReopen: Bool = true) async {
 		// deliberately no ambient-token fallback: a close from inside a transaction should wait for it, not close the DB mid-transaction
-		await _close(waitSec: waitSec)
+		await _close(waitSec: waitSec, allowReopen: allowReopen)
 	}
 	
-	private func _close(waitSec: Double) async {
+	private func _close(waitSec: Double, allowReopen: Bool) async {
+		let reason: CloseState = allowReopen ? .reopensOnAccess : .closedUntilOpen
 		gentleClose?.cancel()
 		harshClose?.cancel()
 		idleWatcher?.cancel()
@@ -369,7 +373,9 @@ public actor Database {
 			}
 			defer { if hasSemaphore { Task { await semaphore.signal(token: nil) } } }
 			try Task.checkCancellation()
-			closeDB(reason: .manuallyClosed)
+			closeDB(reason: reason)
+			// closed in time, the harsh close must not interrupt a connection that reopened on access meanwhile
+			harshClose?.cancel()
 		}
 		
 		// kill after some time?
@@ -382,14 +388,14 @@ public actor Database {
 				return
 			}
 			guard closeState == .open else {
-				// already physically closed - but an interleaved auto-close must still become a manual close
-				closeDB(reason: .manuallyClosed)
+				// already physically closed - but an interleaved auto-close must still become closed until open() when asked to
+				closeDB(reason: reason)
 				return
 			}
 			// if there still is db-access (which it most likely isn't), we can't know that so must interrups to let go of handle.
 			//print("Interrupting sqlite to force close")
 			sqlite3_interrupt(dbHandle)  //https://www.sqlite.org/c3ref/interrupt.html
-			closeDB(reason: .manuallyClosed)
+			closeDB(reason: reason)
 		}
 	}
 	
@@ -399,16 +405,16 @@ public actor Database {
 		idleWatcher?.cancel()
 		idleWatcher = nil
 		switch closeState {
-		case .manuallyClosed:
+		case .closedUntilOpen:
 			return
-		case .autoClosed:
+		case .reopensOnAccess:
 			// the handle is already closed, it must now stay closed
-			closeState = .manuallyClosed
+			closeState = .closedUntilOpen
 			return
 		case .open:
 			break
 		}
-		closeState = .manuallyClosed
+		closeState = .closedUntilOpen
 		
 		// interrubt any other long-running query or transaction, to let go of the handle. If there is no long-running query, this will do nothing
 		sqlite3_interrupt(dbHandle)  //https://www.sqlite.org/c3ref/interrupt.html
@@ -432,14 +438,14 @@ public actor Database {
 	}
 	
 	private func closeDB(reason: CloseState) {
-		if reason == .manuallyClosed {
+		if reason == .closedUntilOpen {
 			idleWatcher?.cancel()
 			idleWatcher = nil
 		}
 		guard closeState == .open else {
-			// already physically closed - only escalate auto -> manual, never close the handle twice
-			if reason == .manuallyClosed {
-				closeState = .manuallyClosed
+			// already physically closed - only escalate reopensOnAccess -> closedUntilOpen, never close the handle twice
+			if reason == .closedUntilOpen {
+				closeState = .closedUntilOpen
 			}
 			return
 		}
@@ -505,12 +511,12 @@ public actor Database {
 	
 	public var changeCount: Int64 {
 		get {
-			if closeState == .autoClosed {
+			if closeState == .reopensOnAccess {
 				// same transparent-reopen policy as the query methods
 				try? ensureOpen()
 			}
 			guard closeState == .open else {
-				// manually closed (or the reopen failed) - the handle must not be touched
+				// closed until open() (or the reopen failed) - the handle must not be touched
 				return 0
 			}
 			if #available(macOS 12.3, iOS 15.4, tvOS 15.4, watchOS 8.5, *) {

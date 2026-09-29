@@ -157,7 +157,7 @@ await AutoDBManager.shared.setAutoClose(after: 60)
 try await MyTable.db().setAutoClose(after: nil)
 ```
 
-Manual closing takes precedence: a DB closed with `close()` or `closeNow()` stays closed (queries throw `databaseIsClosed`) until you call `open()` - it is never auto-reopened. Auto-close also never interrupts work: it waits out running transactions and gives them a fresh idle window. In-memory databases never auto-close, since closing one would discard all their data.
+A DB closed with `close()` reopens on the next access, just like after an auto-close - handy when going to the background, since a query that races the return to the foreground simply reopens it. Pass `close(allowReopen: false)`, or use `closeNow()`, to keep it closed (queries throw `databaseIsClosed`) until you call `open()`; such a DB is never auto-reopened, and a later `close()` does not make it reopenable again. Auto-close also never interrupts work: it waits out running transactions and gives them a fresh idle window. In-memory databases never auto-close, since closing one would discard all their data.
 
 Auto-close is aware of scheduled work: `saveChangesLater`, `saveAllChangesLater` and `deleteLater` hold the affected connection open until their flush has run (whatever the configured delays are), so the DB never closes just to reopen for a pending save. If you schedule delayed DB work of your own, you can do the same with `db.keepOpen(for: seconds)` - a floor that postpones auto-close but never delays a manual close.
 

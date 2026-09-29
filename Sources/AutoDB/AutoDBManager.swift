@@ -926,10 +926,10 @@ extension UInt64 {
 	
 	// MARK: - open and close db
 	
-	/// Close all databases within waitSec
-	public func close(waitSec: Double = 10) async {
+	/// Close all databases within waitSec. allowReopen: the next access reopens a database transparently, pass false to keep them closed until open().
+	public func close(waitSec: Double = 10, allowReopen: Bool = true) async {
 		for db in sharedDatabases {
-			await db.value.close(waitSec: waitSec)
+			await db.value.close(waitSec: waitSec, allowReopen: allowReopen)
 		}
 	}
 	
@@ -950,7 +950,7 @@ extension UInt64 {
 	/// Change database file in the middle of operations, this is good for testing. No dbURL means memory.
 	public func switchDB(_ newPositions: [SettingsKey: URL]) async throws {
 		for db in sharedDatabases {
-			await db.value.close(waitSec: 0.1)
+			await db.value.close(waitSec: 0.1, allowReopen: false)
 		}
 		tables.removeAll()
 		databases.removeAll()
