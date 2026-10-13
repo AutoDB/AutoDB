@@ -503,6 +503,41 @@ final class AutoDBTests: XCTestCase {
 		}
 	}
 	
+	func testDuplicateDoesNotBlockLaterSaves() async throws {
+		try await AutoDBManager.shared.truncateTable(UniqueString.Value.self)
+
+		let existing = await UniqueString.create()
+		existing.string = "taken"
+		try await existing.save()
+
+		// UniqueString has no didSet tracking: register the changes like a tracked model does
+		let duplicate = await UniqueString.create()
+		duplicate.string = "taken"
+		await duplicate.didChange()
+		do {
+			try await duplicate.save()
+			XCTFail("Expected an error when saving a duplicate")
+		} catch AutoError.uniqueConstraintFailed(let ids) {
+			XCTAssertEqual(ids, [duplicate.id])
+		}
+
+		// the duplicate is no longer a pending change: saving everything succeeds and saves what was created after it
+		let other = await UniqueString.create()
+		other.string = "free"
+		await other.didChange()
+		try await AutoDBManager.shared.saveAllChanges()
+		let saved = try await UniqueString.fetchId(other.id)
+		XCTAssertEqual(saved.string, "free")
+
+		// still created: saved unchanged it is an INSERT that fails again, never a REPLACE of the row it collided with
+		do {
+			try await duplicate.save()
+			XCTFail("Expected an error when saving a duplicate")
+		} catch AutoError.uniqueConstraintFailed {}
+		let kept = try await UniqueString.fetchId(existing.id)
+		XCTAssertEqual(kept.string, "taken")
+	}
+
 	func testTypedModelBucketsSavePendingChanges() async throws {
 		try await AutoDBManager.shared.truncateTable(TrackedModel.Value.self)
 		

@@ -434,7 +434,14 @@ public extension Model {
 		}
 		
 		if created.isEmpty == false {
-			try await TableType.saveList(created, onlyUpdated: false)
+			do {
+				try await TableType.saveList(created, onlyUpdated: false)
+			} catch AutoError.uniqueConstraintFailed(let duplicates) {
+				// a duplicate can never be inserted as it is: saveAllChanges would fail on it, and everything created alongside it, forever.
+				// It stays created, so a save after the caller changed it is still an INSERT and never REPLACEs the row it collided with.
+				await AutoDBManager.shared.removeFromChanged(duplicates, ObjectIdentifier(self))
+				throw AutoError.uniqueConstraintFailed(duplicates)
+			}
 			//remove all changed objects
 			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(self))
 		}
