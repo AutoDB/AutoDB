@@ -1,0 +1,32 @@
+#!/bin/bash
+# Formats the staged Swift files with swift-format before each commit.
+# A file that also has unstaged changes gets only its staged version formatted
+# in the index, so unstaged hunks never sneak into the commit.
+# Enable once per clone: git config core.hooksPath .githooks
+
+# GUI clients (Tower, Xcode) run hooks with a minimal PATH.
+export PATH="$HOME/.swiftly/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+if command -v swift-format >/dev/null 2>&1; then
+	format() { swift-format "$@"; }
+elif xcrun --find swift-format >/dev/null 2>&1; then
+	format() { xcrun swift-format "$@"; }
+else
+	echo "pre-commit: swift-format not found, skipping formatting" >&2
+	exit 0
+fi
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+config=.swift-format
+
+git diff --cached --name-only --diff-filter=ACMR -z -- '*.swift' | while IFS= read -r -d '' file; do
+	if git diff --quiet -- "$file"; then
+		format -i --configuration "$config" "$file" || exit 1
+		git add -- "$file" || exit 1
+	else
+		mode=$(git ls-files -s -- "$file" | cut -d' ' -f1)
+		hash=$(git show ":$file" | format --configuration "$config" --assume-filename "$file" - | git hash-object -w --stdin) || exit 1
+		git update-index --cacheinfo "$mode,$hash,$file" || exit 1
+		format -i --configuration "$config" "$file"
+	fi
+done

@@ -14,7 +14,7 @@ struct Optimizations: @unchecked Sendable {
 }
 
 /// All table classes must implement AutoDB and be @unchecked Sendable. Regular Sendable is not meaningful (must both be decodable and owned by a global actor).
-public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwner, TableModel {
+public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwner, TableModel, CustomStringConvertible {
 	associatedtype TableType: Table
 	
 	/// Always called when creating an object
@@ -113,6 +113,11 @@ public extension Model {
 	
 	func hash(into hasher: inout Hasher) {
 		hasher.combine(id)
+	}
+	
+	/// Print the backing value instead of just the class name.
+	var description: String {
+		String(describing: value)
 	}
 	
 	/// sometimes object's inits must be sync. Force-wait in that case, this causes hang by design.

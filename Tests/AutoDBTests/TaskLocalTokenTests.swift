@@ -14,6 +14,7 @@ import Foundation
 
 /// old-schema table whose migration deliberately does NOT forward the token - the ambient task-local must carry it
 struct MigNoToken: Table {
+	static let autoDBSettings = TestDatabase.taskLocalToken
 	var id: AutoId = 1
 	var plain = "plain"
 	
@@ -57,6 +58,7 @@ actor TokenBox {
 /// a Model whose awakeFromInit saves itself and creates a sibling of the same type - both re-enter the encoder semaphore that create() holds
 final class SelfSavingModel: Model, @unchecked Sendable {
 	struct Value: Table {
+		static let autoDBSettings = TestDatabase.taskLocalToken
 		static let tableName = "SelfSavingModel"
 		var id: AutoId = 0
 		var counter = 0
@@ -76,12 +78,24 @@ final class SelfSavingModel: Model, @unchecked Sendable {
 	}
 }
 
+final class TokenRow: Table, @unchecked Sendable {
+	static let autoDBSettings = TestDatabase.taskLocalToken
+	var id: AutoId = 0
+	var integer = 1
+}
+
+struct HookChild: Table {
+	static let autoDBSettings = TestDatabase.taskLocalToken
+	var id: AutoId = 0
+}
+
 /// overrides awakeFromInit WITHOUT repeating any framework work - create() and register() must still cache it and set its relation owners
 final class HookOnlyModel: Model, @unchecked Sendable {
 	struct Value: Table {
+		static let autoDBSettings = TestDatabase.taskLocalToken
 		static let tableName = "HookOnlyModel"
 		var id: AutoId = 0
-		var children = ManyRelation<Child>(initFetch: true)
+		var children = ManyRelation<HookChild>(initFetch: true)
 		var awoken = false
 	}
 	var value: Value
@@ -120,18 +134,18 @@ class TaskLocalTokenTests: @unchecked Sendable {
 	}
 	
 	@Test func nilTokenInsideTransaction() async throws {
-		_ = try await TransClass.db()
+		_ = try await TokenRow.db()
 		let flag = DoneFlag()
 		let work = Task {
-			try await TransClass.transaction { db in
+			try await TokenRow.transaction { db in
 				// none of these forward the token - previously each would deadlock
 				try await db.query("SELECT 1")
-				let item = await TransClass.create(77)
+				let item = await TokenRow.create(77)
 				item.integer = 5
 				try await item.save()
-				let fetched = try await TransClass.fetchId(77)
+				let fetched = try await TokenRow.fetchId(77)
 				#expect(fetched.integer == 5)
-				try await db.execute("DELETE FROM TransClass WHERE id = 77")
+				try await db.execute("DELETE FROM TokenRow WHERE id = 77")
 			}
 			flag.done = true
 		}
@@ -145,7 +159,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 	@Test func nestedTransactionReusesAmbientToken() async throws {
 		// this exact shape used to be the deadlockSemaphore example in TransactionTests -
 		// a nested transaction without a forwarded token now picks up the outer token from the task-local
-		let db = try await TransClass.db()
+		let db = try await TokenRow.db()
 		let flag = DoneFlag()
 		let work = Task {
 			try? await db.transaction { db in
@@ -153,7 +167,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 				try await db.transaction { db in
 					// reuses the outer lock token, nests only the savepoint
 					#expect(SemaphoreToken.current == outerToken)
-					try await db.execute("INSERT OR REPLACE INTO TransClass (id, integer) VALUES (78, 5)")
+					try await db.execute("INSERT OR REPLACE INTO TokenRow (id, integer) VALUES (78, 5)")
 				}
 				// roll back the outer - must also roll back the (released) inner savepoint
 				throw TestError.transaction
@@ -163,7 +177,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 		try await waitFor(flag)
 		#expect(flag.done, "nested nil-token transaction deadlocked")
 		if flag.done {
-			let rows = try await db.query("SELECT id FROM TransClass WHERE id = 78")
+			let rows = try await db.query("SELECT id FROM TokenRow WHERE id = 78")
 			#expect(rows.isEmpty, "inner transaction's write survived the outer rollback")
 		} else {
 			work.cancel()
@@ -173,7 +187,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 	@Test func explicitTokenWinsOverAmbient() async throws {
 		// deliberately uses the deprecated token-taking API - this is the compatibility test
 		// for users who still pass tokens explicitly, so the deprecation warning here is expected.
-		let db = try await TransClass.db()
+		let db = try await TokenRow.db()
 		let explicit = AutoId.generateId()
 		try await SemaphoreToken.$current.withValue(AutoId.generateId()) {
 			try await db.transaction(token: explicit) { db, token in
@@ -197,7 +211,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 	
 	@Test func migrationWithoutForwardingToken() async throws {
 		// create an "old" table for MigNoToken before its own setup runs, then trigger migration
-		let db = try await MigFirst.db()
+		let db = try await TokenRow.db()
 		_ = try? await db.execute("DROP TABLE MigNoToken")
 		try await db.execute(MigNoToken.createTableSQL)
 		try await db.execute("INSERT INTO MigNoToken (id, plain_old) VALUES (1, 'migrated value')")

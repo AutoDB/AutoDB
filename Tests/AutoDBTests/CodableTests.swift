@@ -21,8 +21,7 @@ public struct OptionState: OptionSet, Sendable, Codable, Hashable {
 		self.rawValue = rawValue
 	}
 	
-	public static func == (lhs: OptionState, rhs: OptionState) -> Bool
-	{
+	public static func == (lhs: OptionState, rhs: OptionState) -> Bool {
 		return lhs.rawValue == rhs.rawValue
 	}
 	
@@ -37,6 +36,7 @@ public enum StringEnum: String, Codable, Sendable {
 }
 
 struct OptionTable: Table {
+	static let autoDBSettings = TestDatabase.codable
 	static let tableName = "optiontable"
 	var id: AutoId = 1
 	var state: OptionState = .isFavorite

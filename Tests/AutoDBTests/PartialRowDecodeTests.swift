@@ -18,6 +18,7 @@ struct PartialRowOptions: OptionSet, Codable, Hashable, Sendable {
 }
 
 struct PartialRowTable: Table {
+	static let autoDBSettings = TestDatabase.partialRowDecode
 	static let tableName = "PartialRowTable"
 	
 	var id: AutoId = 1

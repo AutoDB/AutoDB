@@ -145,6 +145,14 @@ While the object stays retained, `fetched === artist`.
 - [Post-1.0 backlog](Documentation/Backlog.md)
 - [Cross-platform notes](Documentation/Android.md)
 
+## Contributing
+
+A pre-commit hook formats staged Swift files with swift-format. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## License
 
 AutoDB is currently distributed under the MIT license. See [LICENSE](LICENSE).

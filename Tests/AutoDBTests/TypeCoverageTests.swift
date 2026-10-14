@@ -17,21 +17,21 @@ enum PlainStringRawEnum: String, Codable, Sendable {
 
 enum PrimitiveStringEnum: String, SQLStringEnum, Codable, Sendable, CaseIterable {
 	typealias RawValue = String
-
+	
 	case alpha = "alpha"
 	case beta = "beta"
 }
 
 enum PrimitiveIntEnum: Int, SQLIntegerEnum, Codable, Sendable, CaseIterable {
 	typealias RawValue = Int
-
+	
 	case first = 1
 	case second = 2
 }
 
 enum PrimitiveUIntEnum: UInt64, SQLUIntegerEnum, Codable, Sendable, CaseIterable {
 	typealias RawValue = UInt64
-
+	
 	case first = 1
 	case second = 2
 }
@@ -53,8 +53,9 @@ struct BlobPayloadV2: Codable, Hashable, Sendable {
 }
 
 struct TypeMatrixRow: Table {
+	static let autoDBSettings = TestDatabase.typeCoverage
 	static let tableName = "TypeMatrixRow"
-
+	
 	var id: AutoId = 1
 	var string = "hello"
 	var optionalString: String? = nil
@@ -95,8 +96,9 @@ struct TypeMatrixRow: Table {
 }
 
 struct PayloadEvolutionRow: Table {
+	static let autoDBSettings = TestDatabase.typeCoverage
 	static let tableName = "PayloadEvolutionRow"
-
+	
 	var id: AutoId = 1
 	var payload = BlobPayloadV2(nested: NestedBlobPayload(title: "payload", count: 0), tags: [], note: nil)
 }
@@ -109,19 +111,20 @@ struct TypeCoverageTests {
 		var result: [String: (type: String, nullable: Bool)] = [:]
 		for row in rows {
 			guard let name = row["name"]?.stringValue,
-			      let type = row["type"]?.stringValue,
-			      let notNull = row["notnull"]?.boolValue else {
+				let type = row["type"]?.stringValue,
+				let notNull = row["notnull"]?.boolValue
+			else {
 				continue
 			}
 			result[name] = (type, !notNull)
 		}
 		return result
 	}
-
+	
 	@Test
 	func sqlNativeSchemaMatchesStoredPrimitiveTypes() async throws {
 		let schema = try await schemaMap(for: TypeMatrixRow.self)
-
+		
 		#expect(schema["string"]?.type == "TEXT")
 		#expect(schema["optionalString"]?.type == "TEXT")
 		#expect(schema["plainStringEnum"]?.type == "TEXT")
@@ -129,7 +132,7 @@ struct TypeCoverageTests {
 		#expect(schema["optionalStringEnum"]?.type == "TEXT")
 		#expect(schema["url"]?.type == "TEXT")
 		#expect(schema["optionalURL"]?.type == "TEXT")
-
+		
 		#expect(schema["bool"]?.type == "INTEGER")
 		#expect(schema["optionalBool"]?.type == "INTEGER")
 		#expect(schema["intValue"]?.type == "INTEGER")
@@ -148,20 +151,20 @@ struct TypeCoverageTests {
 		#expect(schema["optionalSignedEnum"]?.type == "INTEGER")
 		#expect(schema["unsignedEnum"]?.type == "INTEGER")
 		#expect(schema["optionalUnsignedEnum"]?.type == "INTEGER")
-
+		
 		#expect(schema["doubleValue"]?.type == "DOUBLE")
 		#expect(schema["optionalDouble"]?.type == "DOUBLE")
 		#expect(schema["floatValue"]?.type == "DOUBLE")
 		#expect(schema["date"]?.type == "DOUBLE")
 		#expect(schema["optionalDate"]?.type == "DOUBLE")
-
+		
 		#expect(schema["data"]?.type == "BLOB")
 		#expect(schema["optionalData"]?.type == "BLOB")
 		#expect(schema["autoId128"]?.type == "BLOB")
 		#expect(schema["optionalAutoId128"]?.type == "BLOB")
 		#expect(schema["payload"]?.type == "BLOB")
 		#expect(schema["optionalPayload"]?.type == "BLOB")
-
+		
 		#expect(schema["optionalString"]?.nullable == true)
 		#expect(schema["optionalBool"]?.nullable == true)
 		#expect(schema["optionalDouble"]?.nullable == true)
@@ -176,11 +179,11 @@ struct TypeCoverageTests {
 		#expect(schema["optionalUnsignedEnum"]?.nullable == true)
 		#expect(schema["optionalPayload"]?.nullable == true)
 	}
-
+	
 	@Test
 	func roundTripsNativeAndBlobBackedTypes() async throws {
 		try await TypeMatrixRow.truncateTable()
-
+		
 		var row = await TypeMatrixRow.create(42)
 		row.string = "stored"
 		row.optionalString = "optional"
@@ -219,10 +222,10 @@ struct TypeCoverageTests {
 		row.payload = BlobPayload(nested: NestedBlobPayload(title: "nested", count: 8), tags: ["swift", "autodb"])
 		row.optionalPayload = BlobPayload(nested: NestedBlobPayload(title: "optional", count: 9), tags: ["blob"])
 		try await row.save()
-
+		
 		let fetched = try await TypeMatrixRow.fetchId(42)
 		#expect(fetched == row)
-
+		
 		let rawRow = try #require(try await TypeMatrixRow.query("SELECT * FROM TypeMatrixRow WHERE id = ?", [row.id]).first)
 		#expect(rawRow["string"]?.stringValue == row.string)
 		#expect(rawRow["plainStringEnum"]?.stringValue == row.plainStringEnum.rawValue)
@@ -243,11 +246,11 @@ struct TypeCoverageTests {
 		#expect(rawRow["payload"]?.dataValue != nil)
 		#expect(rawRow["optionalPayload"]?.dataValue != nil)
 	}
-
+	
 	@Test
 	func enumColumnsStayQueryableAsPrimitiveStorage() async throws {
 		try await TypeMatrixRow.truncateTable()
-
+		
 		var row = await TypeMatrixRow.create(7)
 		row.plainStringEnum = .beta
 		row.stringEnum = .beta
@@ -257,7 +260,7 @@ struct TypeCoverageTests {
 		row.unsignedEnum = .second
 		row.optionalUnsignedEnum = .first
 		try await row.save()
-
+		
 		let byEnums = try await TypeMatrixRow.fetchQuery(
 			"WHERE plainStringEnum = ? AND stringEnum = ? AND optionalStringEnum = ? AND signedEnum = ? AND optionalSignedEnum = ? AND unsignedEnum = ? AND optionalUnsignedEnum = ?",
 			[
@@ -272,7 +275,7 @@ struct TypeCoverageTests {
 		)
 		#expect(byEnums.count == 1)
 		#expect(byEnums.first?.id == row.id)
-
+		
 		let byRawValues = try await TypeMatrixRow.fetchQuery(
 			"WHERE plainStringEnum = ? AND stringEnum = ? AND signedEnum = ? AND unsignedEnum = ?",
 			[
@@ -285,23 +288,24 @@ struct TypeCoverageTests {
 		#expect(byRawValues.count == 1)
 		#expect(byRawValues.first?.id == row.id)
 	}
-
+	
 	@Test
 	func blobPayloadEvolutionDecodesAddedOptionalFields() async throws {
 		let db = try await PayloadEvolutionRow.db()
 		_ = try? await db.execute("DROP TABLE PayloadEvolutionRow")
-		try await db.execute("""
-		CREATE TABLE `PayloadEvolutionRow` (
-			`id` INTEGER NOT NULL DEFAULT 1,
-			`payload` BLOB NOT NULL DEFAULT X'',
-			PRIMARY KEY (`id`)
-		)
-		""")
-
+		try await db.execute(
+			"""
+			CREATE TABLE `PayloadEvolutionRow` (
+				`id` INTEGER NOT NULL DEFAULT 1,
+				`payload` BLOB NOT NULL DEFAULT X'',
+				PRIMARY KEY (`id`)
+			)
+			""")
+		
 		let legacy = BlobPayload(nested: NestedBlobPayload(title: "legacy", count: 11), tags: ["old"])
 		let legacyData = try JSONEncoder().encode(legacy)
 		try await db.execute("INSERT INTO PayloadEvolutionRow (id, payload) VALUES (?, ?)", [AutoId(1), legacyData])
-
+		
 		let fetched = try await PayloadEvolutionRow.fetchId(1)
 		#expect(fetched.payload.nested.title == "legacy")
 		#expect(fetched.payload.nested.count == 11)

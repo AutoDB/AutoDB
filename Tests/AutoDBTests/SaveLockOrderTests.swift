@@ -13,6 +13,7 @@ import Testing
 @testable import AutoDB
 
 struct LockOrderRow: Table {
+	static let autoDBSettings = TestDatabase.saveLockOrder
 	static let tableName = "LockOrderRow"
 	
 	var id: AutoId = 1
@@ -21,6 +22,7 @@ struct LockOrderRow: Table {
 
 final class LockOrderModel: StoredModel {
 	struct Value: Table {
+		static let autoDBSettings = TestDatabase.saveLockOrder
 		static let tableName = "LockOrderModel"
 		var id: AutoId = 0
 		var name = ""
@@ -39,11 +41,13 @@ final class LockOrderModel: StoredModel {
 
 /// only this file's setup test touches these, so their first-time setup happens in that test
 struct SetupLockOrderInside: Table {
+	static let autoDBSettings = TestDatabase.saveLockOrder
 	static let tableName = "SetupLockOrderInside"
 	var id: AutoId = 1
 }
 
 struct SetupLockOrderOutside: Table {
+	static let autoDBSettings = TestDatabase.saveLockOrder
 	static let tableName = "SetupLockOrderOutside"
 	var id: AutoId = 1
 }

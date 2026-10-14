@@ -1,19 +1,18 @@
 import AutoDB
 import Foundation
-import XCTest
+import Testing
 
+/// The suite's own database file in the cache folder (same layout as TestDatabase in AutoDBTests), deleted the first time a run uses it.
 private enum IntegrationDatabase {
-	static let path = URL(fileURLWithPath: NSTemporaryDirectory())
-		.appendingPathComponent("AutoDBIntegrationTests.sqlite")
-		.path
-    
-	static let settings = AutoDBSettings(
-		path: path,
-		iCloudBackup: false,
-		inAppFolder: false,
-		inCacheFolder: false
-	)
-	static let settingsKey = SettingsKey.specific(settings)
+	static let settingsKey: SettingsKey = {
+		let path = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+			.appendingPathComponent("AutoDBTests/AutoDBIntegrationTests.db")
+			.path
+		for suffix in ["", "-wal", "-shm"] {
+			try? FileManager.default.removeItem(atPath: path + suffix)
+		}
+		return .specific(AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: false))
+	}()
 }
 
 private final class SmokeArtist: Model, @unchecked Sendable {
@@ -76,8 +75,9 @@ private final class SmokeArticle: Model, @unchecked Sendable {
 	
 }
 
-final class AutoDBIntegrationTests: XCTestCase {
-	func testPublicModelRoundTrip() async throws {
+@Suite(.serialized)
+struct AutoDBIntegrationTests {
+	@Test func testPublicModelRoundTrip() async throws {
 		try await SmokeArtist.truncateTable()
 		
 		let artist = await SmokeArtist.create()
@@ -86,11 +86,11 @@ final class AutoDBIntegrationTests: XCTestCase {
 		try await artist.save()
 		
 		let fetched = try await SmokeArtist.fetchId(artist.id)
-		XCTAssertTrue(fetched === artist)
-		XCTAssertEqual(fetched.value.genre, "Post-punk")
+		#expect(fetched === artist)
+		#expect(fetched.value.genre == "Post-punk")
 	}
 	
-	func testPublicOneRelationRoundTrip() async throws {
+	@Test func testPublicOneRelationRoundTrip() async throws {
 		try await SmokeArtist.truncateTable()
 		try await SmokeAlbumArt.truncateTable()
 		
@@ -105,11 +105,11 @@ final class AutoDBIntegrationTests: XCTestCase {
 		
 		let fetched = try await SmokeAlbumArt.fetchId(art.id)
 		let relatedArtist = try await fetched.value.artist.object
-		XCTAssertEqual(relatedArtist.id, artist.id)
-		XCTAssertEqual(relatedArtist.value.name, "Siouxsie and the Banshees")
+		#expect(relatedArtist.id == artist.id)
+		#expect(relatedArtist.value.name == "Siouxsie and the Banshees")
 	}
 	
-	func testPublicFTSSearch() async throws {
+	@Test func testPublicFTSSearch() async throws {
 		try await SmokeArticle.truncateTable()
 		
 		let first = await SmokeArticle.create()
@@ -123,7 +123,7 @@ final class AutoDBIntegrationTests: XCTestCase {
 		try await [first, second].save()
 		
 		let matches = try await first.bodyIndex.search("gothic")
-		XCTAssertEqual(matches.map(\.id), [first.id])
-		XCTAssertEqual(matches.first?.body, "Dark gothic pop with shimmering guitars")
+		#expect(matches.map(\.id) == [first.id])
+		#expect(matches.first?.body == "Dark gothic pop with shimmering guitars")
 	}
 }

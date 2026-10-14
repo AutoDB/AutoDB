@@ -1,8 +1,9 @@
-import XCTest
+import Testing
 @testable import AutoDB
 import Foundation
 
 struct ExampleInit: Table {
+	static let autoDBSettings = TestDatabase.autoDB
 	var id: AutoId = 0
 	let something: Int
 	init() {
@@ -46,11 +47,13 @@ class Resource {
 
  */
 
-@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-final class AutoDBTests: XCTestCase {
+@Suite(.serialized)
+final class AutoDBTests {
 	
-	static override func setUp() {
-		AutoLog.setup()
+	private static let logSetup: Void = AutoLog.setup()
+	
+	init() {
+		_ = Self.logSetup
 	}
 	
 	static let resourcePath: String = {
@@ -67,41 +70,40 @@ final class AutoDBTests: XCTestCase {
 	}()
 
 	// generic fetching, an object should be created, inserted into the DBManager and be fetched as long as it exists there.
-	func testStoring() async throws {
+	@Test func testStoring() async throws {
 		
 		var instance = await BaseClass.create(1)
 		instance.anOptInt = 99
 		try await instance.save()
 		
 		let item = try await BaseClass.fetchId(1)
-		XCTAssertEqual(item, instance)
+		#expect(item == instance)
 		//item.anOptInt = 6
-		XCTAssertEqual(item.anOptInt, instance.anOptInt)
+		#expect(item.anOptInt == instance.anOptInt)
 	}
 	
-	func testInit() async throws {
+	@Test func testInit() async throws {
 		
 		try await ExampleInit.create(12).save()
 		let some = try await ExampleInit.fetchId(12)
-		XCTAssertEqual(some.something, 2)
+		#expect(some.something == 2)
 	}
 	
-	func testEqualModelClasses() async throws {
+	@Test func testEqualModelClasses() async throws {
 		let lhs = await DataAndDate.create(1)
 		let rhs = await DataAndDate.create(1)
-		XCTAssertEqual(lhs, rhs)
+		#expect(lhs == rhs)
 		
 		lhs.dubDub = 2
 		rhs.dubDub = 4
-		XCTAssertNotEqual(lhs, rhs)
+		#expect(lhs != rhs)
 		
 		lhs.dubDub = 4
-		XCTAssertEqual(lhs, rhs)
+		#expect(lhs == rhs)
 	}
 	
-	func testDecodable() throws {
+	@Test func testDecodable() throws {
 		
-		//let expect = XCTestExpectation(description: "expect")
 		let testInt = 4
 		let base = DataAndDate()
 		base.id = UInt64(testInt)
@@ -112,11 +114,12 @@ final class AutoDBTests: XCTestCase {
 		print(string)
 		let decoded = try JSONDecoder().decode(DataAndDate.self, from: encoded)
 		
-		XCTAssertEqual(decoded.id, UInt64(testInt), "Id didn't work")
-		XCTAssertEqual(decoded.intPub, testInt, "regular int")
+		#expect(decoded.id == UInt64(testInt), "Id didn't work")
+		#expect(decoded.intPub == testInt, "regular int")
 	}
 	
-	func testObservedDecodable() async throws {
+	@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+	@Test func testObservedDecodable() async throws {
 		
 		let base = await ObserveBasic.create(2)
 		base.string = "my own little string"
@@ -127,11 +130,12 @@ final class AutoDBTests: XCTestCase {
 		print(string)
 		let decoded = try JSONDecoder().decode(ObserveBasic.self, from: encoded)
 		
-		XCTAssertEqual(decoded.string, base.string, "Id didn't work")
+		#expect(decoded.string == base.string, "Id didn't work")
 	}
 	
 	// then when saving, we use encoder and get an array of encodable values. Then just encode each blob to data, and let the rest become mappings to Sqlite.
-	func testEncodingToDB() async throws {
+	@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+	@Test func testEncodingToDB() async throws {
 		
 		let db = try await ObserveBasic.db()
 		try await ObserveBasic.truncateTable()
@@ -149,15 +153,15 @@ final class AutoDBTests: XCTestCase {
 		
 		var row = try await db.query("SELECT optString FROM ObserveBasic WHERE id = 2").first!
 		var value = row.first!.value.stringValue
-		XCTAssertEqual(value, base.optString)
+		#expect(value == base.optString)
 		
 		row = try await db.query("SELECT optString FROM ObserveBasic WHERE id = 3").first!
 		value = row.first!.value.stringValue
-		XCTAssertEqual(value, base3.optString)
+		#expect(value == base3.optString)
 	}
 	
-	@available(macOS 15.0, *)
-	func testDecodeInts() async throws {
+	@available(macOS 15.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+	@Test func testDecodeInts() async throws {
 		let values: [String: SQLValue] = [
 			"id": try SQLValue.fromAny(UInt64.max),
 			"integer": try SQLValue.fromAny(Int.min),
@@ -173,30 +177,30 @@ final class AutoDBTests: XCTestCase {
 		let decoder = SQLRowDecoder(IntTester.self, table, values)
 		let base = try IntTester(from: decoder)
 		
-		XCTAssertEqual(base.integer, .min)
-		XCTAssertEqual(base.integer32, .min)
-		XCTAssertEqual(base.integer16, .max)
-		XCTAssertEqual(base.integer8, .min)
-		XCTAssertEqual(base.integeru8, .max)
-		XCTAssertEqual(base.id, .max)
+		#expect(base.integer == .min)
+		#expect(base.integer32 == .min)
+		#expect(base.integer16 == .max)
+		#expect(base.integer8 == .min)
+		#expect(base.integeru8 == .max)
+		#expect(base.id == .max)
 		
 		let now = Date()
 		//await db.setDebug()
 		let id = AutoId.max - 3
 		try await db.query("INSERT OR REPLACE INTO IntTester (id, time, integer) VALUES (?, ?, ?)", [id, now.timeIntervalSince1970, Int.min])
 		let next = try await IntTester.fetchId(id)
-		XCTAssertEqual(next.integer, .min)
-		XCTAssertEqual(next.time?.timeIntervalSince1970, now.timeIntervalSince1970)
-		XCTAssertEqual(next.id, id)
+		#expect(next.integer == .min)
+		#expect(next.time?.timeIntervalSince1970 == now.timeIntervalSince1970)
+		#expect(next.id == id)
 	}
 	
 	@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-	func testTableGeneration() async throws {
+	@Test func testTableGeneration() async throws {
 		
-		// test that values get copied correctly when changing column types
-		let db = try await AutoDBManager.shared.initDB(AutoDBSettings())
-		try await AutoDBManager.shared.truncateTable(Mod.self)
-		try await db.query("CREATE TABLE IF NOT EXISTS Mod (`id` INTEGER NOT NULL DEFAULT 0,`removeColumn` INTEGER NOT NULL DEFAULT 0,`bigInt` TEXT NOT NULL DEFAULT 0, `string` INTEGER NOT NULL DEFAULT 0,PRIMARY KEY (`id`));")
+		// test that values get copied correctly when changing column types: create an "old" Mod table in the same file before its own setup runs
+		let db = try await BaseClass.db()
+		_ = try? await db.execute("DROP TABLE Mod")
+		try await db.query("CREATE TABLE Mod (`id` INTEGER NOT NULL DEFAULT 0,`removeColumn` INTEGER NOT NULL DEFAULT 0,`bigInt` TEXT NOT NULL DEFAULT 0, `string` INTEGER NOT NULL DEFAULT 0,PRIMARY KEY (`id`));")
 		try await db.query("INSERT INTO Mod (id, string, bigInt) VALUES (1, 2, -1)")
 		
 		try await Mod.db()
@@ -204,30 +208,30 @@ final class AutoDBTests: XCTestCase {
 		let row = try await db.query("SELECT string, bigInt from Mod where id = 1").first!
 		
 		let stringColumn = row["string"]!
-		XCTAssertEqual(stringColumn.intValue, 2)
-		XCTAssertEqual(stringColumn.stringValue, "2")
+		#expect(stringColumn.intValue == 2)
+		#expect(stringColumn.stringValue == "2")
 		
 		let bigInt = row["bigInt"]!
-		XCTAssertEqual(bigInt.intValue, -1)
-		XCTAssertEqual(bigInt.stringValue, "-1")
-		XCTAssertEqual(bigInt.uint64Value, 18446744073709551615)
+		#expect(bigInt.intValue == -1)
+		#expect(bigInt.stringValue == "-1")
+		#expect(bigInt.uint64Value == 18446744073709551615)
 		
 		let double: Double = -1
 		let intConvert = Int64(double)
-		XCTAssertEqual(UInt64(bitPattern: intConvert), UINT64_MAX)
+		#expect(UInt64(bitPattern: intConvert) == UINT64_MAX)
 		
 		// now fetch a regular object!
 		let mod = try await Mod.fetchId(1)
-		XCTAssertEqual(mod.string, "2")
+		#expect(mod.string == "2")
 	}
 	
 	func lookupObjectsCount(_ tableName: ObjectIdentifier, _ expectedCount: Int, _ message: String) async {
 		
 		let count = await AutoDBManager.shared.lookupObjectsCount(tableName)
-		XCTAssertEqual(count, expectedCount, message)
+		#expect(count == expectedCount, Comment(rawValue: message))
 	}
 	
-	func test_fetching_api() async throws {
+	@Test func test_fetching_api() async throws {
 		
 		try await BaseClass.truncateTable()
 		
@@ -238,14 +242,14 @@ final class AutoDBTests: XCTestCase {
 		let list = try await BaseClass.fetchQuery().dictionary()
 		
 		//The actual point here is that list is of type [BaseClass]? and not AutoModel, or any protocol.
-		XCTAssertEqual(list.count, 2, "Fail to fetch all items!")
+		#expect(list.count == 2, "Fail to fetch all items!")
 		let got = list[AutoId(1)]
-		XCTAssertNotNil(got)
-		XCTAssertNil(got?.anOptInt)  //this should compile
+		#expect(got != nil)
+		#expect(got?.anOptInt == nil)  //this should compile
 		try await list.values.save()
 	}
 	
-	func testBasicQuery() async throws {
+	@Test func testBasicQuery() async throws {
 		
 		let query = "SELECT 'Apa' as animal, 1 + ? as math"
 		let list = try await BaseClass.query(query, [UInt64(2)])
@@ -254,18 +258,18 @@ final class AutoDBTests: XCTestCase {
 			print("l: \(key): \(value)")
 		}
 		let row = list.first!
-		XCTAssertEqual(row["math"]?.intValue, 3)
+		#expect(row["math"]?.intValue == 3)
 		
 		let maxInt = UInt64.max
 		let signed = Int64(bitPattern: maxInt)
-		XCTAssert(UInt64(bitPattern: signed) == maxInt)
+		#expect(UInt64(bitPattern: signed) == maxInt)
 		
 		let maxIntInt = Int(bitPattern: UInt(maxInt))
-		XCTAssert(UInt(bitPattern: maxIntInt) == maxInt)
+		#expect(UInt(bitPattern: maxIntInt) == maxInt)
 	}
 	
-	@available(macOS 15.0, *)
-	func testObserveWithoutCodingKeys() async throws {
+	@available(macOS 15.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+	@Test func testObserveWithoutCodingKeys() async throws {
 		try await AutoDBManager.shared.truncateTable(Artist.Value.self)
 		
 		let first = await Artist.create(1)
@@ -273,12 +277,13 @@ final class AutoDBTests: XCTestCase {
 		try await first.save()
 		
 		let artist = try await Artist.fetchQuery("WHERE name = ?", [first.value.name]).first
-		XCTAssertEqual(artist, first)
-		XCTAssertTrue(artist === first)
+		#expect(artist == first)
+		#expect(artist === first)
 		
 	}
 	
-	func testWithCodingKeys() async throws {
+	@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+	@Test func testWithCodingKeys() async throws {
 		try await AutoDBManager.shared.truncateTable(CodeWithKeys.self)
 		
 		var first: CodeWithKeys? = await CodeWithKeys.create(1)
@@ -288,100 +293,18 @@ final class AutoDBTests: XCTestCase {
 		first = nil
 		
 		let artist = try await CodeWithKeys.fetchQuery("WHERE somethingElse = ?", ["The Cure"]).first
-		XCTAssertNotNil(artist)
-		XCTAssertNotNil(artist?.nest)
+		#expect(artist != nil)
+		#expect(artist?.nest != nil)
 		
 		// works with both default types and setting your own
-		XCTAssertEqual(artist?.nest, Nested(name: "kurt"))
-		XCTAssertEqual(artist?.otherNest, Nested(name: "some name"))
-	}
-	
-	func testRelations() async throws {
-		try await AutoDBManager.shared.truncateTable(Parent.Value.self)
-		try await AutoDBManager.shared.truncateTable(Child.self)
-		
-		var item: Parent? = await Parent.create(1)
-		try await item?.value.children.fetch()
-		
-		let encoder = JSONEncoder()
-		encoder.outputFormatting = [.prettyPrinted]
-		
-		if let item, item.value.children.items.isEmpty {
-			item.value.name = "Olof"
-			
-			var gunnar = await Child.create()
-			gunnar.name = "Gunnar"
-			var bertil = await Child.create()
-			bertil.name = "Bertil"
-			await item.value.children.append([gunnar, bertil])
-			
-			// we must save these separately
-			try await item.value.children.items.save()
-			try await item.save()
-		} else {
-			XCTAssertTrue(item != nil)
-			XCTAssertTrue(item?.value.children.items.isEmpty == false)
-			XCTAssertEqual(item?.value.children.items.first?.name, "Gunnar")
-			XCTAssertEqual(item?.value.children.items.last?.name, "Bertil")
-		}
-		item = nil
-		await Task.yield()
-		
-		let children = try await Child.fetchQuery()
-		XCTAssertEqual(children.count, 2)
-		
-		let parent = try await Parent.fetchQuery("WHERE name = ?", ["Olof"]).first!
-		XCTAssertNotNil(parent.value.children)
-		
-		let data = try encoder.encode(parent.value.children)
-		print(String(data: data, encoding: .utf8)!)
-		
-		try await waitForCondition {
-			parent.value.children.items.count == 2
-		}
-		
-		XCTAssertEqual(parent.value.children.items.first?.name, "Gunnar")
-		XCTAssertEqual(parent.value.children.items.last?.name, "Bertil")
-		
-		XCTAssertNotNil(parent.value.children.owner)
-	}
-	
-	func testOneRelationFetchList() async throws {
-		
-		try await AlbumArt.truncateTable()
-		try await Album.truncateTable()
-		
-		// create albums
-		let albumNames = ["Faith", "Seventeen Seconds", "Pornography", "Three Imaginary Boys"]
-		do {
-			for (index, name) in albumNames.enumerated() {
-				let album: Album = await Album.create()
-				album.value.name = name
-				try await album.save()
-				
-				let art: AlbumArt = await AlbumArt.create(AutoId(index + 1))
-				art.value.album.id = album.id
-				try await art.save()
-			}
-		}
-		
-		let arts = try await AlbumArt.fetchQuery()
-		for art in arts {
-			XCTAssertTrue(art.value.album._object == nil, "Art should have no album data before fetching")
-		}
-		
-		try await arts.fetchAll(\.value.album)
-		
-		for art in arts {
-			XCTAssertTrue(art.value.album._object != nil, "Art should have album data after fetching")
-		}
-		
+		#expect(artist?.nest == Nested(name: "kurt"))
+		#expect(artist?.otherNest == Nested(name: "some name"))
 	}
 	
 	/// two tables have separate actors, test that we can read and write at the same time without crashing.
 	/// Notice that two actors doing writes are slower than one actor.
-	@available(macOS 15.0, *)
-	func testMultipleReadWrites() async throws {
+	@available(macOS 15.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
+	@Test func testMultipleReadWrites() async throws {
 		//let main =
 		try await IntTester.db()
 		//await main.setDebug()
@@ -391,13 +314,9 @@ final class AutoDBTests: XCTestCase {
 		try await IntTester.truncateTable()
 		try await ObserveBasic.truncateTable()
 		
-		let waiter = expectation(description: "multi")
-		let firstIteration = expectation(description: "firstIteration")
-		let observeBasicChunk = expectation(description: "observeBasicChunk")
-		let lastIteration = expectation(description: "lastIteration")
 		let firstIterations = 2000
 		let maxIterations = 4000
-		Task {
+		let firstIteration = Task {
 			for index in 1..<firstIterations {
 				let item = await IntTester.create(AutoId(index))
 				item.integer = index
@@ -405,15 +324,14 @@ final class AutoDBTests: XCTestCase {
 					try await item.save()
 				} catch {
 					print(error.localizedDescription)
-					XCTFail("Error here!")
+					Issue.record("Error here!")
 				}
 			}
 			print("first chunk is saved")
-			firstIteration.fulfill()
 		}
 		
 		// unrelated saves that locks the DB-file
-		Task {
+		let observeBasicChunk = Task {
 			for index in 1..<maxIterations {
 				let item = await ObserveBasic.create(AutoId(index))
 				item.optString = "\(index)"
@@ -421,11 +339,10 @@ final class AutoDBTests: XCTestCase {
 					try await item.save()
 				} catch {
 					print(error.localizedDescription)
-					XCTFail("Error here!")
+					Issue.record("Error here!")
 				}
 			}
 			print("ObserveBasic chunk is saved")
-			observeBasicChunk.fulfill()
 		}
 		
 		Task {
@@ -436,7 +353,7 @@ final class AutoDBTests: XCTestCase {
 			print("second chunk is saved")
 		}
 		
-		Task {
+		let lastIteration = Task {
 			for index in 1..<maxIterations {
 				
 				var item: IntTester? = nil
@@ -447,12 +364,11 @@ final class AutoDBTests: XCTestCase {
 					}
 				}
 				//print("A got \(index)")
-				XCTAssertTrue(item?.integer == index)
+				#expect(item?.integer == index)
 			}
-			lastIteration.fulfill()
 		}
 		
-		Task {
+		let waiter = Task {
 			for index in 1..<maxIterations {
 				var item: Int? = nil
 				while item == nil || item! == 0 {
@@ -463,15 +379,17 @@ final class AutoDBTests: XCTestCase {
 				}
 				//print("B got \(index)")
 				let result = item == index
-				XCTAssertTrue(result, "\(index) was \(item!)")
+				#expect(result, "\(index) was \(item!)")
 			}
-			waiter.fulfill()
 		}
 		
-		await fulfillment(of: [waiter, observeBasicChunk, firstIteration, lastIteration])
+		await waiter.value
+		await observeBasicChunk.value
+		await firstIteration.value
+		await lastIteration.value
 	}
 	
-	func testCreateWithExistingId() async throws {
+	@Test func testCreateWithExistingId() async throws {
 		try await AutoDBManager.shared.truncateTable(UniqueString.Value.self)
 		
 		let item = await UniqueString.create(1)
@@ -479,16 +397,16 @@ final class AutoDBTests: XCTestCase {
 		try await item.save()
 		
 		let fetched = try await UniqueString.fetchId(1)
-		XCTAssertEqual(fetched.string, "Test")
+		#expect(fetched.string == "Test")
 		
 		let newItem = await UniqueString.create(1)
 		newItem.string = "New Test"
 		try await newItem.save()
 		
 		let updated = try await UniqueString.fetchId(1)
-		XCTAssertEqual(updated.string, "New Test")
+		#expect(updated.string == "New Test")
 		
-		XCTAssertTrue(updated === fetched)  // they should be the same object
+		#expect(updated === fetched)  // they should be the same object
 		
 		let duplicateItem = await UniqueString.create()
 		duplicateItem.string = "New Test"
@@ -496,49 +414,49 @@ final class AutoDBTests: XCTestCase {
 		
 		do {
 			try await duplicateItem.save()
-			XCTFail("Expected an error when saving a duplicate id")
+			Issue.record("Expected an error when saving a duplicate id")
 		} catch AutoError.uniqueConstraintFailed(let ids) {
 			print("Caught uniqueConstraintFailed error with ids: \(ids)")
-			XCTAssertTrue(ids.contains(1) || ids.contains(duplicateId), "Expected id \(duplicateId) to be in the unique constraint error")
+			#expect(ids.contains(1) || ids.contains(duplicateId), "Expected id \(duplicateId) to be in the unique constraint error")
 		}
 	}
 	
-	func testDuplicateDoesNotBlockLaterSaves() async throws {
+	@Test func testDuplicateDoesNotBlockLaterSaves() async throws {
 		try await AutoDBManager.shared.truncateTable(UniqueString.Value.self)
-
+		
 		let existing = await UniqueString.create()
 		existing.string = "taken"
 		try await existing.save()
-
+		
 		// UniqueString has no didSet tracking: register the changes like a tracked model does
 		let duplicate = await UniqueString.create()
 		duplicate.string = "taken"
 		await duplicate.didChange()
 		do {
 			try await duplicate.save()
-			XCTFail("Expected an error when saving a duplicate")
+			Issue.record("Expected an error when saving a duplicate")
 		} catch AutoError.uniqueConstraintFailed(let ids) {
-			XCTAssertEqual(ids, [duplicate.id])
+			#expect(ids == [duplicate.id])
 		}
-
+		
 		// the duplicate is no longer a pending change: saving everything succeeds and saves what was created after it
 		let other = await UniqueString.create()
 		other.string = "free"
 		await other.didChange()
 		try await AutoDBManager.shared.saveAllChanges()
 		let saved = try await UniqueString.fetchId(other.id)
-		XCTAssertEqual(saved.string, "free")
-
+		#expect(saved.string == "free")
+		
 		// still created: saved unchanged it is an INSERT that fails again, never a REPLACE of the row it collided with
 		do {
 			try await duplicate.save()
-			XCTFail("Expected an error when saving a duplicate")
+			Issue.record("Expected an error when saving a duplicate")
 		} catch AutoError.uniqueConstraintFailed {}
 		let kept = try await UniqueString.fetchId(existing.id)
-		XCTAssertEqual(kept.string, "taken")
+		#expect(kept.string == "taken")
 	}
-
-	func testTypedModelBucketsSavePendingChanges() async throws {
+	
+	@Test func testTypedModelBucketsSavePendingChanges() async throws {
 		try await AutoDBManager.shared.truncateTable(TrackedModel.Value.self)
 		
 		let item = await TrackedModel.create(1)
@@ -550,12 +468,12 @@ final class AutoDBTests: XCTestCase {
 		
 		let fetched = try await TrackedModel.fetchId(1)
 		let pendingCount = await AutoDBManager.shared.lookupObjectsCount(ObjectIdentifier(TrackedModel.self))
-		XCTAssertTrue(fetched === item)
-		XCTAssertEqual(fetched.name, "second")
-		XCTAssertEqual(pendingCount, 0)
+		#expect(fetched === item)
+		#expect(fetched.name == "second")
+		#expect(pendingCount == 0)
 	}
 	
-	func testSaveAllChangesPersistsDroppedModelReferences() async throws {
+	@Test func testSaveAllChangesPersistsDroppedModelReferences() async throws {
 		try await AutoDBManager.shared.truncateTable(TrackedModel.Value.self)
 		
 		let weakModel = WeakBox<TrackedModel>()
@@ -571,13 +489,18 @@ final class AutoDBTests: XCTestCase {
 			model = nil
 		}
 		
-		XCTAssertNotNil(weakModel.value)
+		#expect(weakModel.value != nil)
 		try await AutoDBManager.shared.saveAllChanges()
 		try await waitForCondition {
 			weakModel.value == nil
 		}
 		
 		let fetched = try await TrackedModel.fetchId(modelID)
-		XCTAssertEqual(fetched.name, "pending")
+		#expect(fetched.name == "pending")
+	}
+	
+	@Test func specificSettingsAreUsed() async {
+		let settings = AutoDBSettings(path: "/tmp/AutoDBSpecificSettings.db", iCloudBackup: false, inAppFolder: false, inCacheFolder: false)
+		#expect(await AutoDBManager.shared.appSettings(for: .specific(settings)) == settings)
 	}
 }

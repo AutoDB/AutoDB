@@ -12,6 +12,7 @@ import Combine
 final class Album: Model, @unchecked Sendable {
 	
 	struct Value: Table {
+		static let autoDBSettings = TestDatabase.relationQuery
 		
 		var id: AutoId = 0
 		var name = ""
@@ -39,9 +40,7 @@ final class AlbumArt: Model, @unchecked Sendable {
 		// what album does this belong to?
 		var album = OneRelation<Album>()
 		
-		static var autoDBSettings: SettingsKey {
-			.cache
-		}
+		static let autoDBSettings = TestDatabase.relationQueryCache
 	}
 	
 	var value: Value
@@ -69,6 +68,7 @@ final class DeallocTest: @unchecked Sendable {
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class CureAlbums: Model, @unchecked Sendable {
 	struct CureAlbumsTable: Table {
+		static let autoDBSettings = TestDatabase.relationQuery
 		static let tableName = "CureAlbums"
 		
 		var id: AutoId = 0
@@ -82,6 +82,7 @@ final class CureAlbums: Model, @unchecked Sendable {
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 struct SaveFail: Table {
+	static let autoDBSettings = TestDatabase.relationQuery
 	var id: AutoId = 0
 	var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 3)
 }
@@ -90,6 +91,7 @@ final class CombineAlbum: Model, @unchecked Sendable, ObservableObject {
 	
 	//var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
 	struct CombineAlbumTable: Table {
+		static let autoDBSettings = TestDatabase.relationQuery
 		
 		var id: AutoId = 0
 		var name = ""
@@ -123,6 +125,7 @@ final class CombineArtist: @unchecked Sendable, ObservableObject, RelationOwner 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class PagedCureAlbums: Model, @unchecked Sendable {
 	struct Value: Table {
+		static let autoDBSettings = TestDatabase.relationQuery
 		static let tableName = "PagedCureAlbums"
 		
 		var id: AutoId = 0
@@ -270,7 +273,7 @@ actor RelationQueryPublisherTests {
 			await countIsOne()
 		}
 	}
-
+	
 	@Test
 	func asyncObserverDoesNotLoseFirstQueuedValue() async {
 		let observer = AsyncObserver<Int>()
@@ -289,6 +292,38 @@ actor RelationQueryPublisherTests {
 
 @Suite("RelationQueryTests", .serialized)
 class RelationQueryTests {
+	@Test func testOneRelationFetchList() async throws {
+		
+		try await AlbumArt.truncateTable()
+		try await Album.truncateTable()
+		
+		// create albums
+		let albumNames = ["Faith", "Seventeen Seconds", "Pornography", "Three Imaginary Boys"]
+		do {
+			for (index, name) in albumNames.enumerated() {
+				let album: Album = await Album.create()
+				album.value.name = name
+				try await album.save()
+				
+				let art: AlbumArt = await AlbumArt.create(AutoId(index + 1))
+				art.value.album.id = album.id
+				try await art.save()
+			}
+		}
+		
+		let arts = try await AlbumArt.fetchQuery()
+		for art in arts {
+			#expect(art.value.album._object == nil, "Art should have no album data before fetching")
+		}
+		
+		try await arts.fetchAll(\.value.album)
+		
+		for art in arts {
+			#expect(art.value.album._object != nil, "Art should have album data after fetching")
+		}
+		
+	}
+	
 	private func createAlbum(_ name: String, artist: String = "The Cure") async throws {
 		let album = await Album.create()
 		album.value.name = name
@@ -349,7 +384,7 @@ class RelationQueryTests {
 	
 	@Test
 	func testOneRelationMultipleDBs() async throws {
-		let mainDB = try await ObserveBasic.db()
+		let mainDB = try await Album.db()
 		
 		let cacheDB = try await AlbumArt.db()
 		try await AlbumArt.truncateTable()

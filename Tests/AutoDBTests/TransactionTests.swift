@@ -11,6 +11,7 @@ import Foundation
 @testable import AutoDB
 
 final class TransClass: Table, @unchecked Sendable {
+	static let autoDBSettings = TestDatabase.transaction
 	var id: AutoId = 1
 	var integer = 1
 }

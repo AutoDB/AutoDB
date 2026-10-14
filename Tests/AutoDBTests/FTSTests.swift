@@ -11,6 +11,7 @@ import Foundation
 @testable import AutoDB
 
 struct FTS: Table {
+	static let autoDBSettings = TestDatabase.fts
 	var id: AutoId = 1
 	var name = 1
 	var text = ""
@@ -32,6 +33,7 @@ struct FTS: Table {
 
 final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
 	struct PostTable: Table {
+		static let autoDBSettings = TestDatabase.fts
 		var id: AutoId = 1
 		var title: String = "Untitled"
 		var body: String = "Once upon a time..."
@@ -61,7 +63,7 @@ class FTSTests {
 	private func resetFTS() async throws {
 		try await FTS.truncateTable()
 	}
-
+	
 	@discardableResult
 	private func seedFTSData() async throws -> (primary: FTS, magical: FTS, secondary: FTS) {
 		try await resetFTS()
@@ -73,16 +75,16 @@ class FTSTests {
 	
 	@Test func search() async throws {
 		let seeded = try await seedFTSData()
-
+		
 		let result = try await FTSColumn<FTS>.search("long and boring", column: "text").first
 		#expect(result?.id == seeded.primary.id)
 		#expect(result == seeded.primary)
-
+		
 		let ambition = try await FTSColumn<FTS>.search("Ambition", column: "somethingElse").first
 		#expect(ambition?.id == seeded.primary.id)
 		#expect(ambition?.somethingElse == "Ambition in the back of a black car")
 	}
-
+	
 	@Test
 	func reindexesAfterUpdateAndDelete() async throws {
 		let seeded = try await seedFTSData()
@@ -90,17 +92,17 @@ class FTSTests {
 		updated.text = "ÖÄÅ"
 		try await updated.save()
 		let updatedID = updated.id
-
+		
 		try await waitForCondition("updated text should be searchable and old text removed from the FTS index") {
 			let updatedMatches = try await FTSColumn<FTS>.search("ÖÄÅ", column: "text")
 			let oldMatches = try await FTSColumn<FTS>.search("long and boring", column: "text")
 			return updatedMatches.count == 1 && updatedMatches.first?.id == updatedID && oldMatches.isEmpty
 		}
-
+		
 		try await waitForCondition("diacritic folding should not collapse Nordic vowels into unrelated words") {
 			try await FTSColumn<FTS>.search("oAA", column: "text").count == 1
 		}
-
+		
 		try await seeded.magical.delete()
 		try await seeded.secondary.delete()
 		try await waitForCondition("deleted rows should disappear from the FTS index") {
@@ -144,5 +146,5 @@ class FTSTests {
 		let cached: Post? = await AutoDBManager.shared.modelForTable(fetchedPost)
 		#expect(cached === post)
 	}
-		
+	
 }

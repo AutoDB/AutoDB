@@ -155,6 +155,8 @@ extension UInt64 {
 			switch key {
 			case .cache:
 				fresh = AutoDBSettings.cache()
+			case .specific(let settings):
+				fresh = settings
 			default:
 				fresh = AutoDBSettings()
 			}
