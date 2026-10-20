@@ -38,7 +38,7 @@ extension UInt64 {
 		if let enc = encoders[typeID ?? ObjectIdentifier(T.self)] {
 			return enc
 		}
-		let enc = await SQLRowEncoder(T.self, self)
+		let enc = try await SQLRowEncoder(T.self, self)
 		encoders[typeID ?? ObjectIdentifier(T.self)] = enc
 		return enc
 	}
@@ -66,7 +66,7 @@ extension UInt64 {
 		if let enc = decoders[typeID] {
 			return enc
 		}
-		let table = await tableInfo(T.self)
+		let table = try await tableInfo(T.self)
 		let dec = SQLRowDecoder(T.self, table)
 		decoders[ObjectIdentifier(T.self)] = dec
 		return dec
@@ -74,15 +74,13 @@ extension UInt64 {
 	
 	/// The table's columns as AutoDB created them: name, SQL type, Swift type and nullability. Sets the table up first.
 	public func columns<T: Table>(_ type: T.Type) async throws -> [Column] {
-		_ = try await setupDB(T.self)
-		return await tableInfo(T.self).columns
+		try await tableInfo(T.self).columns
 	}
 	
 	/// `base` with the row's columns decoded over it. Columns the row lacks keep base's values, a NULL clears an optional.
 	/// For partial rows that come from outside the database (sync, imports).
 	public func decode<T: Table>(_ row: Row, into base: T) async throws -> T {
-		_ = try await setupDB(T.self)
-		let decoder = SQLRowDecoder(T.self, await tableInfo(T.self), row, base: base)
+		let decoder = SQLRowDecoder(T.self, try await tableInfo(T.self), row, base: base)
 		return try T(from: decoder)
 	}
 	
@@ -306,17 +304,21 @@ extension UInt64 {
 		databases[typeID] = db
 	}
 	
-	/// tables are created after awaits and may not exist in the beginning of execution, just add a short delay to wait for them
-	func tableInfo<T: Table>(_ classType: T.Type) async -> TableInfo {
-		await tableInfo(ObjectIdentifier(classType))
+	/// The table's info, setting the table up first when needed.
+	func tableInfo<T: Table>(_ classType: T.Type) async throws -> TableInfo {
+		try await setupDB(classType)
+		return try tableInfo(ObjectIdentifier(classType))
 	}
 	
-	/// tables are created after awaits and may not exist in the beginning of execution, just add a short delay to wait for them
-	func tableInfo(_ typeID: ObjectIdentifier) async -> TableInfo {
-		while tables[typeID] == nil {
-			try? await Task.sleep(nanoseconds: .shortDelay)
+	/// The info of a table this manager has set up. Throws instead of waiting: a table setupDB refused, like one used outside a required scope, never shows up.
+	func tableInfo(_ typeID: ObjectIdentifier) throws -> TableInfo {
+		if let table = tables[typeID] {
+			return table
 		}
-		return tables[typeID]!
+		if scopeRequired {
+			throw AutoError.noScope("a table was used outside a test database")
+		}
+		throw AutoError.missingSetup
 	}
 	
 	@discardableResult
@@ -763,12 +765,22 @@ extension UInt64 {
 		lookupTable.deleted[typeID] ?? []
 	}
 	
+	/// Delete rows of a table, setting it up first when needed.
+	public func delete<T: Table>(_ ids: [AutoId], _ classType: T.Type) async throws {
+		if ids.isEmpty {
+			return
+		}
+		try await setupDB(classType)
+		try await delete(ids, ObjectIdentifier(classType))
+	}
+	
+	/// Delete rows of a table this manager has set up, throws `missingSetup` otherwise - pass the type to set it up.
 	public func delete(_ ids: [AutoId], _ typeID: ObjectIdentifier) async throws {
 		
 		guard ids.isEmpty == false else {
 			return
 		}
-		let table = await tableInfo(typeID)
+		let table = try tableInfo(typeID)
 		lookupTable.setDeleted(ids, typeID)
 		
 		let query = String(format: table.deleteQuery, Self.questionMarks(ids.count))
@@ -946,7 +958,7 @@ extension UInt64 {
 		
 		let typeID = ObjectIdentifier(classType)
 		let database = try await setupDB(T.self, typeID)
-		let table = await tableInfo(typeID)
+		let table = try tableInfo(typeID)
 		return await database.tableChangeObserver(table.name)
 	}
 	
@@ -954,7 +966,7 @@ extension UInt64 {
 		
 		let typeID = ObjectIdentifier(classType)
 		let database = try await setupDB(T.self, typeID)
-		let table = await tableInfo(typeID)
+		let table = try tableInfo(typeID)
 		return await database.rowChangeObserver(table.name)
 	}
 	

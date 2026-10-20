@@ -494,11 +494,11 @@ public extension Model {
 	}
 	
 	func delete() async throws {
-		try await autoDBManager.delete([id], ObjectIdentifier(TableType.self))
+		try await autoDBManager.delete([id], TableType.self)
 	}
 	
 	static func deleteIds(_ ids: [AutoId]) async throws {
-		try await AutoDBManager.current.delete(ids, ObjectIdentifier(TableType.self))
+		try await AutoDBManager.current.delete(ids, TableType.self)
 	}
 	
 	/// delete when calling saveChanges, or after x seconds
@@ -547,7 +547,7 @@ public extension Collection where Element: Model {
 	
 	func delete() async throws {
 		let ids = self.map(\.id)
-		try await AutoDBManager.manager(of: first).delete(ids, ObjectIdentifier(Element.TableType.self))
+		try await AutoDBManager.manager(of: first).delete(ids, Element.TableType.self)
 	}
 	
 	/// Convert an array with AutoModels to a dictionary

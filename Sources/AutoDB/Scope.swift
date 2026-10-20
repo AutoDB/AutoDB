@@ -17,6 +17,8 @@ private struct ScopedObject: @unchecked Sendable {
 private let scopedObjects = Locked<[ObjectIdentifier: ScopedObject]>([:])
 /// prune dead entries when the registry grows past this, then double it
 private let scopedObjectsPruneAt = Locked<Int>(1024)
+/// test folders this process has already emptied
+private let emptiedTestFolders = Locked<Set<String>>([])
 
 public extension AutoDBManager {
 	
@@ -38,6 +40,19 @@ public extension AutoDBManager {
 			return try await operation()
 		}
 		return try await $scoped.withValue(manager, operation: operation)
+	}
+	
+	/// A manager for one test scope, rooted at `Caches/AutoDBTests/<name>/`. The folder is emptied the first time this process asks for name, so every run starts empty and the last run's files stay for inspection.
+	/// Names must be unique within a test process: two managers in one folder would open the same files twice. "()" is removed, and "/" and ":" become "_", so a test's name components can be passed as they are.
+	/// The AutoDBTesting trait is built on this. It lives here, without Swift Testing, for test targets that cannot link AutoDBTesting - see "When AutoDB is inside another library" in Documentation.md.
+	static func testManager(_ name: String) -> AutoDBManager {
+		let name = name.replacingOccurrences(of: "()", with: "").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
+		let folder = shared.fileURL(for: .cache(path: "AutoDBTests/\(name)"))!
+		let isFirstUse = emptiedTestFolders.withLock { $0.insert(name).inserted }
+		if isFirstUse {
+			try? FileManager.default.removeItem(at: folder)
+		}
+		return AutoDBManager(root: folder)
 	}
 	
 	/// After this, every table that is not yet set up throws `AutoError.noScope` instead of opening a file through this manager.

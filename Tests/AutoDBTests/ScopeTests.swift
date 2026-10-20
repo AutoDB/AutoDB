@@ -141,6 +141,26 @@ struct ScopeTests {
 		#expect(FileManager.default.fileExists(atPath: folder.path) == false)
 	}
 	
+	/// deletes look up the table without setting it up first - they used to wait forever for a setup requireScope refused
+	@Test(.timeLimit(.minutes(1))) func requireScopeThrowsOnDelete() async throws {
+		let (manager, _) = freshManager("requireScopeDelete")
+		await manager.requireScope()
+		await #expect(throws: AutoError.self) {
+			try await manager.delete([1], ObjectIdentifier(ScopeItem.Value.self))
+		}
+		await AutoDBManager.withScope(manager) {
+			await #expect(throws: AutoError.self) {
+				try await ScopeItem.deleteIds([1])
+			}
+		}
+	}
+	
+	@Test func testManagerFolder() async throws {
+		let manager = AutoDBManager.testManager("ScopeTests/testManager()")
+		let regular = try #require(manager.fileURL(for: .regular))
+		#expect(regular.path.contains("/AutoDBTests/ScopeTests_testManager/"))
+	}
+	
 	@Test func storageIsPerManager() {
 		let (first, _) = freshManager("storageFirst")
 		let (second, _) = freshManager("storageSecond")

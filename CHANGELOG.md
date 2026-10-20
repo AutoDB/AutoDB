@@ -33,7 +33,8 @@ AutoDB 1.0 is intended to be the first stable Apple-first Swift Package release.
 
 - `AutoDBManager(root:)` makes a manager whose files live under root. All state lives in the manager instance: connections, caches, changed objects, FTS and debounce state.
 - `AutoDBManager.withScope(manager) { ... }` binds a manager for a task. Static calls use `AutoDBManager.current`, and models remember the manager they came from.
-- New product `AutoDBTesting` with the Swift Testing trait `.autoDB`, which gives each suite its own databases so suites run in parallel.
+- New product `AutoDBTesting` with the Swift Testing trait `.autoDB`, which gives each suite its own databases so suites run in parallel. `AutoDBManager.testManager(_:)` makes the same per-suite managers without Swift Testing, for test targets where AutoDB is compiled into another library and AutoDBTesting can't be linked.
+- `delete(_:_:)` with a type sets the table up first. With an `ObjectIdentifier`, a table that isn't set up throws `missingSetup` (or `noScope`) instead of waiting forever.
 - `requireScope()` makes a manager throw `AutoError.noScope` instead of opening files, `storage(for:default:)` keeps per-manager singletons, and `fileURL(for:)` tells where settings put a file.
 - `switchDB` is removed, use `.autoDB` or `withScope`.
 - See "Scopes and testing" in [Documentation/Documentation.md](Documentation/Documentation.md#scopes-and-testing).

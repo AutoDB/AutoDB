@@ -367,7 +367,7 @@ public extension Table {
 	}
 	
 	static func deleteIds(_ ids: [AutoId]) async throws {
-		try await AutoDBManager.current.delete(ids, ObjectIdentifier(self))
+		try await AutoDBManager.current.delete(ids, self)
 	}
 	
 	/// Batch delete

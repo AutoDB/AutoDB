@@ -41,6 +41,7 @@ extension Table {
 - A table elsewhere: declare `autoDBSettings` on that type. For a `Model`, put it on its `Value`.
 - A group of tables elsewhere: a refined protocol, `protocol CacheTable: Table {}` with `extension CacheTable { static var autoDBSettings: AutoDBSettings { .cache } }`.
 - Keep the `extension Table` `internal` and repeat it in each module that declares tables. A `public` one in a shared module makes conformances in importing modules ambiguous.
+- Public table types need a public witness, which an internal extension is not. Give them a public refined protocol, `public protocol FeedsTable: Table {}` with `public extension FeedsTable { static var autoDBSettings ... }`. See [Database settings](Documentation.md#database-settings).
 
 ## 3. Persist and fetch models
 

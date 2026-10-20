@@ -146,7 +146,7 @@ final class AutoDBTests {
 		base3.optString = "base 3"
 		
 		// this is basically the save function
-		let encoder = await SQLRowEncoder(ObserveBasic.self, AutoDBManager.current)
+		let encoder = try await SQLRowEncoder(ObserveBasic.self, AutoDBManager.current)
 		try base.encode(to: encoder)
 		try base3.encode(to: encoder)
 		try await encoder.commit(update: false)
@@ -172,7 +172,7 @@ final class AutoDBTests {
 		]
 
 		let db = try await IntTester.db()
-		let table = await AutoDBManager.current.tableInfo(IntTester.self)
+		let table = try await AutoDBManager.current.tableInfo(IntTester.self)
 		
 		let decoder = SQLRowDecoder(IntTester.self, table, values)
 		let base = try IntTester(from: decoder)

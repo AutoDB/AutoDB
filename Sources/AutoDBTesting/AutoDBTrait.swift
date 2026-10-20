@@ -19,7 +19,7 @@ import AutoDB
 ///     }
 /// }
 /// ```
-/// It makes an `AutoDBManager` rooted at `Caches/AutoDBTests/<name>/` and runs the suite inside `AutoDBManager.withScope`.
+/// It runs the suite inside `AutoDBManager.withScope` with a manager from `AutoDBManager.testManager(_:)`, rooted at `Caches/AutoDBTests/<name>/`.
 /// On a suite, every test and nested suite shares that manager. On a single test, that test gets its own.
 /// The folder is deleted the first time a run uses it, so every run starts empty and the last run's files stay for inspection.
 /// Names must be unique within a test process: two scopes in one folder would open the same files twice.
@@ -27,9 +27,6 @@ public struct AutoDBTrait: SuiteTrait, TestTrait, TestScoping {
 	
 	/// the folder name, nil uses the suite's or test's name
 	let name: String?
-	
-	/// folders this process has already emptied
-	private static let emptied = Locked<Set<String>>([])
 	
 	public var isRecursive: Bool { false }
 	
@@ -42,25 +39,10 @@ public struct AutoDBTrait: SuiteTrait, TestTrait, TestScoping {
 	}
 	
 	public func provideScope(for test: Test, testCase: Test.Case?, performing function: @Sendable () async throws -> Void) async throws {
-		let manager = AutoDBManager(root: Self.folder(name ?? Self.name(of: test)))
+		let manager = AutoDBManager.testManager(name ?? test.id.nameComponents.joined(separator: "."))
 		try await AutoDBManager.withScope(manager) {
 			try await function()
 		}
-	}
-	
-	/// `Caches/AutoDBTests/<name>`, emptied the first time this process asks for it
-	static func folder(_ name: String) -> URL {
-		let folder = AutoDBManager.shared.fileURL(for: .cache(path: "AutoDBTests/\(name)"))!
-		let isFirstUse = emptied.withLock { $0.insert(name).inserted }
-		if isFirstUse {
-			try? FileManager.default.removeItem(at: folder)
-		}
-		return folder
-	}
-	
-	/// `Suite` for a suite, `Suite.test` for a test function
-	static func name(of test: Test) -> String {
-		test.id.nameComponents.map { $0.replacingOccurrences(of: "()", with: "").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_") }.joined(separator: ".")
 	}
 }
 

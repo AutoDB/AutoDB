@@ -167,6 +167,21 @@ The most specific declaration wins:
 
 Keep the `extension Table` `internal`, and repeat it in every module that declares tables. A `public` one in a shared module makes conformances in importing modules ambiguous.
 
+An internal default cannot serve a `public` table type: Swift requires a public witness for a public protocol's requirement. In a module with public tables, give them a public refined protocol instead, it does not reach tables in modules that import it:
+
+```swift
+public protocol FeedsTable: Table {}
+public extension FeedsTable {
+	static var autoDBSettings: AutoDBSettings { .regular }
+}
+
+public final class Feed: Model {
+	public struct Value: FeedsTable { ... }
+}
+```
+
+The module can keep an internal `extension Table` next to it for its internal tables. A single public table can also declare `public static var autoDBSettings` itself.
+
 `autoDBSettings` is read the first time a table is used, so it may compute a path. Tables whose settings resolve to the same place share one connection. If two different settings point to the same file, the first one's options (backup, auto-close delay) are used and AutoDB logs the mismatch once. Two connections to one file are never opened.
 
 `.memory` is shared by every table of a manager that uses it, and it lives as long as that manager. It never auto-closes, and `AutoDBManager.close()` skips it, since closing it would discard its data.
@@ -237,6 +252,41 @@ Every suite gets a manager rooted at `Caches/AutoDBTests/<suite name>/`. Suites 
 - `.autoDB("name")` picks the folder name. Names must be unique within a test process.
 - The folder is deleted the first time a run uses it, so every run starts empty and the last run's files stay for inspection.
 - Inside a suite, tests that share tables still need `.serialized` or their own ids.
+
+### When AutoDB is inside another library
+
+Link AutoDBTesting only when the test target links the `AutoDB` product itself. When AutoDB is compiled into another library, for example a dynamic framework that re-exports it, AutoDBTesting brings a second copy of AutoDB. Its `withScope` binds a task-local the library's copy never reads, and Xcode may also move AutoDB out of the library's binary so the library no longer links.
+
+Declare the trait in the test target instead. `AutoDBManager.testManager(_:)` does the folders, so only the Swift Testing part is left:
+
+```swift
+import Testing
+import AutoDB	// or the library that re-exports it
+
+struct AutoDBTrait: SuiteTrait, TestTrait, TestScoping {
+	var isRecursive: Bool { false }
+	
+	func scopeProvider(for test: Test, testCase: Test.Case?) -> AutoDBTrait? {
+		if test.isSuite || testCase == nil {
+			return self
+		}
+		return nil
+	}
+	
+	func provideScope(for test: Test, testCase: Test.Case?, performing function: @Sendable () async throws -> Void) async throws {
+		let manager = AutoDBManager.testManager(test.id.nameComponents.joined(separator: "."))
+		try await AutoDBManager.withScope(manager) {
+			try await function()
+		}
+	}
+}
+
+extension Trait where Self == AutoDBTrait {
+	static var autoDB: AutoDBTrait { AutoDBTrait() }
+}
+```
+
+Make it `public` when it lives in a shared test-support target.
 
 ### The leak guard
 
