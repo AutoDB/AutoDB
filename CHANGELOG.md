@@ -20,6 +20,15 @@ AutoDB 1.0 is intended to be the first stable Apple-first Swift Package release.
 - FTS-backed search through `FTSColumn`
 - `RelationQuery` on supported Observation-capable OS versions
 
+### Database settings (breaking)
+
+- `Table.autoDBSettings` is now an `AutoDBSettings` with no library default. Declare it once per module with `extension Table { static var autoDBSettings: AutoDBSettings { .regular } }`, and override it per type or through a refined protocol.
+- `SettingsKey`, `setAppSettings(_:for:)`, `appSettings(for:)` and `appDefaults` are removed: there is no runtime registration left, so nothing has to run before the first table is touched.
+- New presets `AutoDBSettings.regular`, `.cache` and `.memory`. `.memory` is now really in memory, before it opened the default file.
+- Settings resolving to the same file share one connection, the first one's options win and the mismatch is logged.
+- `switchDB` takes `[AutoDBSettings: URL?]`. `close()` skips in-memory databases.
+- See "Migrating from SettingsKey" in [Documentation/Documentation.md](Documentation/Documentation.md#migrating-from-settingskey).
+
 ### Known limitations
 
 - AutoDB does not infer column renames; rename-safe migrations must use the migration callback

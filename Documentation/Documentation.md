@@ -140,6 +140,48 @@ try await feed.save()
 
 # Features
 
+## Database settings
+
+Every `Table` says which database it lives in through `static var autoDBSettings: AutoDBSettings`. AutoDB ships no default, so the compiler makes you choose, and there is nothing to register at app start. Declare it once for the whole module:
+
+```swift
+extension Table {
+	static var autoDBSettings: AutoDBSettings { .regular }
+}
+```
+
+The presets:
+
+- `.regular`: `AutoDB/AutoDB.db` in Application Support, backed up.
+- `.cache`: `AutoDB/AutoDB.db` in Caches, not backed up, and the system may delete it when space runs low. `.cache(path:)` picks another file name.
+- `.memory`: an in-memory database.
+- `AutoDBSettings(path:iCloudBackup:inAppFolder:inCacheFolder:autoCloseDelay:)` for anything else. With both folder flags false, `path` is absolute, for example an App Group container.
+
+On macOS the app name is added between the folder and `path`.
+
+The most specific declaration wins:
+
+1. A type's own `autoDBSettings`. For a `Model`, declare it on its `Value`.
+2. A refined protocol's default: `protocol CacheTable: Table {}` with `extension CacheTable { static var autoDBSettings: AutoDBSettings { .cache } }`, and its tables conform to `CacheTable`.
+3. The module-wide `extension Table`.
+
+Keep the `extension Table` `internal`, and repeat it in every module that declares tables. A `public` one in a shared module makes conformances in importing modules ambiguous.
+
+`autoDBSettings` is read the first time a table is used, so it may compute a path. Tables whose settings resolve to the same place share one connection. If two different settings point to the same file, the first one's options (backup, auto-close delay) are used and AutoDB logs the mismatch once. Two connections to one file are never opened.
+
+`.memory` is shared by every table that uses it, and it lives as long as the process. It never auto-closes, and `AutoDBManager.close()` skips it, since closing it would discard its data. `switchDB` moves any database it is not given a URL for to memory, which discards the old in-memory data.
+
+### Migrating from SettingsKey
+
+| Before | After |
+| --- | --- |
+| `static var autoDBSettings: SettingsKey { .regular }` | `static var autoDBSettings: AutoDBSettings { .regular }` |
+| `.cache` | `.cache` |
+| `.specific(settings)` | `settings` |
+| `AutoDBManager.shared.setAppSettings(s, for: .regular)` at startup | `extension Table { static var autoDBSettings: AutoDBSettings { s } }` |
+| `setAppSettings(s, for: .cache)` | a refined protocol, or `s` on each cache table |
+| `switchDB([.regular: url])` | `switchDB([settings: url])`, keyed by the tables' settings |
+
 ## Connection lifecycle and auto-close
 
 You never need to open or close the database yourself. Every `Database` closes automatically after `AutoDBManager.defaultWaitTime` (3 seconds) of non-use - releasing its file handle, checkpointing the WAL and freeing SQLite's page cache - and reopens transparently on the next access. Reopening costs a few milliseconds at most, so this is invisible in practice.

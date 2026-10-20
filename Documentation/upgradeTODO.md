@@ -145,7 +145,7 @@ codebases ready for the step-2 deprecations with zero further edits.
   `Optimizations` cache was a `nonisolated(unsafe)` dictionary read lock-free from any thread while the
   actor wrote it (and its "lock" was a freshly created local Semaphore, guarding nothing) - it is now a
   `Locked` value; `setOptimization` also finally persists `innerRelations`, so the reflection result is
-  actually cached. Same treatment for `AutoDBManager.appDefaults` (nonisolated setter vs actor reader).
+  actually cached.
   `Database`'s observer dictionaries dropped their `nonisolated(unsafe)` - all access already went through
   the actor, now compiler-enforced. The new `Utilities/Locked.swift` (tiered: Mutex → os_unfair_lock /
   pthread_mutex → NSLock) is shared infrastructure; ModelStorage is refactored on top of it.

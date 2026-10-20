@@ -59,12 +59,15 @@ final class Artist: Model, @unchecked Sendable {
 }
 ```
 
-Configure defaults once during startup:
+Tell AutoDB where your tables live, once per module that declares tables:
 
 ```swift
-let settings = AutoDBSettings(path: "AutoDB/App.sqlite")
-AutoDBManager.shared.setAppSettings(settings, for: .regular)
+extension Table {
+	static var autoDBSettings: AutoDBSettings { .regular }
+}
 ```
+
+See [Database settings](Documentation/Documentation.md#database-settings) for other files, the cache and in-memory databases.
 
 Create, save, and fetch:
 

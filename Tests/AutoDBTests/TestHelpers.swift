@@ -23,18 +23,21 @@ enum TestDatabase {
 	/// RelationQueryTests also checks relations between two database files
 	static let relationQueryCache = file("RelationQueryTestsCache")
 	static let saveLockOrder = file("SaveLockOrderTests")
+	static let settings = file("SettingsTests")
+	/// SettingsTests also checks that a refined protocol sends its tables to another file
+	static let settingsGroup = file("SettingsTestsGroup")
 	static let storedModel = file("StoredModelTests")
 	static let taskLocalToken = file("TaskLocalTokenTests")
 	static let transaction = file("TransactionTests")
 	static let typeCoverage = file("TypeCoverageTests")
 	
-	private static func file(_ name: String) -> SettingsKey {
+	private static func file(_ name: String) -> AutoDBSettings {
 		let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("AutoDBTests")
 		let path = folder.appendingPathComponent("\(name).db").path
 		for suffix in ["", "-wal", "-shm"] {
 			try? FileManager.default.removeItem(atPath: path + suffix)
 		}
-		return .specific(AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: false))
+		return AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: false)
 	}
 }
 

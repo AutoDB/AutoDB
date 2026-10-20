@@ -102,36 +102,56 @@ public enum TableError: Error {
 	case impossibleUrlMigration
 }
 
-///Class specific settings to generate SQL information that can't be known automatically, each DB needs to define its path and cache settings. Then every table may subscribe to one of these settings, if none is chosen the default will be used
+/// Where a database lives and how its connection behaves. Tables pick one through `Table.autoDBSettings`, equal settings share one connection.
 public struct AutoDBSettings: Sendable, Hashable {
 	
-	// Cache settings-shorthand for all tables to be stored in the cache
-	static func cache(path: String = "AutoDB/AutoDB.db") -> AutoDBSettings {
+	/// The default file in the app's support folder, backed up.
+	public static let regular = AutoDBSettings()
+	/// A file in the cache folder, never backed up - the system may remove it when the device is low on disc-space.
+	public static let cache = AutoDBSettings.cache()
+	/// An in-memory database, shared by every table using it. It never auto-closes and is gone when the process ends.
+	public static let memory = AutoDBSettings(path: "", iCloudBackup: false, inAppFolder: false, inCacheFolder: false, autoCloseDelay: nil, inMemory: true)
+	
+	/// Cache settings-shorthand for tables stored in the cache folder.
+	public static func cache(path: String = "AutoDB/AutoDB.db") -> AutoDBSettings {
 		AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: true)
 	}
 	
-	// Common settings for all tables to be stored in the app-folder and allow for being backed up.
+	/// Common settings for all tables to be stored in the app-folder and allow for being backed up. With both folder flags false, path is absolute.
 	public init(path: String = "AutoDB/AutoDB.db", iCloudBackup: Bool = true, inAppFolder: Bool = true, inCacheFolder: Bool = false, autoCloseDelay: Double? = AutoDBManager.defaultWaitTime) {
+		self.init(path: path, iCloudBackup: iCloudBackup, inAppFolder: inAppFolder, inCacheFolder: inCacheFolder, autoCloseDelay: autoCloseDelay, inMemory: false)
+	}
+	
+	init(path: String, iCloudBackup: Bool, inAppFolder: Bool, inCacheFolder: Bool, autoCloseDelay: Double?, inMemory: Bool) {
 		self.path = path
 		self.iCloudBackup = iCloudBackup
 		self.inAppFolder = inAppFolder
 		self.inCacheFolder = inCacheFolder
 		self.autoCloseDelay = autoCloseDelay
+		self.inMemory = inMemory
 	}
 	
 	/// the path or fileName inside your app's supportDirectory or cachesDirectory
-	let path: String
+	public let path: String
 	/// Should this data be backed up and transfered to new devices?
-	let iCloudBackup: Bool
+	public let iCloudBackup: Bool
 	/// Is the path relative to the applications folder?
-	let inAppFolder: Bool
+	public let inAppFolder: Bool
 	/// Is the path relative to the cache folder - so the system may remove it whenever the user is low on disc-space?
-	let inCacheFolder: Bool
+	public let inCacheFolder: Bool
 	/// Auto-close the connection after this many seconds of non-use (it reopens transparently on the next access), nil keeps it open until closed manually.
-	let autoCloseDelay: Double?
+	public let autoCloseDelay: Double?
+	/// Keep the database in memory instead of a file, path and folder flags are ignored.
+	public let inMemory: Bool
 	
 	/// Should this get its own unique actor to issue queries from, or share with other tables with the same DB-file? If you have a lot of writes it is usually FASTER to share (one actor are better at scheduling than many SQLite connectors who uses locks with busy/retries). In normal usage you won't see any difference so there is typically no need to split them up. It may improve performance in some esotheric situations, so the option is available. Measure!
 	// let shareDB: Bool // this was a bad idea and is always worse. Don't do it.
+}
+
+/// Where a database's data lives, settings resolving to the same location share one connection.
+enum DatabaseLocation: Hashable {
+	case memory
+	case file(String)
 }
 
 public typealias AnyTable = (any Table)

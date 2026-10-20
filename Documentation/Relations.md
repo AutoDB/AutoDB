@@ -56,7 +56,7 @@ final class AlbumArt: Model, @unchecked Sendable {
 		// what album does this belong to?
 		var album = OneRelation<Album>()
 		
-		static var autoDBSettings: SettingsKey {
+		static var autoDBSettings: AutoDBSettings {
 			.cache
 		}
 	}

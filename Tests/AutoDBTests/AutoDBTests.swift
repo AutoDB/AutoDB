@@ -498,9 +498,4 @@ final class AutoDBTests {
 		let fetched = try await TrackedModel.fetchId(modelID)
 		#expect(fetched.name == "pending")
 	}
-	
-	@Test func specificSettingsAreUsed() async {
-		let settings = AutoDBSettings(path: "/tmp/AutoDBSpecificSettings.db", iCloudBackup: false, inAppFolder: false, inCacheFolder: false)
-		#expect(await AutoDBManager.shared.appSettings(for: .specific(settings)) == settings)
-	}
 }

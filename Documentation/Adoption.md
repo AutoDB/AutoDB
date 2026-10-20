@@ -30,14 +30,17 @@ final class Artist: Model, @unchecked Sendable {
 
 ## 2. Configure database settings
 
-Most apps should set package-wide defaults once during startup.
+Every `Table` says which database it lives in through `autoDBSettings`, and AutoDB has no default: declare it once for the whole module.
 
 ```swift
-let settings = AutoDBSettings(path: "AutoDB/App.sqlite")
-AutoDBManager.shared.setAppSettings(settings, for: .regular)
+extension Table {
+	static var autoDBSettings: AutoDBSettings { AutoDBSettings(path: "AutoDB/App.sqlite") }
+}
 ```
 
-If a specific table should live in a different file, override `autoDBSettings` on that `Table`.
+- A table elsewhere: declare `autoDBSettings` on that type. For a `Model`, put it on its `Value`.
+- A group of tables elsewhere: a refined protocol, `protocol CacheTable: Table {}` with `extension CacheTable { static var autoDBSettings: AutoDBSettings { .cache } }`.
+- Keep the `extension Table` `internal` and repeat it in each module that declares tables. A `public` one in a shared module makes conformances in importing modules ambiguous.
 
 ## 3. Persist and fetch models
 

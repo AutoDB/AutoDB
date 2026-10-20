@@ -11,7 +11,10 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	static func create(_ id: AutoId?) async -> Self
 	/// The unique id that identifies this object
 	var id: AutoId { get set }
-	static var autoDBSettings: SettingsKey { get }
+	/// Which database this table lives in. Declare it once for the whole app with `extension Table { static var autoDBSettings: AutoDBSettings { .regular } }`,
+	/// declare it on a type (or a refined protocol) to send that table elsewhere. Evaluated lazily at first setup, so it may compute paths (App Group containers).
+	/// Equal settings share one connection.
+	static var autoDBSettings: AutoDBSettings { get }
 	
 	/// The table name to use for storage, must be unique, good when having models inside modelObjects.
 	static var tableName: String { get }
@@ -110,7 +113,7 @@ public extension Table {
 		return item
 	}
 	
-    /// synchronized version of create, if you cannot use async/await. This will block the calling thread until the object is created. Always prefer async create.
+	/// synchronized version of create, if you cannot use async/await. This will block the calling thread until the object is created. Always prefer async create.
 	/// Never from async code: it blocks a thread of the cooperative pool, see Model.create(_:).
 	@available(*, noasync, message: "blocks a thread of the cooperative pool and can hang the process, use await create()")
 	static func create(_ id: AutoId? = nil) -> Self {
@@ -155,12 +158,6 @@ public extension Table {
 	/// Passing the token explicitly is still supported and always wins over the ambient one. Note: Task.detached inside the closure does not inherit the token and waits for the transaction (by design).
 	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database) async throws -> R)) async throws -> R {
 		try await db().transaction(action)
-	}
-	
-	/// Implement this to specify path to the database, or other settings.
-	/// You need to specify settings for each key before use, by calling AutoDBManager.shared.setAppSettings(...)
-	static var autoDBSettings: SettingsKey {
-		.regular
 	}
 	
 	/// return a list of variable names that have index, group together to make multi-column index

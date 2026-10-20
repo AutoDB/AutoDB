@@ -81,7 +81,9 @@ extension UInt64 {
 	private var modelCacheIdentifiersByTableIdentifier = [ObjectIdentifier: Set<ObjectIdentifier>]()
 	
 	var databases = [ObjectIdentifier: Database]()
-	var sharedDatabases = [SettingsKey: Database]()
+	var sharedDatabases = [DatabaseLocation: Database]()
+	/// the settings each shared database was opened with, the first settings for a location win
+	private var openedSettings = [DatabaseLocation: AutoDBSettings]()
 	
 	#if os(Android)
 	#else
@@ -126,45 +128,6 @@ extension UInt64 {
 		lookupTable.clear(typeID)
 	}
 	
-	/// Instead of asking each Table, supply defaults for any new table. If an ObjectIdentifier of a Table.Type is not within any - settings is picked from the first existing one in order: regular, cache, specific.
-	/// Bypassed if the Table has its own settings
-	/// If all is empty the default is used
-	/// Set from any thread (usually at app start) and read on the actor while setting up tables, so it is guarded by a lock.
-	private static let appDefaultsStorage = Locked<[SettingsKey: AutoDBSettings]>([:])
-	public static var appDefaults: [SettingsKey: AutoDBSettings] {
-		get { appDefaultsStorage.withLock { $0 } }
-		set { appDefaultsStorage.withLock { $0 = newValue } }
-	}
-	
-	/// insert a new global setting for the entire app, this is a good starting point directly at appstart.
-	/// Define app settings e.g. path, backup, etc.
-	public nonisolated func setAppSettings(_ settings: AutoDBSettings, for key: SettingsKey) {
-		// all with the same key will share the same settings
-		Self.appDefaultsStorage.withLock { $0[key] = settings }
-	}
-	
-	/// To ask for a common setting, e.g. when creating settings at startup:
-	/// AutoDBManager.shared.setAppSettingsSync(backupDBSettings, for: .regular)
-	/// AutoDBManager.shared.setAppSettingsSync(cacheDBSettings, for: .cache)
-	public func appSettings(for key: SettingsKey) -> AutoDBSettings {
-		Self.appDefaultsStorage.withLock { storage in
-			if let settings = storage[key] {
-				return settings
-			}
-			let fresh: AutoDBSettings
-			switch key {
-			case .cache:
-				fresh = AutoDBSettings.cache()
-			case .specific(let settings):
-				fresh = settings
-			default:
-				fresh = AutoDBSettings()
-			}
-			storage[key] = fresh
-			return fresh
-		}
-	}
-	
 	private let setupSemaphore = Semaphore()
 	
 	/// migration info, to get a callback when migration is done simply call: `_ = try await table.db()` which will wait until migration is complete.
@@ -188,20 +151,51 @@ extension UInt64 {
 	}
 	
 	/// The Database for these settings, created once. The setup semaphore only guards this - opening the file - never table work.
-	private func sharedDatabase(for key: SettingsKey, _ settings: AutoDBSettings) async throws -> Database {
+	private func sharedDatabase(for settings: AutoDBSettings) async throws -> Database {
 		// in theory you could have multiple actors for the same file, but that is always a bad idea.
-		if let db = sharedDatabases[key] {
+		let location = Self.location(for: settings)
+		if let db = sharedDatabases[location] {
+			warnIfDifferent(settings, location)
 			return db
 		}
 		// many threads will go here at the same time at startup, they need to wait.
 		await setupSemaphore.wait()
 		defer { Task { await setupSemaphore.signal() } }
-		if let db = sharedDatabases[key] {
+		if let db = sharedDatabases[location] {
+			warnIfDifferent(settings, location)
 			return db
 		}
 		let database = try await initDB(settings)
-		sharedDatabases[key] = database
+		sharedDatabases[location] = database
+		openedSettings[location] = settings
 		return database
+	}
+	
+	private var warnedLocations = Set<DatabaseLocation>()
+	/// two different settings for the same file share the first one's connection, say so once
+	private func warnIfDifferent(_ settings: AutoDBSettings, _ location: DatabaseLocation) {
+		guard let opened = openedSettings[location], opened != settings, warnedLocations.insert(location).inserted else { return }
+		AutoLog.error("two AutoDBSettings resolve to the same file \(location); the first one's options are in use. First: \(opened), ignored: \(settings)")
+	}
+	
+	/// Where these settings put the database: App Support or Caches (plus the app name on macOS) joined with path, path itself when both folder flags are false, or memory.
+	nonisolated static func location(for settings: AutoDBSettings) -> DatabaseLocation {
+		if settings.inMemory {
+			return .memory
+		}
+		guard settings.inAppFolder || settings.inCacheFolder else {
+			return .file(settings.path)
+		}
+		let url = settings.inCacheFolder ? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0] : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+		var path = url.path
+		if path.hasSuffix("/") == false {
+			path += "/"
+		}
+		#if os(macOS)
+			let appName = Bundle.main.infoDictionary?["CFBundleName"] as? String ?? Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String ?? "AutoDBApp"
+			path += appName + "/"
+		#endif
+		return .file(path + settings.path)
 	}
 	
 	/// Setup database for this class, attach to file defined in settings. Settings defaults to .main, implement autoDBSettings in each Table to specify location or use the cache.
@@ -214,9 +208,8 @@ extension UInt64 {
 		if let db = databases[typeID] {
 			return db
 		}
-		let settingsKey = table.autoDBSettings
-		let tableSettings = appSettings(for: settingsKey)
-		let database = try await sharedDatabase(for: settingsKey, tableSettings)
+		let tableSettings = table.autoDBSettings
+		let database = try await sharedDatabase(for: tableSettings)
 		let lock = setupLock(typeID)
 		
 		return try await database.excludingTransactions {
@@ -284,21 +277,9 @@ extension UInt64 {
 	@discardableResult
 	func initDB(_ settings: AutoDBSettings) async throws -> Database {
 		
-		var path: String
-		if settings.inAppFolder || settings.inCacheFolder {
-			let url = settings.inCacheFolder ? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0] : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-			path = url.path
-			if path.hasSuffix("/") == false {
-				path += "/"
-			}
-			#if os(macOS)
-				let appName = Bundle.main.infoDictionary?["CFBundleName"] as? String ?? Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String ?? "AutoDBApp"
-				path += appName + "/"
-			#endif
-			
-			path += settings.path
-		} else {
-			path = settings.path
+		guard case .file(let path) = Self.location(for: settings) else {
+			// memory databases never auto-close: closing one discards its data
+			return try Database(nil)
 		}
 		print("sqlite3 \"\(path)\"")
 		let db = try Database(path)
@@ -929,8 +910,9 @@ extension UInt64 {
 	// MARK: - open and close db
 	
 	/// Close all databases within waitSec. allowReopen: the next access reopens a database transparently, pass false to keep them closed until open().
+	/// Close all file databases, memory databases are skipped since closing one discards its data.
 	public func close(waitSec: Double = 10, allowReopen: Bool = true) async {
-		for db in sharedDatabases {
+		for db in sharedDatabases where db.key != .memory {
 			await db.value.close(waitSec: waitSec, allowReopen: allowReopen)
 		}
 	}
@@ -950,14 +932,16 @@ extension UInt64 {
 	}
 	
 	/// Change database file in the middle of operations, this is good for testing. No dbURL means memory.
-	public func switchDB(_ newPositions: [SettingsKey: URL]) async throws {
+	/// Every open database moves: the ones whose settings are not in newPositions go to memory.
+	public func switchDB(_ newPositions: [AutoDBSettings: URL?]) async throws {
+		let positions = Dictionary(newPositions.map { (Self.location(for: $0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
 		for db in sharedDatabases {
 			await db.value.close(waitSec: 0.1, allowReopen: false)
 		}
 		tables.removeAll()
 		databases.removeAll()
 		for db in sharedDatabases {
-			let url = newPositions[db.key]
+			let url = positions[db.key] ?? nil
 			try await db.value.switchDB(url)
 		}
 	}

@@ -4,21 +4,25 @@ import Testing
 
 /// The suite's own database file in the cache folder (same layout as TestDatabase in AutoDBTests), deleted the first time a run uses it.
 private enum IntegrationDatabase {
-	static let settingsKey: SettingsKey = {
+	static let settings: AutoDBSettings = {
 		let path = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
 			.appendingPathComponent("AutoDBTests/AutoDBIntegrationTests.db")
 			.path
 		for suffix in ["", "-wal", "-shm"] {
 			try? FileManager.default.removeItem(atPath: path + suffix)
 		}
-		return .specific(AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: false))
+		return AutoDBSettings(path: path, iCloudBackup: false, inAppFolder: false, inCacheFolder: false)
 	}()
+}
+
+/// The app-wide recipe: every table in this module lives in the suite's file.
+extension Table {
+	static var autoDBSettings: AutoDBSettings { IntegrationDatabase.settings }
 }
 
 private final class SmokeArtist: Model, @unchecked Sendable {
 	struct Value: Table {
 		static let tableName = "SmokeArtist"
-		static let autoDBSettings = IntegrationDatabase.settingsKey
 		
 		var id: AutoId = 0
 		var name = ""
@@ -37,7 +41,6 @@ private final class SmokeArtist: Model, @unchecked Sendable {
 private final class SmokeAlbumArt: Model, @unchecked Sendable {
 	struct Value: Table {
 		static let tableName = "SmokeAlbumArt"
-		static let autoDBSettings = IntegrationDatabase.settingsKey
 		
 		var id: AutoId = 0
 		var title = ""
@@ -56,7 +59,6 @@ private final class SmokeAlbumArt: Model, @unchecked Sendable {
 private final class SmokeArticle: Model, @unchecked Sendable {
 	struct Value: Table {
 		static let tableName = "SmokeArticle"
-		static let autoDBSettings = IntegrationDatabase.settingsKey
 		
 		var id: AutoId = 0
 		var title = ""
@@ -75,8 +77,34 @@ private final class SmokeArticle: Model, @unchecked Sendable {
 	
 }
 
+/// a group of tables sent elsewhere through a refined protocol, which beats the module-wide extension
+private protocol SmokeCacheTable: Table {}
+extension SmokeCacheTable {
+	static var autoDBSettings: AutoDBSettings { .memory }
+}
+
+private struct SmokeCached: SmokeCacheTable {
+	var id: AutoId = 0
+	var name = ""
+}
+
+/// read the way AutoDB does, through the protocol witness
+private func settings<T: Table>(_ type: T.Type) -> AutoDBSettings {
+	T.autoDBSettings
+}
+
 @Suite(.serialized)
 struct AutoDBIntegrationTests {
+	@Test func testSettingsWitnessRanking() async throws {
+		#expect(settings(SmokeArtist.Value.self) == IntegrationDatabase.settings)
+		#expect(settings(SmokeCached.self) == .memory)
+		
+		var cached = await SmokeCached.create()
+		cached.name = "kept in memory"
+		try await cached.save()
+		#expect(try await SmokeCached.fetchId(cached.id).name == "kept in memory")
+	}
+	
 	@Test func testPublicModelRoundTrip() async throws {
 		try await SmokeArtist.truncateTable()
 		

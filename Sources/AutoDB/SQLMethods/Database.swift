@@ -110,7 +110,7 @@ public actor Database {
 	var dbHandle: OpaquePointer
 	
 	/// the file url for the DB
-	private var dbURL: URL?
+	private(set) var dbURL: URL?
 	
 	/// Why the connection is closed: reopensOnAccess (idle auto-close, or close(allowReopen: true)) reopens transparently on the next access,
 	/// closedUntilOpen (close(allowReopen: false), closeNow) stays closed until open() is called.
