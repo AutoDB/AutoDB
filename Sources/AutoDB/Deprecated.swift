@@ -9,6 +9,8 @@
 //  longer needed - each wrapper binds the given token and forwards to the clean version.
 //  Explicit tokens still win over an ambient one. Delete this whole file in the next major version.
 
+import Foundation
+
 // MARK: - Model
 
 public extension Model {
@@ -116,10 +118,14 @@ public extension Model {
 	
 	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
 	func save(token: AutoId?) {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			// explicit tokens deliberately cross into detached work - preserve that
-			try? await SemaphoreToken.$current.withValue(token) {
-				try await self.save()
+			await AutoDBManager.withScope(manager) {
+				// explicit tokens deliberately cross into detached work - preserve that
+				try? await SemaphoreToken.$current.withValue(token) {
+					try await self.save()
+				}
 			}
 		}
 	}
@@ -140,9 +146,13 @@ public extension Model {
 	
 	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
 	static func saveChangesDetached(token: AutoId?) {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await SemaphoreToken.$current.withValue(token) {
-				try await AutoDBManager.shared.saveChanges(Self.self)
+			await AutoDBManager.withScope(manager) {
+				try? await SemaphoreToken.$current.withValue(token) {
+					try await AutoDBManager.current.saveChanges(Self.self)
+				}
 			}
 		}
 	}
@@ -156,9 +166,13 @@ public extension Model {
 	
 	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
 	static func saveAllChangesDetacted(token: AutoId?) {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await SemaphoreToken.$current.withValue(token) {
-				try await AutoDBManager.shared.saveAllChanges()
+			await AutoDBManager.withScope(manager) {
+				try? await SemaphoreToken.$current.withValue(token) {
+					try await AutoDBManager.current.saveAllChanges()
+				}
 			}
 		}
 	}
@@ -172,9 +186,13 @@ public extension Model {
 	
 	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
 	func delete(token: AutoId?) {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await SemaphoreToken.$current.withValue(token) {
-				try await self.delete()
+			await AutoDBManager.withScope(manager) {
+				try? await SemaphoreToken.$current.withValue(token) {
+					try await self.delete()
+				}
 			}
 		}
 	}
@@ -198,9 +216,13 @@ public extension Collection where Element: Model {
 	
 	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
 	func save(token: AutoId?) where Self: Sendable {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await SemaphoreToken.$current.withValue(token) {
-				try await self.save()
+			await AutoDBManager.withScope(manager) {
+				try? await SemaphoreToken.$current.withValue(token) {
+					try await self.save()
+				}
 			}
 		}
 	}
@@ -319,10 +341,14 @@ public extension Table {
 	
 	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
 	func save(token: AutoId?) {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			// explicit tokens deliberately cross into detached work - preserve that
-			try? await SemaphoreToken.$current.withValue(token) {
-				try await self.save()
+			await AutoDBManager.withScope(manager) {
+				// explicit tokens deliberately cross into detached work - preserve that
+				try? await SemaphoreToken.$current.withValue(token) {
+					try await self.save()
+				}
 			}
 		}
 	}
@@ -350,9 +376,13 @@ public extension Table {
 	
 	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
 	func delete(token: AutoId?) {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await SemaphoreToken.$current.withValue(token) {
-				try await self.delete()
+			await AutoDBManager.withScope(manager) {
+				try? await SemaphoreToken.$current.withValue(token) {
+					try await self.delete()
+				}
 			}
 		}
 	}
@@ -376,9 +406,13 @@ public extension Collection where Element: Table {
 	
 	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
 	func save(token: AutoId?) where Self: Sendable {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await SemaphoreToken.$current.withValue(token) {
-				try await self.save()
+			await AutoDBManager.withScope(manager) {
+				try? await SemaphoreToken.$current.withValue(token) {
+					try await self.save()
+				}
 			}
 		}
 	}
@@ -502,5 +536,10 @@ extension AutoDBManager {
 	@available(*, unavailable, message: "appDefaults is removed: declare `extension Table { static var autoDBSettings: AutoDBSettings { ... } }` instead. See 'Migrating from SettingsKey' in Documentation.md")
 	public static var appDefaults: [SettingsKey: AutoDBSettings] {
 		fatalError("AutoDB: appDefaults is removed, declare `extension Table { static var autoDBSettings: AutoDBSettings { ... } }` instead. See 'Migrating from SettingsKey' in Documentation.md")
+	}
+	
+	@available(*, unavailable, message: "switchDB is removed: give each test its own databases with @Suite(.autoDB) from AutoDBTesting, or run code against other files with AutoDBManager.withScope(AutoDBManager(root:)). See 'Scopes and testing' in Documentation.md")
+	public func switchDB(_ newPositions: [AutoDBSettings: URL?]) async throws {
+		fatalError("AutoDB: switchDB is removed, use @Suite(.autoDB) or AutoDBManager.withScope. See 'Scopes and testing' in Documentation.md")
 	}
 }

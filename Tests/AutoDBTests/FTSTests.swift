@@ -9,9 +9,9 @@ import Testing
 import Foundation
 
 @testable import AutoDB
+import AutoDBTesting
 
 struct FTS: Table {
-	static let autoDBSettings = TestDatabase.fts
 	var id: AutoId = 1
 	var name = 1
 	var text = ""
@@ -33,7 +33,6 @@ struct FTS: Table {
 
 final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
 	struct PostTable: Table {
-		static let autoDBSettings = TestDatabase.fts
 		var id: AutoId = 1
 		var title: String = "Untitled"
 		var body: String = "Once upon a time..."
@@ -57,7 +56,7 @@ final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
 	}
 }
 
-@Suite(.serialized)
+@Suite(.autoDB, .serialized)
 class FTSTests {
 	
 	private func resetFTS() async throws {
@@ -143,7 +142,7 @@ class FTSTests {
 		//TODO: THINK: should we return the owner or the table? We should return the owner (Model) if exists!
 		let fetchedPost = try await post?.ownerIndex.search("once").first
 		#expect(fetchedPost?.title == title)
-		let cached: Post? = await AutoDBManager.shared.modelForTable(fetchedPost)
+		let cached: Post? = await AutoDBManager.current.modelForTable(fetchedPost)
 		#expect(cached === post)
 	}
 	

@@ -7,6 +7,7 @@
 
 import Testing
 @testable import AutoDB
+import AutoDBTesting
 
 public enum Status: UInt, Sendable, Codable {
 	case ok = 1
@@ -36,13 +37,13 @@ public enum StringEnum: String, Codable, Sendable {
 }
 
 struct OptionTable: Table {
-	static let autoDBSettings = TestDatabase.codable
 	static let tableName = "optiontable"
 	var id: AutoId = 1
 	var state: OptionState = .isFavorite
 	var name: StringEnum = .firstValue
 }
 
+@Suite(.autoDB)
 class CodableTests {
 	
 	@Test func testEnumCodable() async throws {

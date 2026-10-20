@@ -1,9 +1,9 @@
 import Testing
 @testable import AutoDB
+import AutoDBTesting
 import Foundation
 
 struct ExampleInit: Table {
-	static let autoDBSettings = TestDatabase.autoDB
 	var id: AutoId = 0
 	let something: Int
 	init() {
@@ -47,7 +47,7 @@ class Resource {
 
  */
 
-@Suite(.serialized)
+@Suite(.autoDB, .serialized)
 final class AutoDBTests {
 	
 	private static let logSetup: Void = AutoLog.setup()
@@ -146,7 +146,7 @@ final class AutoDBTests {
 		base3.optString = "base 3"
 		
 		// this is basically the save function
-		let encoder = await SQLRowEncoder(ObserveBasic.self)
+		let encoder = await SQLRowEncoder(ObserveBasic.self, AutoDBManager.current)
 		try base.encode(to: encoder)
 		try base3.encode(to: encoder)
 		try await encoder.commit(update: false)
@@ -172,7 +172,7 @@ final class AutoDBTests {
 		]
 
 		let db = try await IntTester.db()
-		let table = await AutoDBManager.shared.tableInfo(IntTester.self)
+		let table = await AutoDBManager.current.tableInfo(IntTester.self)
 		
 		let decoder = SQLRowDecoder(IntTester.self, table, values)
 		let base = try IntTester(from: decoder)
@@ -227,7 +227,7 @@ final class AutoDBTests {
 	
 	func lookupObjectsCount(_ tableName: ObjectIdentifier, _ expectedCount: Int, _ message: String) async {
 		
-		let count = await AutoDBManager.shared.lookupObjectsCount(tableName)
+		let count = await AutoDBManager.current.lookupObjectsCount(tableName)
 		#expect(count == expectedCount, Comment(rawValue: message))
 	}
 	
@@ -270,7 +270,7 @@ final class AutoDBTests {
 	
 	@available(macOS 15.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 	@Test func testObserveWithoutCodingKeys() async throws {
-		try await AutoDBManager.shared.truncateTable(Artist.Value.self)
+		try await AutoDBManager.current.truncateTable(Artist.Value.self)
 		
 		let first = await Artist.create(1)
 		first.value.name = "The Cure"
@@ -284,7 +284,7 @@ final class AutoDBTests {
 	
 	@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 	@Test func testWithCodingKeys() async throws {
-		try await AutoDBManager.shared.truncateTable(CodeWithKeys.self)
+		try await AutoDBManager.current.truncateTable(CodeWithKeys.self)
 		
 		var first: CodeWithKeys? = await CodeWithKeys.create(1)
 		first?.name = "The Cure"
@@ -390,7 +390,7 @@ final class AutoDBTests {
 	}
 	
 	@Test func testCreateWithExistingId() async throws {
-		try await AutoDBManager.shared.truncateTable(UniqueString.Value.self)
+		try await AutoDBManager.current.truncateTable(UniqueString.Value.self)
 		
 		let item = await UniqueString.create(1)
 		item.string = "Test"
@@ -422,7 +422,7 @@ final class AutoDBTests {
 	}
 	
 	@Test func testDuplicateDoesNotBlockLaterSaves() async throws {
-		try await AutoDBManager.shared.truncateTable(UniqueString.Value.self)
+		try await AutoDBManager.current.truncateTable(UniqueString.Value.self)
 		
 		let existing = await UniqueString.create()
 		existing.string = "taken"
@@ -443,7 +443,7 @@ final class AutoDBTests {
 		let other = await UniqueString.create()
 		other.string = "free"
 		await other.didChange()
-		try await AutoDBManager.shared.saveAllChanges()
+		try await AutoDBManager.current.saveAllChanges()
 		let saved = try await UniqueString.fetchId(other.id)
 		#expect(saved.string == "free")
 		
@@ -457,24 +457,24 @@ final class AutoDBTests {
 	}
 	
 	@Test func testTypedModelBucketsSavePendingChanges() async throws {
-		try await AutoDBManager.shared.truncateTable(TrackedModel.Value.self)
+		try await AutoDBManager.current.truncateTable(TrackedModel.Value.self)
 		
 		let item = await TrackedModel.create(1)
 		item.name = "first"
 		try await item.save()
 		
 		item.name = "second"
-		try await AutoDBManager.shared.saveChanges(TrackedModel.self)
+		try await AutoDBManager.current.saveChanges(TrackedModel.self)
 		
 		let fetched = try await TrackedModel.fetchId(1)
-		let pendingCount = await AutoDBManager.shared.lookupObjectsCount(ObjectIdentifier(TrackedModel.self))
+		let pendingCount = await AutoDBManager.current.lookupObjectsCount(ObjectIdentifier(TrackedModel.self))
 		#expect(fetched === item)
 		#expect(fetched.name == "second")
 		#expect(pendingCount == 0)
 	}
 	
 	@Test func testSaveAllChangesPersistsDroppedModelReferences() async throws {
-		try await AutoDBManager.shared.truncateTable(TrackedModel.Value.self)
+		try await AutoDBManager.current.truncateTable(TrackedModel.Value.self)
 		
 		let weakModel = WeakBox<TrackedModel>()
 		let modelID: AutoId = 2
@@ -490,7 +490,7 @@ final class AutoDBTests {
 		}
 		
 		#expect(weakModel.value != nil)
-		try await AutoDBManager.shared.saveAllChanges()
+		try await AutoDBManager.current.saveAllChanges()
 		try await waitForCondition {
 			weakModel.value == nil
 		}

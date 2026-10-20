@@ -7,15 +7,16 @@
 
 import Testing
 @testable import AutoDB
+import AutoDBTesting
 import Foundation
 
-@Suite(.serialized)
+@Suite(.autoDB, .serialized)
 class ManyRelationTest {
 	
 	@Test
 	func testStructsInitFetch() async throws {
-		try await AutoDBManager.shared.truncateTable(ParentStruct.self)
-		try await AutoDBManager.shared.truncateTable(Child.self)
+		try await AutoDBManager.current.truncateTable(ParentStruct.self)
+		try await AutoDBManager.current.truncateTable(Child.self)
 		try await createData()
 		
 		await Task.yield()
@@ -42,8 +43,8 @@ class ManyRelationTest {
 	
 	@Test
 	func testPagedFetchStopsAtTotalCount() async throws {
-		try await AutoDBManager.shared.truncateTable(PagedParentStruct.self)
-		try await AutoDBManager.shared.truncateTable(Child.self)
+		try await AutoDBManager.current.truncateTable(PagedParentStruct.self)
+		try await AutoDBManager.current.truncateTable(Child.self)
 		
 		let parent = await PagedParentStruct.create(1)
 		let names = ["A", "B", "C"]
@@ -88,8 +89,8 @@ class ManyRelationTest {
 	}
 	
 	@Test func testRelations() async throws {
-		try await AutoDBManager.shared.truncateTable(Parent.Value.self)
-		try await AutoDBManager.shared.truncateTable(Child.self)
+		try await AutoDBManager.current.truncateTable(Parent.Value.self)
+		try await AutoDBManager.current.truncateTable(Child.self)
 		
 		var item: Parent? = await Parent.create(1)
 		try await item?.value.children.fetch()
@@ -139,13 +140,11 @@ class ManyRelationTest {
 }
 
 struct PagedParentStruct: Table {
-	static let autoDBSettings = TestDatabase.manyRelation
 	var id: UInt64 = 0
 	var children = ManyRelation<Child>(initial: 2, limit: 2, initFetch: false)
 }
 
 struct ParentStruct: Table {
-	static let autoDBSettings = TestDatabase.manyRelation
 	var id: UInt64 = 0
 	var name = ""
 	var children = ManyRelation<Child>(initFetch: false)

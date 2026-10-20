@@ -169,7 +169,7 @@ Keep the `extension Table` `internal`, and repeat it in every module that declar
 
 `autoDBSettings` is read the first time a table is used, so it may compute a path. Tables whose settings resolve to the same place share one connection. If two different settings point to the same file, the first one's options (backup, auto-close delay) are used and AutoDB logs the mismatch once. Two connections to one file are never opened.
 
-`.memory` is shared by every table that uses it, and it lives as long as the process. It never auto-closes, and `AutoDBManager.close()` skips it, since closing it would discard its data. `switchDB` moves any database it is not given a URL for to memory, which discards the old in-memory data.
+`.memory` is shared by every table of a manager that uses it, and it lives as long as that manager. It never auto-closes, and `AutoDBManager.close()` skips it, since closing it would discard its data.
 
 ### Migrating from SettingsKey
 
@@ -180,7 +180,87 @@ Keep the `extension Table` `internal`, and repeat it in every module that declar
 | `.specific(settings)` | `settings` |
 | `AutoDBManager.shared.setAppSettings(s, for: .regular)` at startup | `extension Table { static var autoDBSettings: AutoDBSettings { s } }` |
 | `setAppSettings(s, for: .cache)` | a refined protocol, or `s` on each cache table |
-| `switchDB([.regular: url])` | `switchDB([settings: url])`, keyed by the tables' settings |
+| `switchDB([.regular: url])` in tests | `@Suite(.autoDB)`, see [Scopes and testing](#scopes-and-testing) |
+
+## Scopes and testing
+
+Settings answer *which* database a table uses. An `AutoDBManager` answers *where* that set of databases lives. Each manager owns all of its state: its connections, table setup, object caches, changed and deleted objects, and FTS state. `AutoDBManager.shared` is the app's manager.
+
+`AutoDBManager(root: url)` makes another manager whose files live under `url`:
+
+| Settings | File under the root |
+| --- | --- |
+| in the app folder, like `.regular` | `root/Application Support/<path>` |
+| in the cache folder, like `.cache` | `root/Caches/<path>` |
+| an absolute path | `root/<file name>` |
+| `.memory` | in memory, private to the manager |
+
+`.regular` and `.cache` stay two files, so relations between them still work under a root.
+
+### Which manager a call uses
+
+- Static calls (`fetchId`, `fetchQuery`, `create`, `query`, `execute`, `truncateTable`, `saveChanges`) use `AutoDBManager.current`. That is the manager bound with `AutoDBManager.withScope(manager) { ... }`, or `.shared` outside a scope.
+- A model remembers the manager that created, fetched or registered it. Its `save()`, `delete()`, `isDeleted`, change tracking and relations use that manager, wherever they are called from.
+
+The scope is a task-local, so it reaches `Task { }` and child tasks, but not `Task.detached`, DispatchQueue blocks or NotificationCenter observers. A model saved from any of those still lands in its own files, because the model carries its manager. A static call made from there uses `.shared`. Wrap it in `withScope` when it must stay in the scope.
+
+`withScope` works in apps too, for example for an import into a separate database:
+
+```swift
+let importer = AutoDBManager(root: importFolder)
+try await AutoDBManager.withScope(importer) {
+	let items = try await FeedItem.fetchQuery("WHERE unread = 1")
+	...
+}
+```
+
+### Testing with AutoDBTesting
+
+Add the `AutoDBTesting` product to your test target and put `.autoDB` on each suite:
+
+```swift
+import Testing
+import AutoDBTesting
+
+@Suite(.autoDB)
+struct FeedTests {
+	@Test func save() async throws {
+		let item = await FeedItem.create()
+		try await item.save()
+	}
+}
+```
+
+Every suite gets a manager rooted at `Caches/AutoDBTests/<suite name>/`. Suites that use the same production tables can then run in parallel without seeing each other's rows, with no `switchDB`, `.serialized` or cleanup between them.
+
+- On a suite, every test and nested suite shares one manager. On a single test, that test gets its own.
+- `.autoDB("name")` picks the folder name. Names must be unique within a test process.
+- The folder is deleted the first time a run uses it, so every run starts empty and the last run's files stay for inspection.
+- Inside a suite, tests that share tables still need `.serialized` or their own ids.
+
+### The leak guard
+
+A test that forgets `.autoDB` would use `.shared`, and an unsandboxed macOS test process resolves `.shared` to your real database. Guard against this once in the test target:
+
+```swift
+await AutoDBManager.shared.requireScope()
+```
+
+After this, any table that `.shared` has not set up yet throws `AutoError.noScope` instead of opening a file.
+
+### Singletons
+
+A process-wide `static` that holds a model is shared by every scope, and it shows rows from whichever scope loaded it first. Keep database-backed singletons in the manager instead, so each scope gets its own:
+
+```swift
+extension SharedModel {
+	static var current: SharedModel {
+		AutoDBManager.current.storage(for: "SharedModel") { SharedModel() }
+	}
+}
+```
+
+`make` runs outside the lock. When two callers race, the first value stored wins and both get it.
 
 ## Connection lifecycle and auto-close
 

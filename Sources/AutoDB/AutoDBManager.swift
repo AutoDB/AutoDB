@@ -14,7 +14,19 @@ extension UInt64 {
 
 @globalActor public actor AutoDBManager: GlobalActor {
 	
+	/// The app's manager, used by every call outside `withScope`.
 	public static let shared = AutoDBManager()
+	
+	/// Where this manager keeps its files, nil for the real locations. See `init(root:)`.
+	public nonisolated let root: URL?
+	/// full-text search state of this manager's tables
+	nonisolated let ftsHandler = FTSHandler()
+	/// coalesces saveAllChangesLater
+	private let debounce = Debounce()
+	/// see storage(for:default:)
+	nonisolated let storageSlots = Locked<[String: any Sendable]>([:])
+	/// set by requireScope(), setupDB throws instead of opening a database
+	var scopeRequired = false
 	
 	var encoders = [ObjectIdentifier: SQLRowEncoder]()
 	/// get the cached encoder for this class, or create one
@@ -26,7 +38,7 @@ extension UInt64 {
 		if let enc = encoders[typeID ?? ObjectIdentifier(T.self)] {
 			return enc
 		}
-		let enc = await SQLRowEncoder(T.self)
+		let enc = await SQLRowEncoder(T.self, self)
 		encoders[typeID ?? ObjectIdentifier(T.self)] = enc
 		return enc
 	}
@@ -85,12 +97,16 @@ extension UInt64 {
 	/// the settings each shared database was opened with, the first settings for a location win
 	private var openedSettings = [DatabaseLocation: AutoDBSettings]()
 	
-	#if os(Android)
-	#else
+	#if !os(Android)
 		// keep track of low memory warnings, save any unsaved objects to release memory.
 		private let lowMemoryEventSource: DispatchSourceMemoryPressure
-		
-		private init() {
+	#endif
+	
+	/// A manager with its own databases, caches and changed objects. Bind it with `withScope` to use it.
+	/// With a root, every file database lives inside root instead of its real location: app-folder settings in `root/Application Support/<path>`, cache-folder settings in `root/Caches/<path>`, absolute paths in `root/<file name>`. Memory databases are private to the manager either way.
+	public init(root: URL? = nil) {
+		self.root = root
+		#if !os(Android)
 			lowMemoryEventSource = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical])
 			lowMemoryEventSource.setEventHandler { [weak self] in
 				guard let self else { return }
@@ -98,13 +114,13 @@ extension UInt64 {
 					try? await self.saveAllChanges()
 				}
 			}
-			Task {
-				await self._init()
-			}
-		}
-		
-		private func _init() async {
 			lowMemoryEventSource.resume()
+		#endif
+	}
+	
+	#if !os(Android)
+		deinit {
+			lowMemoryEventSource.cancel()
 		}
 	#endif
 	
@@ -153,7 +169,7 @@ extension UInt64 {
 	/// The Database for these settings, created once. The setup semaphore only guards this - opening the file - never table work.
 	private func sharedDatabase(for settings: AutoDBSettings) async throws -> Database {
 		// in theory you could have multiple actors for the same file, but that is always a bad idea.
-		let location = Self.location(for: settings)
+		let location = location(for: settings)
 		if let db = sharedDatabases[location] {
 			warnIfDifferent(settings, location)
 			return db
@@ -198,6 +214,29 @@ extension UInt64 {
 		return .file(path + settings.path)
 	}
 	
+	/// Where these settings put the database for this manager: `Self.location(for:)` moved inside root when there is one.
+	nonisolated func location(for settings: AutoDBSettings) -> DatabaseLocation {
+		let location = Self.location(for: settings)
+		guard let root, case .file(let path) = location else {
+			return location
+		}
+		if settings.inCacheFolder {
+			return .file(root.appendingPathComponent("Caches").appendingPathComponent(settings.path).path)
+		}
+		if settings.inAppFolder {
+			return .file(root.appendingPathComponent("Application Support").appendingPathComponent(settings.path).path)
+		}
+		return .file(root.appendingPathComponent(URL(fileURLWithPath: path).lastPathComponent).path)
+	}
+	
+	/// The file these settings open through this manager, nil for a memory database.
+	public nonisolated func fileURL(for settings: AutoDBSettings) -> URL? {
+		guard case .file(let path) = location(for: settings) else {
+			return nil
+		}
+		return URL(fileURLWithPath: path)
+	}
+	
 	/// Setup database for this class, attach to file defined in settings. Settings defaults to .main, implement autoDBSettings in each Table to specify location or use the cache.
 	///
 	/// Lock order: the database's transaction slot first (`excludingTransactions`), then this table's own setup lock. The table's queries - PRAGMA, CREATE, a copy for changed columns - wait for an open transaction otherwise.
@@ -207,6 +246,9 @@ extension UInt64 {
 		let typeID = typeID ?? ObjectIdentifier(table)
 		if let db = databases[typeID] {
 			return db
+		}
+		if scopeRequired {
+			throw AutoError.noScope("\(table) used outside a test database")
 		}
 		let tableSettings = table.autoDBSettings
 		let database = try await sharedDatabase(for: tableSettings)
@@ -220,7 +262,10 @@ extension UInt64 {
 			if let db = await self.databases[typeID] {
 				return db
 			}
-			return try await self.setUpTable(table, typeID, database, tableSettings)
+			// user migrations call the static API, bind ourselves so it comes back here
+			return try await Self.withScope(self) {
+				try await self.setUpTable(table, typeID, database, tableSettings)
+			}
 		}
 	}
 	
@@ -277,7 +322,7 @@ extension UInt64 {
 	@discardableResult
 	func initDB(_ settings: AutoDBSettings) async throws -> Database {
 		
-		guard case .file(let path) = Self.location(for: settings) else {
+		guard case .file(let path) = location(for: settings) else {
 			// memory databases never auto-close: closing one discards its data
 			return try Database(nil)
 		}
@@ -411,6 +456,7 @@ extension UInt64 {
 	func cacheObject<T: Model>(_ object: T, _ identifier: ObjectIdentifier? = nil) {
 		let typeID = identifier ?? ObjectIdentifier(T.self)
 		registerModelCacheIdentifier(typeID, tableTypeID: object.valueIdentifier)
+		remember(object)
 		if cachedObjects[typeID] == nil {
 			cachedObjects[typeID] = WeakDictionary([object.id: object])
 		} else {
@@ -488,7 +534,7 @@ extension UInt64 {
 	// MARK: - fetching
 	
 	static func fetchId<T: Table>(_ id: UInt64, _ identifier: ObjectIdentifier? = nil) async throws -> T? {
-		try await shared.fetchId(id)
+		try await current.fetchId(id)
 	}
 	
 	/// Fetch an object with known id, throw missingId if no object was found.
@@ -814,7 +860,10 @@ extension UInt64 {
 		let buckets = Array(lookupTable.changedObjects.values)
 		for bucket in buckets {
 			do {
-				try await bucket.saveChanges()
+				// saveList is static, bind ourselves so it saves here
+				try await Self.withScope(self) {
+					try await bucket.saveChanges()
+				}
 			} catch {
 				anyError = error
 			}
@@ -828,7 +877,7 @@ extension UInt64 {
 	nonisolated public func saveAllChangesLater() {
 		Task {
 			await self.keepAllDatabasesOpen(for: self.saveLaterDelay)
-			await Debounce.shared.debounce(delay: self.saveLaterDelay) {
+			await self.debounce.debounce(delay: self.saveLaterDelay) {
 				do {
 					try await self.saveAllChanges()
 				} catch {
@@ -857,7 +906,9 @@ extension UInt64 {
 		}
 		
 		if let bucket = lookupTable.changedObjects[typeID] as? ChangedModelBucket<T> {
-			try await bucket.saveChanges()
+			try await Self.withScope(self) {
+				try await bucket.saveChanges()
+			}
 		}
 		if let anyError {
 			throw anyError
@@ -928,21 +979,6 @@ extension UInt64 {
 	public func setAutoClose(after delay: Double?) async {
 		for db in sharedDatabases {
 			await db.value.setAutoClose(after: delay)
-		}
-	}
-	
-	/// Change database file in the middle of operations, this is good for testing. No dbURL means memory.
-	/// Every open database moves: the ones whose settings are not in newPositions go to memory.
-	public func switchDB(_ newPositions: [AutoDBSettings: URL?]) async throws {
-		let positions = Dictionary(newPositions.map { (Self.location(for: $0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
-		for db in sharedDatabases {
-			await db.value.close(waitSec: 0.1, allowReopen: false)
-		}
-		tables.removeAll()
-		databases.removeAll()
-		for db in sharedDatabases {
-			let url = positions[db.key] ?? nil
-			try await db.value.switchDB(url)
 		}
 	}
 	

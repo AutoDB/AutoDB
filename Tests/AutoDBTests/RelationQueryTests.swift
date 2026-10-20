@@ -6,13 +6,13 @@
 //
 import Foundation
 @testable import AutoDB
+import AutoDBTesting
 import Testing
 import Combine
 
 final class Album: Model, @unchecked Sendable {
 	
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.relationQuery
 		
 		var id: AutoId = 0
 		var name = ""
@@ -40,7 +40,7 @@ final class AlbumArt: Model, @unchecked Sendable {
 		// what album does this belong to?
 		var album = OneRelation<Album>()
 		
-		static let autoDBSettings = TestDatabase.relationQueryCache
+		static let autoDBSettings = AutoDBSettings.cache
 	}
 	
 	var value: Value
@@ -68,7 +68,6 @@ final class DeallocTest: @unchecked Sendable {
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class CureAlbums: Model, @unchecked Sendable {
 	struct CureAlbumsTable: Table {
-		static let autoDBSettings = TestDatabase.relationQuery
 		static let tableName = "CureAlbums"
 		
 		var id: AutoId = 0
@@ -82,7 +81,6 @@ final class CureAlbums: Model, @unchecked Sendable {
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 struct SaveFail: Table {
-	static let autoDBSettings = TestDatabase.relationQuery
 	var id: AutoId = 0
 	var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 3)
 }
@@ -91,7 +89,6 @@ final class CombineAlbum: Model, @unchecked Sendable, ObservableObject {
 	
 	//var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
 	struct CombineAlbumTable: Table {
-		static let autoDBSettings = TestDatabase.relationQuery
 		
 		var id: AutoId = 0
 		var name = ""
@@ -125,7 +122,6 @@ final class CombineArtist: @unchecked Sendable, ObservableObject, RelationOwner 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class PagedCureAlbums: Model, @unchecked Sendable {
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.relationQuery
 		static let tableName = "PagedCureAlbums"
 		
 		var id: AutoId = 0
@@ -145,7 +141,7 @@ class CombineTester: @unchecked Sendable {
 	
 	// will models be notified when values change or Relation-changes
 	@Test func plainListener() async throws {
-		try await AutoDBManager.shared.truncateTable(CombineAlbum.CombineAlbumTable.self)
+		try await AutoDBManager.current.truncateTable(CombineAlbum.CombineAlbumTable.self)
 		let item = await CombineAlbum.create()
 		item.objectWillChange.sink { [self] _ in
 			gotMessage = true
@@ -290,7 +286,7 @@ actor RelationQueryPublisherTests {
 	}
 }
 
-@Suite("RelationQueryTests", .serialized)
+@Suite("RelationQueryTests", .autoDB, .serialized)
 class RelationQueryTests {
 	@Test func testOneRelationFetchList() async throws {
 		
@@ -333,8 +329,8 @@ class RelationQueryTests {
 	
 	@available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 	private func createRelationQueryOwner(limit: Int = 20) async throws -> CureAlbums {
-		try await AutoDBManager.shared.truncateTable(CureAlbums.CureAlbumsTable.self)
-		try await AutoDBManager.shared.truncateTable(Album.Value.self)
+		try await AutoDBManager.current.truncateTable(CureAlbums.CureAlbumsTable.self)
+		try await AutoDBManager.current.truncateTable(Album.Value.self)
 		
 		let db = try await CureAlbums.db()
 		try await CureAlbums.create(1).save()
@@ -348,7 +344,7 @@ class RelationQueryTests {
 	}
 	
 	@Test func deallocRelationQuery() async throws {
-		//try await AutoDBManager.shared.truncateTable(DeallocTest.self)
+		//try await AutoDBManager.current.truncateTable(DeallocTest.self)
 		var owner: DeallocTest? = DeallocTest()
 		weak let listener = owner?.albums
 		nonisolated(unsafe) var didDealloc = false
@@ -429,7 +425,7 @@ class RelationQueryTests {
 		
 		// save sometimes fails, figure out why this happens!
 		for i in 1...1000 {
-			try await AutoDBManager.shared.truncateTable(SaveFail.self)
+			try await AutoDBManager.current.truncateTable(SaveFail.self)
 			try await SaveFail.create(1).save()
 			let count = try await db.query("Select count(*) From SaveFail").first?.values.first?.intValue ?? 0
 			if count == 0 {
@@ -479,8 +475,8 @@ class RelationQueryTests {
 	
 	@Test
 	func deleteRefreshesVisibleWindow() async throws {
-		try await AutoDBManager.shared.truncateTable(PagedCureAlbums.Value.self)
-		try await AutoDBManager.shared.truncateTable(Album.Value.self)
+		try await AutoDBManager.current.truncateTable(PagedCureAlbums.Value.self)
+		try await AutoDBManager.current.truncateTable(Album.Value.self)
 		try await PagedCureAlbums.create(1).save()
 		
 		let cure = try await PagedCureAlbums.fetchId(1)

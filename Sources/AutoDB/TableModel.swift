@@ -95,6 +95,8 @@ public enum AutoError: Error {
 	case noFTSSupport
 	/// unique constraint failed, you tried to insert an object that already exists, it may return a list of the conflicting ids - if trying to save new non-objects this list can be empty.
 	case uniqueConstraintFailed([AutoId])
+	/// requireScope() was called on the manager and a table was used without a scope, the message names the table
+	case noScope(String)
 }
 
 public enum TableError: Error {

@@ -32,14 +32,14 @@ public class SQLRowEncoder: Encoder, @unchecked Sendable {
 	public var codingPath: [CodingKey] = []
 	public var userInfo: [CodingUserInfoKey: Any] = [:]
 	
-	init<TableClass: Table>(_ classType: TableClass.Type) async {
+	init<TableClass: Table>(_ classType: TableClass.Type, _ manager: AutoDBManager) async {
 		
 		tableClass = classType
-		guard let database = try? await AutoDBManager.shared.setupDB(classType) else {
+		guard let database = try? await manager.setupDB(classType) else {
 			fatalError("Cannot setup table \(classType)")
 		}
 		self.database = database
-		table = await AutoDBManager.shared.tableInfo(classType)
+		table = await manager.tableInfo(classType)
 		maxQueryVariableCount = await database.maxQueryVariableCount
 		insertQuery = " INTO `\(table.name)` (\(table.columnNameString)) VALUES "
 	}

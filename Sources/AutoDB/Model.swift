@@ -148,7 +148,7 @@ public extension Model {
 		guard let db = try? await TableType.db() else {
 			fatalError("Could not setup DB")
 		}
-		let creationLock = await AutoDBManager.shared.creationLock(typeID)
+		let creationLock = await AutoDBManager.current.creationLock(typeID)
 		
 		// Lock order: the database's transaction slot first, then this type's creation lock (two tasks must not create the same object at the same time).
 		// Holding the lock while waiting for an open transaction deadlocked with a create or save of this type inside it.
@@ -161,7 +161,7 @@ public extension Model {
 			defer { Task { await creationLock.signal(token: token) } }
 			
 			if let id {
-				if let item = await AutoDBManager.shared.cached(Self.self, id, typeID) {
+				if let item = await AutoDBManager.current.cached(Self.self, id, typeID) {
 					return item
 				}
 				if let item = try? await fetchId(id, typeID) {
@@ -175,7 +175,7 @@ public extension Model {
 			let item = Self(value)
 			
 			// mark as new so the first save inserts (a plain INSERT, which fails if the row exists - we just checked that it doesn't)
-			await AutoDBManager.shared.setCreated(value.id, ObjectIdentifier(TableType.self))
+			await AutoDBManager.current.setCreated(value.id, ObjectIdentifier(TableType.self))
 			
 			// cache (so it won't be created twice), wire up relations and call awakeFromInit - the same path as manually registered objects.
 			await item.register()
@@ -253,7 +253,7 @@ public extension Model {
 	/// Register an object you constructed yourself instead of via create(): caches it (so fetches return this instance), wires up its relations and then calls awakeFromInit().
 	/// Lives only in the extension so it cannot be overridden - the framework part always runs. Not needed after create(), which does this already.
 	func register() async {
-		await AutoDBManager.shared.cacheObject(self)
+		await AutoDBManager.current.cacheObject(self)
 		setOwnerOnRelations()
 		await awakeFromInit()
 	}
@@ -282,33 +282,33 @@ public extension Model {
 	
 	static func fetchId(_ id: AutoId, _ typeID: ObjectIdentifier? = nil) async throws -> Self {
 		
-		try await AutoDBManager.shared.fetchId(id, typeID)
+		try await AutoDBManager.current.fetchId(id, typeID)
 	}
 	
 	static func fetchIds(_ ids: [AutoId], _ identifier: ObjectIdentifier? = nil) async throws -> [Self] where Self: AnyObject {
 		if ids.isEmpty {
 			return []
 		}
-		return try await AutoDBManager.shared.fetchIds(ids, identifier)
+		return try await AutoDBManager.current.fetchIds(ids, identifier)
 	}
 	
 	static func fetchQuery(_ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Self] where Self: AnyObject {
-		try await AutoDBManager.shared.fetchQuery(query, arguments: arguments, sqlArguments: sqlArguments)
+		try await AutoDBManager.current.fetchQuery(query, arguments: arguments, sqlArguments: sqlArguments)
 	}
 	
 	/// Tell the manager to save at a later time
 	func didChange() async {
-		await AutoDBManager.shared.objectHasChanged(self)
+		await autoDBManager.objectHasChanged(self)
 	}
 	
 	func didChange() {
 		if #available(macOS 26.0, iOS 26.0, tvOS 26.0, watchOS 26.0, *) {
 			Task.immediate {
-				await AutoDBManager.shared.objectHasChanged(self)
+				await autoDBManager.objectHasChanged(self)
 			}
 		} else {
 			Task {
-				await AutoDBManager.shared.objectHasChanged(self)
+				await autoDBManager.objectHasChanged(self)
 			}
 		}
 	}
@@ -316,9 +316,9 @@ public extension Model {
 	/// Refresh all objects currently in use, if changed by external process - this will bring in fresh values from DB.
 	/// note that you can only remove objects from cache by stop referencing them. Otherwise there will be duplicate objects.
 	static func refreshCache() async throws {
-		let objects: [AutoId: Self] = await AutoDBManager.shared.cached(Self.self)
+		let objects: [AutoId: Self] = await AutoDBManager.current.cached(Self.self)
 		let ids: [AutoId] = Array(objects.keys)
-		let values: [TableType] = try await AutoDBManager.shared.fetchIds(ids)
+		let values: [TableType] = try await AutoDBManager.current.fetchIds(ids)
 		for value in values {
 			objects[value.id]?.value = value
 		}
@@ -326,41 +326,41 @@ public extension Model {
 	
 	/// Refresh our value
 	func refreshCache() async throws {
-		self.value = try await AutoDBManager.shared.fetchId(id)
+		self.value = try await autoDBManager.fetchId(id)
 	}
 	
 	// MARK: - db queries
 	
 	@discardableResult
 	static func query(_ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Row] {
-		try await AutoDBManager.shared.query(TableType.self, query, arguments)
+		try await AutoDBManager.current.query(TableType.self, query, arguments)
 	}
 	
 	// this cannot have the same signature
 	@discardableResult
 	static func query(_ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
-		try await AutoDBManager.shared.query(TableType.self, query, sqlArguments: sqlArguments)
+		try await AutoDBManager.current.query(TableType.self, query, sqlArguments: sqlArguments)
 	}
 	
 	/// Execute a query without returning any rows, like INSERT or UPDATE.
 	static func execute(_ query: String = "", _ arguments: [Sendable]? = nil) async throws {
-		try await AutoDBManager.shared.execute(TableType.self, query, arguments)
+		try await AutoDBManager.current.execute(TableType.self, query, arguments)
 	}
 	
 	/// Execute a query without returning any rows, like INSERT or UPDATE.
 	static func execute(_ query: String = "", sqlArguments: [SQLValue]? = nil) async throws {
-		try await AutoDBManager.shared.execute(TableType.self, query, sqlArguments: sqlArguments)
+		try await AutoDBManager.current.execute(TableType.self, query, sqlArguments: sqlArguments)
 	}
 	
 	/// Execute a query without returning any rows, like INSERT or UPDATE. Returns the amount of affected rows. Since Swift 6 has a bug with @discardableResult we need to have two versions of this method.
 	static func executeAffectedRows(_ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> Int {
-		return try await AutoDBManager.shared.execute(TableType.self, query, sqlArguments: sqlArguments)
+		return try await AutoDBManager.current.execute(TableType.self, query, sqlArguments: sqlArguments)
 	}
 	
 	/// A non-throwable query, returns nil instead of throwing
 	@discardableResult
 	static func queryNT(_ query: String = "", arguments: [Sendable]? = nil) async -> [Row]? {
-		try? await AutoDBManager.shared.query(TableType.self, query, arguments)
+		try? await AutoDBManager.current.query(TableType.self, query, arguments)
 	}
 	
 	// MARK: - common queries
@@ -368,7 +368,7 @@ public extension Model {
 	/// return the first value of the first row of the result,
 	/// throws fetchError if the value is nil
 	static func valueQuery<Val: SQLColumnWrappable>(_ query: String = "", _ arguments: [Sendable]? = nil) async throws -> Val {
-		if let value: Val = try await AutoDBManager.shared.valueQuery(TableType.self, query, arguments) {
+		if let value: Val = try await AutoDBManager.current.valueQuery(TableType.self, query, arguments) {
 			return value
 		}
 		throw AutoError.fetchError
@@ -376,15 +376,19 @@ public extension Model {
 	
 	///return an array with all values in the result for a (the first) column.
 	static func groupConcatQuery<Val: SQLColumnWrappable>(_ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
-		try await AutoDBManager.shared.groupConcatQuery(TableType.self, query, arguments)
+		try await AutoDBManager.current.groupConcatQuery(TableType.self, query, arguments)
 	}
 	
 	// MARK: - saving
 	
 	/// When you don't need to wait for the save procedure
 	func save() {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await self.save()
+			await AutoDBManager.withScope(manager) {
+				try? await self.save()
+			}
 		}
 	}
 	
@@ -394,28 +398,40 @@ public extension Model {
 	}
 	
 	static func saveChanges() async throws {
-		try await AutoDBManager.shared.saveChanges(Self.self)
+		try await AutoDBManager.current.saveChanges(Self.self)
 	}
 	
 	static func saveChangesLater() {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			await AutoDBManager.shared.saveChangesLater(Self.self)
+			await AutoDBManager.withScope(manager) {
+				await AutoDBManager.current.saveChangesLater(Self.self)
+			}
 		}
 	}
 	
 	static func saveChangesDetached() {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await AutoDBManager.shared.saveChanges(Self.self)
+			await AutoDBManager.withScope(manager) {
+				try? await AutoDBManager.current.saveChanges(Self.self)
+			}
 		}
 	}
 	
 	static func saveAllChanges() async throws {
-		try await AutoDBManager.shared.saveAllChanges()
+		try await AutoDBManager.current.saveAllChanges()
 	}
 	
 	static func saveAllChangesDetacted() {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await AutoDBManager.shared.saveAllChanges()
+			await AutoDBManager.withScope(manager) {
+				try? await AutoDBManager.current.saveAllChanges()
+			}
 		}
 	}
 	
@@ -429,13 +445,13 @@ public extension Model {
 		
 		try await willSave(objects)
 		
-		let (created, updated) = await AutoDBManager.shared.filterCreated(TableType.identifier, list)
+		let (created, updated) = await AutoDBManager.current.filterCreated(TableType.identifier, list)
 		
 		// note that we do these in two steps, since creating objects may fail, and we don't want to save the updated objects twice.
 		if updated.isEmpty == false {
 			try await TableType.saveList(updated, onlyUpdated: true)
 			//remove all changed objects
-			await AutoDBManager.shared.removeFromChanged(updated.map(\.id), ObjectIdentifier(self))
+			await AutoDBManager.current.removeFromChanged(updated.map(\.id), ObjectIdentifier(self))
 		}
 		
 		if created.isEmpty == false {
@@ -444,11 +460,11 @@ public extension Model {
 			} catch AutoError.uniqueConstraintFailed(let duplicates) {
 				// a duplicate can never be inserted as it is: saveAllChanges would fail on it, and everything created alongside it, forever.
 				// It stays created, so a save after the caller changed it is still an INSERT and never REPLACEs the row it collided with.
-				await AutoDBManager.shared.removeFromChanged(duplicates, ObjectIdentifier(self))
+				await AutoDBManager.current.removeFromChanged(duplicates, ObjectIdentifier(self))
 				throw AutoError.uniqueConstraintFailed(duplicates)
 			}
 			//remove all changed objects
-			await AutoDBManager.shared.removeFromChanged(created.map(\.id), ObjectIdentifier(self))
+			await AutoDBManager.current.removeFromChanged(created.map(\.id), ObjectIdentifier(self))
 		}
 		
 		try await didSave(objects)
@@ -458,12 +474,12 @@ public extension Model {
 	
 	static func truncateTable() async throws {
 		
-		try await AutoDBManager.shared.truncateTable(Self.self.TableType)
+		try await AutoDBManager.current.truncateTable(Self.self.TableType)
 	}
 	
 	var isDeleted: Bool {
 		get async {
-			await AutoDBManager.shared.isDeleted(id, ObjectIdentifier(TableType.self))
+			await autoDBManager.isDeleted(id, ObjectIdentifier(TableType.self))
 		}
 	}
 	
@@ -478,28 +494,28 @@ public extension Model {
 	}
 	
 	func delete() async throws {
-		try await Self.deleteIds([id])
+		try await autoDBManager.delete([id], ObjectIdentifier(TableType.self))
 	}
 	
 	static func deleteIds(_ ids: [AutoId]) async throws {
-		try await AutoDBManager.shared.delete(ids, ObjectIdentifier(TableType.self))
+		try await AutoDBManager.current.delete(ids, ObjectIdentifier(TableType.self))
 	}
 	
 	/// delete when calling saveChanges, or after x seconds
 	static func deleteIdsLater(_ ids: [AutoId]) async {
-		await AutoDBManager.shared.deleteLater(ids, ObjectIdentifier(TableType.self))
+		await AutoDBManager.current.deleteLater(ids, ObjectIdentifier(TableType.self))
 	}
 	
 	// MARK: - callbacks
 	
 	/// get row-level changes from db with ids of changed rows
 	static func rowChangeObserver() async throws -> RowChangeObserver {
-		try await AutoDBManager.shared.rowChangeObserver(TableType.self)
+		try await AutoDBManager.current.rowChangeObserver(TableType.self)
 	}
 	
 	/// get notified by AutoDB after saves or deletions. You can bypass this notification by crafting your own save/delete SQL.
 	static func tableChangeObserver() async throws -> TableChangeObserver {
-		try await AutoDBManager.shared.tableChangeObserver(TableType.self)
+		try await AutoDBManager.current.tableChangeObserver(TableType.self)
 	}
 }
 
@@ -507,8 +523,12 @@ public extension Collection where Element: Model {
 	
 	/// Shorthand to saveList() - When you don't need to wait for the save procedure
 	func save() where Self: Sendable {
+		// Task.detached drops task-locals, carry the manager over
+		let manager = AutoDBManager.current
 		Task.detached {
-			try? await self.save()
+			await AutoDBManager.withScope(manager) {
+				try? await self.save()
+			}
 		}
 	}
 	
@@ -516,7 +536,10 @@ public extension Collection where Element: Model {
 	func save() async throws {
 		// Do some compiler-type magic to be allowed to call...
 		if let list = (self as? [Self.Element]) ?? (Array(self) as? [Self.Element]) {
-			try await Element.saveList(list)
+			// save where the models came from, a list is never mixed from two managers
+			try await AutoDBManager.withScope(AutoDBManager.manager(of: list.first)) {
+				try await Element.saveList(list)
+			}
 		} else {
 			throw AutoError.missingSetup
 		}
@@ -524,7 +547,7 @@ public extension Collection where Element: Model {
 	
 	func delete() async throws {
 		let ids = self.map(\.id)
-		try await Element.deleteIds(ids)
+		try await AutoDBManager.manager(of: first).delete(ids, ObjectIdentifier(Element.TableType.self))
 	}
 	
 	/// Convert an array with AutoModels to a dictionary

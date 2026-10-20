@@ -9,10 +9,10 @@ import Testing
 import Foundation
 
 @testable import AutoDB
+import AutoDBTesting
 
 final class DelayModel: Model, @unchecked Sendable {
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.delayConfig
 		static let tableName = "DelayModel"
 		
 		var id: AutoId = 0
@@ -36,11 +36,11 @@ final class DelayModel: Model, @unchecked Sendable {
 }
 
 // serialized since the delays are global state on AutoDBManager
-@Suite(.serialized) class DelayConfigTests: @unchecked Sendable {
+@Suite(.autoDB, .serialized) class DelayConfigTests: @unchecked Sendable {
 	
 	@Test func saveLaterHonorsConfiguredDelay() async throws {
-		await AutoDBManager.shared.setSaveLaterDelay(0.2)
-		defer { Task { await AutoDBManager.shared.setSaveLaterDelay(AutoDBManager.defaultWaitTime) } }
+		await AutoDBManager.current.setSaveLaterDelay(0.2)
+		defer { Task { await AutoDBManager.current.setSaveLaterDelay(AutoDBManager.defaultWaitTime) } }
 		
 		let id = AutoId.generateId()
 		let object = await DelayModel.create(id)
@@ -55,8 +55,8 @@ final class DelayModel: Model, @unchecked Sendable {
 	}
 	
 	@Test func deleteLaterHonorsConfiguredDelay() async throws {
-		await AutoDBManager.shared.setDeleteLaterDelay(0.2)
-		defer { Task { await AutoDBManager.shared.setDeleteLaterDelay(AutoDBManager.defaultWaitTime) } }
+		await AutoDBManager.current.setDeleteLaterDelay(0.2)
+		defer { Task { await AutoDBManager.current.setDeleteLaterDelay(AutoDBManager.defaultWaitTime) } }
 		
 		let id = AutoId.generateId()
 		let object = await DelayModel.create(id)

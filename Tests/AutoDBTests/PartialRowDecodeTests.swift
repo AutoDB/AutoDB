@@ -10,6 +10,7 @@ import Foundation
 import Testing
 
 @testable import AutoDB
+import AutoDBTesting
 
 struct PartialRowOptions: OptionSet, Codable, Hashable, Sendable {
 	let rawValue: UInt
@@ -18,7 +19,6 @@ struct PartialRowOptions: OptionSet, Codable, Hashable, Sendable {
 }
 
 struct PartialRowTable: Table {
-	static let autoDBSettings = TestDatabase.partialRowDecode
 	static let tableName = "PartialRowTable"
 	
 	var id: AutoId = 1
@@ -29,7 +29,7 @@ struct PartialRowTable: Table {
 	var count = 7
 }
 
-@Suite("Partial row decoding", .serialized)
+@Suite("Partial row decoding", .autoDB, .serialized)
 struct PartialRowDecodeTests {
 	
 	@Test func rowColumnsReplaceBaseValuesAndTheRestStays() async throws {

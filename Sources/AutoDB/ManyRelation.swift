@@ -125,7 +125,10 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		
 		let end = min(ids.count, initial)
 		let idsToFetch = Array(ids[0..<end])
-		_items = try await AutoType.fetchIds(idsToFetch, nil).sortById(idsToFetch)
+		// fetch from the owner's manager, we may be called from a context that lost the scope
+		_items = try await AutoDBManager.withScope(AutoDBManager.manager(of: owner)) {
+			try await AutoType.fetchIds(idsToFetch, nil).sortById(idsToFetch)
+		}
 		hasMore = _items?.count == initial  // make sure to compare the actually fetched items in case there are missmatches
 		
 		return items
@@ -153,7 +156,9 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		let start = _items?.count ?? 0
 		let end = min(ids.count, start + fetchStep)
 		let idsToFetch = Array(ids[start..<end])
-		let fetched = try await AutoType.fetchIds(idsToFetch, nil).sortById(idsToFetch)
+		let fetched = try await AutoDBManager.withScope(AutoDBManager.manager(of: owner)) {
+			try await AutoType.fetchIds(idsToFetch, nil).sortById(idsToFetch)
+		}
 		hasMore = ids.count > end
 		_items?.append(contentsOf: fetched)
 		

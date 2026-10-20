@@ -2,7 +2,7 @@ import AutoDB
 import Foundation
 import Testing
 
-/// The suite's own database file in the cache folder (same layout as TestDatabase in AutoDBTests), deleted the first time a run uses it.
+/// The suite's own database file in the cache folder, deleted the first time a run uses it.
 private enum IntegrationDatabase {
 	static let settings: AutoDBSettings = {
 		let path = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]

@@ -9,6 +9,7 @@ import Foundation
 import Testing
 
 @testable import AutoDB
+import AutoDBTesting
 
 enum PlainStringRawEnum: String, Codable, Sendable {
 	case alpha
@@ -53,7 +54,6 @@ struct BlobPayloadV2: Codable, Hashable, Sendable {
 }
 
 struct TypeMatrixRow: Table {
-	static let autoDBSettings = TestDatabase.typeCoverage
 	static let tableName = "TypeMatrixRow"
 	
 	var id: AutoId = 1
@@ -96,14 +96,13 @@ struct TypeMatrixRow: Table {
 }
 
 struct PayloadEvolutionRow: Table {
-	static let autoDBSettings = TestDatabase.typeCoverage
 	static let tableName = "PayloadEvolutionRow"
 	
 	var id: AutoId = 1
 	var payload = BlobPayloadV2(nested: NestedBlobPayload(title: "payload", count: 0), tags: [], note: nil)
 }
 
-@Suite("Type Coverage", .serialized)
+@Suite("Type Coverage", .autoDB, .serialized)
 struct TypeCoverageTests {
 	private func schemaMap<TableType: Table>(for table: TableType.Type) async throws -> [String: (type: String, nullable: Bool)] {
 		let db = try await table.db()

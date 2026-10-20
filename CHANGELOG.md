@@ -26,8 +26,17 @@ AutoDB 1.0 is intended to be the first stable Apple-first Swift Package release.
 - `SettingsKey`, `setAppSettings(_:for:)`, `appSettings(for:)` and `appDefaults` are removed: there is no runtime registration left, so nothing has to run before the first table is touched.
 - New presets `AutoDBSettings.regular`, `.cache` and `.memory`. `.memory` is now really in memory, before it opened the default file.
 - Settings resolving to the same file share one connection, the first one's options win and the mismatch is logged.
-- `switchDB` takes `[AutoDBSettings: URL?]`. `close()` skips in-memory databases.
+- `close()` skips in-memory databases.
 - See "Migrating from SettingsKey" in [Documentation/Documentation.md](Documentation/Documentation.md#migrating-from-settingskey).
+
+### Scopes and testing (breaking)
+
+- `AutoDBManager(root:)` makes a manager whose files live under root. All state lives in the manager instance: connections, caches, changed objects, FTS and debounce state.
+- `AutoDBManager.withScope(manager) { ... }` binds a manager for a task. Static calls use `AutoDBManager.current`, and models remember the manager they came from.
+- New product `AutoDBTesting` with the Swift Testing trait `.autoDB`, which gives each suite its own databases so suites run in parallel.
+- `requireScope()` makes a manager throw `AutoError.noScope` instead of opening files, `storage(for:default:)` keeps per-manager singletons, and `fileURL(for:)` tells where settings put a file.
+- `switchDB` is removed, use `.autoDB` or `withScope`.
+- See "Scopes and testing" in [Documentation/Documentation.md](Documentation/Documentation.md#scopes-and-testing).
 
 ### Known limitations
 

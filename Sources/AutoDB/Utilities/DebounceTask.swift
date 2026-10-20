@@ -7,7 +7,6 @@
 
 public actor Debounce {
 	
-	static let shared = Debounce()
 	private var debounceTasks: [String: Task<Void, Never>] = [:]
 	
 	func debounce(id: AnyHashable = #function, delay: Double = 3, _ action: @escaping @Sendable () async -> Void) {

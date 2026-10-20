@@ -11,9 +11,9 @@ import Foundation
 import Testing
 
 @testable import AutoDB
+import AutoDBTesting
 
 struct LockOrderRow: Table {
-	static let autoDBSettings = TestDatabase.saveLockOrder
 	static let tableName = "LockOrderRow"
 	
 	var id: AutoId = 1
@@ -22,7 +22,6 @@ struct LockOrderRow: Table {
 
 final class LockOrderModel: StoredModel {
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.saveLockOrder
 		static let tableName = "LockOrderModel"
 		var id: AutoId = 0
 		var name = ""
@@ -41,13 +40,11 @@ final class LockOrderModel: StoredModel {
 
 /// only this file's setup test touches these, so their first-time setup happens in that test
 struct SetupLockOrderInside: Table {
-	static let autoDBSettings = TestDatabase.saveLockOrder
 	static let tableName = "SetupLockOrderInside"
 	var id: AutoId = 1
 }
 
 struct SetupLockOrderOutside: Table {
-	static let autoDBSettings = TestDatabase.saveLockOrder
 	static let tableName = "SetupLockOrderOutside"
 	var id: AutoId = 1
 }
@@ -60,7 +57,7 @@ actor LockOrderFlags {
 	func markOutsideStarted() { outsideStarted = true }
 }
 
-@Suite("Save lock order", .serialized)
+@Suite("Save lock order", .autoDB, .serialized)
 struct SaveLockOrderTests {
 	
 	/// both tasks must finish - a deadlock shows up as this timeout, not as a hung test run
@@ -112,7 +109,7 @@ struct SaveLockOrderTests {
 	/// create(id) outside a transaction fetches under the creation lock; it must wait for the transaction first, or the transaction's create + save of the type hangs
 	@Test func createOutsideATransactionWaitsForItInsteadOfDeadlocking() async throws {
 		let db = try await LockOrderModel.db()
-		try await AutoDBManager.shared.truncateTable(LockOrderModel.Value.self)
+		try await AutoDBManager.current.truncateTable(LockOrderModel.Value.self)
 		let flags = LockOrderFlags()
 		
 		let transaction = Task {

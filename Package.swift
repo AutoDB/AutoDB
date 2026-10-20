@@ -9,7 +9,12 @@ var package = Package(
 			name: "AutoDB",
 			type: .static,
 			targets: ["AutoDB"]
-		)
+		),
+		// Swift Testing traits that give each suite its own databases, see Documentation.md "Scopes and testing"
+		.library(
+			name: "AutoDBTesting",
+			targets: ["AutoDBTesting"]
+		),
 	],
 	targets: [
 		.target(
@@ -18,9 +23,13 @@ var package = Package(
 				//.product(name: "SQLCipher", package: "swift-sqlcipher", condition: .when(platforms: [.android, .linux, .windows, .wasi])),
 			]
 		),
+		.target(
+			name: "AutoDBTesting",
+			dependencies: ["AutoDB"]
+		),
 		.testTarget(
 			name: "AutoDBTests",
-			dependencies: ["AutoDB"]
+			dependencies: ["AutoDB", "AutoDBTesting"]
 		),
 		.testTarget(
 			name: "AutoDBIntegrationTests",

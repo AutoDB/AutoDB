@@ -9,15 +9,14 @@ import Foundation
 import Testing
 
 @testable import AutoDB
+import AutoDBTesting
 
 struct MigrationHarness: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "MigrationHarness"
 	var id: AutoId = 1
 }
 
 struct AddRemoveColumnsTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "AddRemoveColumnsTarget"
 	var id: AutoId = 1
 	var kept = "kept"
@@ -25,56 +24,48 @@ struct AddRemoveColumnsTarget: Table {
 }
 
 struct OptionalWidenTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "OptionalWidenTarget"
 	var id: AutoId = 1
 	var title: String? = nil
 }
 
 struct OptionalTightenTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "OptionalTightenTarget"
 	var id: AutoId = 1
 	var title = "fallback"
 }
 
 struct OptionalTightenNullTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "OptionalTightenNullTarget"
 	var id: AutoId = 1
 	var title = "fallback"
 }
 
 struct NumericStringToIntTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "NumericStringToIntTarget"
 	var id: AutoId = 1
 	var number = 67
 }
 
 struct IntegerToStringTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "IntegerToStringTarget"
 	var id: AutoId = 1
 	var number = "fallback"
 }
 
 struct GarbageStringToIntTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "GarbageStringToIntTarget"
 	var id: AutoId = 1
 	var number = 67
 }
 
 struct IntegerWidthTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "IntegerWidthTarget"
 	var id: AutoId = 1
 	var number: Int64 = 0
 }
 
 struct EnumMigrationTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "EnumMigrationTarget"
 	var id: AutoId = 1
 	var plain = PrimitiveStringEnum.alpha
@@ -83,7 +74,6 @@ struct EnumMigrationTarget: Table {
 }
 
 struct RichStorageMigrationTarget: Table {
-	static let autoDBSettings = TestDatabase.migrationContract
 	static let tableName = "RichStorageMigrationTarget"
 	var id: AutoId = 1
 	var website = URL(string: "https://autodb.dev")!
@@ -92,7 +82,7 @@ struct RichStorageMigrationTarget: Table {
 	var payload = BlobPayload(nested: NestedBlobPayload(title: "payload", count: 1), tags: ["default"])
 }
 
-@Suite("Migration Contract", .serialized)
+@Suite("Migration Contract", .autoDB, .serialized)
 struct MigrationContractTests {
 	private func migrationDB() async throws -> Database {
 		try await MigrationHarness.db()

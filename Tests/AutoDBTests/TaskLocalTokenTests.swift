@@ -11,10 +11,10 @@ import Testing
 import Foundation
 
 @testable import AutoDB
+import AutoDBTesting
 
 /// old-schema table whose migration deliberately does NOT forward the token - the ambient task-local must carry it
 struct MigNoToken: Table {
-	static let autoDBSettings = TestDatabase.taskLocalToken
 	var id: AutoId = 1
 	var plain = "plain"
 	
@@ -58,7 +58,6 @@ actor TokenBox {
 /// a Model whose awakeFromInit saves itself and creates a sibling of the same type - both re-enter the encoder semaphore that create() holds
 final class SelfSavingModel: Model, @unchecked Sendable {
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.taskLocalToken
 		static let tableName = "SelfSavingModel"
 		var id: AutoId = 0
 		var counter = 0
@@ -79,20 +78,17 @@ final class SelfSavingModel: Model, @unchecked Sendable {
 }
 
 final class TokenRow: Table, @unchecked Sendable {
-	static let autoDBSettings = TestDatabase.taskLocalToken
 	var id: AutoId = 0
 	var integer = 1
 }
 
 struct HookChild: Table {
-	static let autoDBSettings = TestDatabase.taskLocalToken
 	var id: AutoId = 0
 }
 
 /// overrides awakeFromInit WITHOUT repeating any framework work - create() and register() must still cache it and set its relation owners
 final class HookOnlyModel: Model, @unchecked Sendable {
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.taskLocalToken
 		static let tableName = "HookOnlyModel"
 		var id: AutoId = 0
 		var children = ManyRelation<HookChild>(initFetch: true)
@@ -108,7 +104,7 @@ final class HookOnlyModel: Model, @unchecked Sendable {
 	}
 }
 
-@Suite(.serialized)
+@Suite(.autoDB, .serialized)
 class TaskLocalTokenTests: @unchecked Sendable {
 	
 	/// wait for a flag with a deadline, so a deadlock regression fails the test instead of hanging CI forever
@@ -201,7 +197,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 		// delayed work must never inherit a transaction token - it could re-enter a still-open transaction's lock
 		let box = TokenBox()
 		await SemaphoreToken.$current.withValue(42) {
-			await Debounce.shared.debounce(id: "tokenScrubTest", delay: 0.01) {
+			await Debounce().debounce(id: "tokenScrubTest", delay: 0.01) {
 				await box.set(SemaphoreToken.current ?? 0)
 			}
 			try? await Task.sleep(for: .milliseconds(300))
@@ -232,7 +228,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 	
 	@Test func awakeFromInitReentersCreateLock() async throws {
 		// outside any transaction, awakeFromInit saving or creating the same type used to deadlock on the encoder semaphore held by create()
-		try await AutoDBManager.shared.truncateTable(SelfSavingModel.Value.self)
+		try await AutoDBManager.current.truncateTable(SelfSavingModel.Value.self)
 		let flag = DoneFlag()
 		let work = Task {
 			let item = await SelfSavingModel.create(90)
@@ -254,7 +250,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 	}
 	
 	@Test func overrideKeepsCachingAndRelationOwners() async throws {
-		try await AutoDBManager.shared.truncateTable(HookOnlyModel.Value.self)
+		try await AutoDBManager.current.truncateTable(HookOnlyModel.Value.self)
 		let item = await HookOnlyModel.create(93)
 		#expect(item.value.awoken, "awakeFromInit override was not called")
 		// the framework work must happen even though the override does not repeat it
@@ -267,7 +263,7 @@ class TaskLocalTokenTests: @unchecked Sendable {
 	}
 	
 	@Test func registerManuallyCreatedObject() async throws {
-		try await AutoDBManager.shared.truncateTable(HookOnlyModel.Value.self)
+		try await AutoDBManager.current.truncateTable(HookOnlyModel.Value.self)
 		var value = HookOnlyModel.Value()
 		value.id = 94
 		let item = HookOnlyModel(value)

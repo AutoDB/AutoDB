@@ -9,14 +9,13 @@ import Testing
 import Foundation
 
 @testable import AutoDB
+import AutoDBTesting
 
 struct MigFirst: Table {
-	static let autoDBSettings = TestDatabase.migration
 	var id: AutoId = 1
 }
 
 struct MigIndex: Table {
-	static let autoDBSettings = TestDatabase.migration
 	var id: AutoId = 1
 	var toInt = 1  // a type converted from String to Int
 	var plain = "plain"
@@ -37,7 +36,6 @@ struct MigIndex: Table {
 }
 
 struct MigChangedIndex: Table {
-	static let autoDBSettings = TestDatabase.migration
 	static let tableName = "MigChangedIndex"
 	
 	var id: AutoId = 1
@@ -49,7 +47,6 @@ struct MigChangedIndex: Table {
 }
 
 struct Mig: Table {
-	static let autoDBSettings = TestDatabase.migration
 	var id: AutoId = 1
 	var toInt = 1  // a type converted from String to Int
 	var plain = "plain"
@@ -121,7 +118,7 @@ struct Mig: Table {
 	}
 }
 
-@Suite("Migration", .serialized)
+@Suite("Migration", .autoDB, .serialized)
 class MigrationTests {
 	
 	@Test func createTable() async throws {

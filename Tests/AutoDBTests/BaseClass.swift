@@ -11,7 +11,6 @@ import Combine
 // They must all implement AutoDB
 // They must all not have an init OR an empty required one: required init() {... setup }, you may use convenience inits instead.
 final class DataAndDate: Table, @unchecked Sendable {
-	static let autoDBSettings = TestDatabase.autoDB
 	var anOptObject: DataAndDate? = nil
 	var hasChanges: Bool = false
 	
@@ -30,7 +29,6 @@ final class DataAndDate: Table, @unchecked Sendable {
 }
 
 struct BaseClass: Table {
-	static let autoDBSettings = TestDatabase.autoDB
 	var id: UInt64 = 0
 	var anOptInt: Int? = nil
 	
@@ -40,7 +38,6 @@ struct BaseClass: Table {
 final class UniqueString: Model, @unchecked Sendable {
 	
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.autoDB
 		
 		static let tableName: String = "UniqueString"
 		var id: AutoId = .generateId()
@@ -68,7 +65,6 @@ final class UniqueString: Model, @unchecked Sendable {
 
 final class TrackedModel: Model, @unchecked Sendable {
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.autoDB
 		static let tableName = "TrackedModel"
 		
 		var id: AutoId = 0
@@ -93,7 +89,6 @@ final class TrackedModel: Model, @unchecked Sendable {
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable final class ObserveBasic: Table, @unchecked Sendable {
-	static let autoDBSettings = TestDatabase.autoDB
 	
 	var hasChanges: Bool = false
 	var id: UInt64 = 0
@@ -125,7 +120,6 @@ struct Nested: Codable, Equatable {
 }
 
 final class Mod: Table, @unchecked Sendable {
-	static let autoDBSettings = TestDatabase.autoDB
 	var id: UInt64 = 0
 	var string: String? = "some string"
 	var bigInt: UInt64 = 0
@@ -133,7 +127,6 @@ final class Mod: Table, @unchecked Sendable {
 
 @available(macOS 15.0, *)
 final class IntTester: Table, @unchecked Sendable {
-	static let autoDBSettings = TestDatabase.autoDB
 	
 	var id: UInt64 = .max
 	
@@ -149,7 +142,6 @@ final class IntTester: Table, @unchecked Sendable {
 @Observable final class Artist: Model, @unchecked Sendable {
 	
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.autoDB
 		var id: AutoId = 0  // all ids are of type UInt64, which makes it easy to handle uniqueness.
 		var name: String = ""  // we must have default values or nil
 		static let tableName: String = "Artist"
@@ -165,7 +157,6 @@ final class IntTester: Table, @unchecked Sendable {
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 @Observable
 final class CodeWithKeys: Table, @unchecked Sendable {
-	static let autoDBSettings = TestDatabase.autoDB
 	
 	var id: AutoId = 0
 	var name: String = ""
@@ -186,7 +177,6 @@ final class CodeWithKeys: Table, @unchecked Sendable {
 final class Parent: Model, @unchecked Sendable {
 	var value: Value
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.manyRelation
 		
 		var id: UInt64 = 0
 		var name = ""
@@ -200,7 +190,6 @@ final class Parent: Model, @unchecked Sendable {
 }
 
 struct Child: Table, @unchecked Sendable {
-	static let autoDBSettings = TestDatabase.manyRelation
 	var id: UInt64 = 0
 	var name = "fox"
 	

@@ -7,11 +7,11 @@
 
 import Testing
 @testable import AutoDB
+import AutoDBTesting
 
 // A StoredModel keeps its value in a ModelStorage, needs no didSet boilerplate and conforms to Sendable without @unchecked.
 final class StoredPerson: StoredModel {
 	struct Value: Table {
-		static let autoDBSettings = TestDatabase.storedModel
 		static let tableName = "StoredPerson"
 		var id: AutoId = 0
 		var name: String = ""
@@ -29,7 +29,7 @@ final class StoredPerson: StoredModel {
 	}
 }
 
-@Suite(.serialized)
+@Suite(.autoDB, .serialized)
 struct StoredModelTests {
 	
 	private static let logSetup: Void = AutoLog.setup()
@@ -39,7 +39,7 @@ struct StoredModelTests {
 	}
 	
 	@Test func testSaveAndFetch() async throws {
-		try await AutoDBManager.shared.truncateTable(StoredPerson.Value.self)
+		try await AutoDBManager.current.truncateTable(StoredPerson.Value.self)
 		
 		let item = await StoredPerson.create(1)
 		item.name = "first"
@@ -55,24 +55,24 @@ struct StoredModelTests {
 	}
 	
 	@Test func testChangeTrackingViaWithValue() async throws {
-		try await AutoDBManager.shared.truncateTable(StoredPerson.Value.self)
+		try await AutoDBManager.current.truncateTable(StoredPerson.Value.self)
 		
 		let item = await StoredPerson.create(2)
 		item.name = "first"
 		try await item.save()
 		
 		item.withValue { $0.name = "second" }
-		try await AutoDBManager.shared.saveChanges(StoredPerson.self)
+		try await AutoDBManager.current.saveChanges(StoredPerson.self)
 		
 		let value = try await StoredPerson.Value.fetchId(2)
 		#expect(value.name == "second")
 		
-		let pendingCount = await AutoDBManager.shared.lookupObjectsCount(ObjectIdentifier(StoredPerson.self))
+		let pendingCount = await AutoDBManager.current.lookupObjectsCount(ObjectIdentifier(StoredPerson.self))
 		#expect(pendingCount == 0)
 	}
 	
 	@Test func testChangeTrackingViaValueSetter() async throws {
-		try await AutoDBManager.shared.truncateTable(StoredPerson.Value.self)
+		try await AutoDBManager.current.truncateTable(StoredPerson.Value.self)
 		
 		let item = await StoredPerson.create(3)
 		item.name = "first"
@@ -80,14 +80,14 @@ struct StoredModelTests {
 		
 		// mutating a field goes through the computed value property and must fire change-tracking
 		item.value.name = "second"
-		try await AutoDBManager.shared.saveChanges(StoredPerson.self)
+		try await AutoDBManager.current.saveChanges(StoredPerson.self)
 		
 		let value = try await StoredPerson.Value.fetchId(3)
 		#expect(value.name == "second")
 	}
 	
 	@Test func testWithValueIsAtomic() async throws {
-		try await AutoDBManager.shared.truncateTable(StoredPerson.Value.self)
+		try await AutoDBManager.current.truncateTable(StoredPerson.Value.self)
 		
 		let item = await StoredPerson.create(4)
 		await withTaskGroup(of: Void.self) { group in

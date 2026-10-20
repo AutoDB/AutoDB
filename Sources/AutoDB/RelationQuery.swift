@@ -189,7 +189,9 @@ protocol ObserverSubject {
 				return
 			}
 			
-			let listener = try await AutoType.tableChangeObserver()
+			let listener = try await AutoDBManager.withScope(AutoDBManager.manager(of: owner)) {
+				try await AutoType.tableChangeObserver()
+			}
 			let iterator = listener.makeAsyncIterator()
 			listenerTask = Task { [weak self] in
 				let iterator = iterator
@@ -236,7 +238,10 @@ protocol ObserverSubject {
 		}
 		
 		private func fetchWindow(limit: Int, offset: Int) async throws -> [AutoType] {
-			try await AutoType.fetchQuery(String(format: query, arguments: [limit, offset]), arguments, sqlArguments: nil)
+			// fetch from the owner's manager, we may be called from a context that lost the scope
+			try await AutoDBManager.withScope(AutoDBManager.manager(of: owner)) {
+				try await AutoType.fetchQuery(String(format: query, arguments: [limit, offset]), arguments, sqlArguments: nil)
+			}
 		}
 		
 		@discardableResult

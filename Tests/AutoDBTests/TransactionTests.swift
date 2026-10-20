@@ -9,13 +9,14 @@ import Testing
 import Foundation
 
 @testable import AutoDB
+import AutoDBTesting
 
 final class TransClass: Table, @unchecked Sendable {
-	static let autoDBSettings = TestDatabase.transaction
 	var id: AutoId = 1
 	var integer = 1
 }
 
+@Suite(.autoDB)
 class TransactionTests: @unchecked Sendable {
 	
 	@Test func testTransaction() async throws {

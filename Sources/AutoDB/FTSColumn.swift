@@ -30,9 +30,6 @@ struct FTSTableInfo {
 /// A helper class for handling FTS columns in a thread-safe manner.
 actor FTSHandler {
 	
-	private init() {}
-	static let shared = FTSHandler()
-	
 	/// this table's FTS column is locked by semaphore when searching and setting up - note that we only use one semaphore per table even if you have multiple FTS columns.
 	var columnLock = [ObjectIdentifier: Semaphore]()
 	var ftsTables = [ObjectIdentifier: [String: FTSTableInfo]]()  // note that each table can have multiple FTS columns
@@ -177,7 +174,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	public func setCallbackOwner<T: FTSCallbackOwner>(_ ftsOwner: T.Type, _ typeID: ObjectIdentifier? = nil) async {
 		
 		let typeID = typeID ?? ObjectIdentifier(ftsOwner)
-		await FTSHandler.shared.setTextCallback(typeID, column, ftsOwner.textCallback)
+		await AutoDBManager.current.ftsHandler.setTextCallback(typeID, column, ftsOwner.textCallback)
 	}
 	
 	// we must store the column in order for Codable to work.
@@ -189,7 +186,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	public func setup<T: Table>(_ tableType: T.Type) async throws {
 		let column = column
 		let typeID = ObjectIdentifier(T.self)
-		let firstSetup = try await FTSHandler.shared.setup(T.self, column, typeID, targetTableName)
+		let firstSetup = try await AutoDBManager.current.ftsHandler.setup(T.self, column, typeID, targetTableName)
 		
 		if firstSetup {
 			try await setupCallback(T.self, typeID)
@@ -213,18 +210,18 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 			return result
 		}
 
-		await FTSHandler.shared.setDefaultTextCallback(typeID, column, textCallback)
+		await AutoDBManager.current.ftsHandler.setDefaultTextCallback(typeID, column, textCallback)
 	}
 	
 	/// insert missing text into the index
 	static func populateIndex(_ column: String) async throws {
 		
 		let typeID = ObjectIdentifier(TargetTableType.self)
-		while await FTSHandler.shared.columnLock[typeID] == nil {
+		while await AutoDBManager.current.ftsHandler.columnLock[typeID] == nil {
 			try? await Task.sleep(nanoseconds: 1_000_000)
 			await Task.yield()
 		}
-		guard let semaphore = await FTSHandler.shared.columnLock[typeID] else {
+		guard let semaphore = await AutoDBManager.current.ftsHandler.columnLock[typeID] else {
 			return
 		}
 		
@@ -237,7 +234,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	
 	static private func populateIndexIterate(_ typeID: ObjectIdentifier, _ column: String) async throws {
 		
-		guard let tableInfo = await FTSHandler.shared.ftsTables[typeID]?[column],
+		guard let tableInfo = await AutoDBManager.current.ftsHandler.ftsTables[typeID]?[column],
 			let textCallback = tableInfo.textCallback
 		else {
 			return
@@ -277,7 +274,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 	public static func search(_ phrase: String, limit: Int = 2000, offset: Int = 0) async throws -> [TargetTableType] {
 		
 		let typeID = ObjectIdentifier(TargetTableType.self)
-		guard let tables = await FTSHandler.shared.ftsTables[typeID],
+		guard let tables = await AutoDBManager.current.ftsHandler.ftsTables[typeID],
 			let firstColumn = tables.keys.first,
 			let tableInfo = tables[firstColumn]
 		else {
@@ -300,7 +297,7 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 		try await Self.populateIndex(column)
 		
 		let typeID = ObjectIdentifier(TargetTableType.self)
-		guard let tableInfo = await FTSHandler.shared.ftsTables[typeID]?[column] else {
+		guard let tableInfo = await AutoDBManager.current.ftsHandler.ftsTables[typeID]?[column] else {
 			return []
 		}
 		return try await search(phrase, limit: limit, offset: offset, tableInfo: tableInfo)

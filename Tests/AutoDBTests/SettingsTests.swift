@@ -10,22 +10,27 @@ import Foundation
 import Testing
 
 @testable import AutoDB
+import AutoDBTesting
+
+/// the suite runs under .autoDB, so these land in its folder
+private let settingsFile = AutoDBSettings.cache(path: "SettingsTests.db")
+private let settingsGroupFile = AutoDBSettings.cache(path: "SettingsTestsGroup.db")
 
 private struct SettingsFirst: Table {
-	static let autoDBSettings = TestDatabase.settings
+	static let autoDBSettings = settingsFile
 	var id: AutoId = 0
 	var name = ""
 }
 
 private struct SettingsSecond: Table {
-	static let autoDBSettings = TestDatabase.settings
+	static let autoDBSettings = settingsFile
 	var id: AutoId = 0
 	var name = ""
 }
 
-/// same file as TestDatabase.settings but other options - it must share the first one's connection
+/// same file as settingsFile but other options - it must share the first one's connection
 private struct SettingsSameFileOtherOptions: Table {
-	static let autoDBSettings = AutoDBSettings(path: TestDatabase.settings.path, iCloudBackup: false, inAppFolder: false, inCacheFolder: false, autoCloseDelay: nil)
+	static let autoDBSettings = AutoDBSettings(path: settingsFile.path, iCloudBackup: false, inAppFolder: false, inCacheFolder: true, autoCloseDelay: nil)
 	var id: AutoId = 0
 	var name = ""
 }
@@ -45,7 +50,7 @@ private struct SettingsMemorySecond: Table {
 /// a group of tables sent to another file through a refined protocol
 private protocol SettingsGroupTable: Table {}
 extension SettingsGroupTable {
-	static var autoDBSettings: AutoDBSettings { TestDatabase.settingsGroup }
+	static var autoDBSettings: AutoDBSettings { settingsGroupFile }
 }
 
 private struct SettingsGrouped: SettingsGroupTable {
@@ -55,17 +60,20 @@ private struct SettingsGrouped: SettingsGroupTable {
 
 /// the type's own declaration beats its group's
 private struct SettingsGroupedOverride: SettingsGroupTable {
-	static let autoDBSettings = TestDatabase.settings
+	static let autoDBSettings = settingsFile
 	var id: AutoId = 0
 	var name = ""
 }
 
+@Suite(.autoDB)
 struct SettingsTests {
 	
 	@Test func explicitPathIsUsed() async throws {
 		let db = try await SettingsFirst.db()
-		#expect(await db.dbURL?.path == TestDatabase.settings.path)
-		#expect(FileManager.default.fileExists(atPath: TestDatabase.settings.path))
+		let path = try #require(AutoDBManager.current.fileURL(for: settingsFile)?.path)
+		#expect(path.hasSuffix("/SettingsTests/Caches/SettingsTests.db"))
+		#expect(await db.dbURL?.path == path)
+		#expect(FileManager.default.fileExists(atPath: path))
 	}
 	
 	@Test func memoryDatabase() async throws {
@@ -96,17 +104,18 @@ struct SettingsTests {
 	}
 	
 	@Test func refinedProtocolAndOwnDeclarationWin() async throws {
-		#expect(SettingsGrouped.autoDBSettings == TestDatabase.settingsGroup)
-		#expect(SettingsGroupedOverride.autoDBSettings == TestDatabase.settings)
+		#expect(SettingsGrouped.autoDBSettings == settingsGroupFile)
+		#expect(SettingsGroupedOverride.autoDBSettings == settingsFile)
 		
 		let grouped = try await SettingsGrouped.db()
-		#expect(await grouped.dbURL?.path == TestDatabase.settingsGroup.path)
+		#expect(await grouped.dbURL?.path == AutoDBManager.current.fileURL(for: settingsGroupFile)?.path)
 		#expect(try await SettingsGroupedOverride.db() === SettingsFirst.db())
 	}
 	
 	@Test func location() {
 		#expect(AutoDBManager.location(for: .memory) == .memory)
-		#expect(AutoDBManager.location(for: TestDatabase.settings) == .file(TestDatabase.settings.path))
+		let absolute = AutoDBSettings(path: "/tmp/AutoDB/absolute.db", iCloudBackup: false, inAppFolder: false, inCacheFolder: false)
+		#expect(AutoDBManager.location(for: absolute) == .file(absolute.path))
 		
 		guard case .file(let regular) = AutoDBManager.location(for: .regular), case .file(let cache) = AutoDBManager.location(for: .cache) else {
 			Issue.record(".regular and .cache should be files")
