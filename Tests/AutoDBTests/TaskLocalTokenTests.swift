@@ -5,7 +5,7 @@
 //  Created by Olof Andersson-Thorén on 2026-08-22.
 //
 //  Tests for the ambient SemaphoreToken task-local: code inside transactions and migrations
-//  no longer needs to forward the token explicitly, explicit tokens still win.
+//  never needs to forward a token.
 
 import Testing
 import Foundation
@@ -56,15 +56,15 @@ actor TokenBox {
 }
 
 /// a Model whose awakeFromInit saves itself and creates a sibling of the same type - both re-enter the encoder semaphore that create() holds
-final class SelfSavingModel: Model, @unchecked Sendable {
+final class SelfSavingModel: Model {
 	struct Value: Table {
 		static let tableName = "SelfSavingModel"
 		var id: AutoId = 0
 		var counter = 0
 	}
-	var value: Value
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	
 	func awakeFromInit() async {
@@ -87,16 +87,16 @@ struct HookChild: Table {
 }
 
 /// overrides awakeFromInit WITHOUT repeating any framework work - create() and register() must still cache it and set its relation owners
-final class HookOnlyModel: Model, @unchecked Sendable {
+final class HookOnlyModel: Model {
 	struct Value: Table {
 		static let tableName = "HookOnlyModel"
 		var id: AutoId = 0
 		var children = ManyRelation<HookChild>(initFetch: true)
 		var awoken = false
 	}
-	var value: Value
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	
 	func awakeFromInit() async {
@@ -177,19 +177,6 @@ class TaskLocalTokenTests: @unchecked Sendable {
 			#expect(rows.isEmpty, "inner transaction's write survived the outer rollback")
 		} else {
 			work.cancel()
-		}
-	}
-	
-	@Test func explicitTokenWinsOverAmbient() async throws {
-		// deliberately uses the deprecated token-taking API - this is the compatibility test
-		// for users who still pass tokens explicitly, so the deprecation warning here is expected.
-		let db = try await TokenRow.db()
-		let explicit = AutoId.generateId()
-		try await SemaphoreToken.$current.withValue(AutoId.generateId()) {
-			try await db.transaction(token: explicit) { db, token in
-				#expect(token == explicit)
-				#expect(SemaphoreToken.current == explicit)
-			}
 		}
 	}
 	

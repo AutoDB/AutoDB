@@ -20,7 +20,7 @@ struct LockOrderRow: Table {
 	var name = ""
 }
 
-final class LockOrderModel: StoredModel {
+final class LockOrderModel: Model {
 	struct Value: Table {
 		static let tableName = "LockOrderModel"
 		var id: AutoId = 0

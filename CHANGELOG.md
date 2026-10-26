@@ -1,14 +1,13 @@
 # Changelog
 
-## 1.0.0 (Draft)
+## 1.0.0 (2026-10-26)
 
-AutoDB 1.0 is intended to be the first stable Apple-first Swift Package release.
+AutoDB 1.0 is the first stable Apple-first Swift Package release.
 
 ### Supported platforms
 
-- Package platforms: macOS 14+, iOS 17+, tvOS 13+
+- Package platforms: macOS 14+, iOS 17+, tvOS 17+, watchOS 10+ (breaking: tvOS was 13+). This is the Observation floor, which models and `RelationQuery` rely on.
 - Tested regularly: macOS and iOS through `swift test`
-- `RelationQuery` requires Observation availability: macOS 14+, iOS 17+, tvOS 17+, watchOS 10+
 
 ### Stable surface in 1.0
 
@@ -19,6 +18,21 @@ AutoDB 1.0 is intended to be the first stable Apple-first Swift Package release.
 - `ManyRelation` and `OneRelation`
 - FTS-backed search through `FTSColumn`
 - `RelationQuery` on supported Observation-capable OS versions
+
+### Models keep their value in ModelStorage (breaking)
+
+- The `Model` requirement `var value: TableType { get set }` is replaced by `var storage: ModelStorage<TableType> { get }`. `value` and `withValue` are protocol-extension members now, so call sites don't change - only model declarations do.
+- Models conform to plain `Sendable`, drop `@unchecked`. The compiler now flags mutable stored properties on models: make `FTSColumn` properties `let`.
+- Change-tracking is automatic for every model, `didSet(_:)` is removed. Models that stored `var value` without `didSet` used to skip tracking, now they are marked for `saveChanges()` like the rest.
+- Models are observable without `@Observable`: `ModelStorage` registers reads of `value` and notifies Observation on every change. `ObservableObject` models get `objectWillChange` sent automatically, no `@Published var value` or `$value` sink needed.
+- `refreshCache()` no longer marks refreshed objects for saving.
+- `StoredModel` is a deprecated alias for `Model`.
+- See "Migrating to ModelStorage" in [Documentation/Documentation.md](Documentation/Documentation.md#migrating-to-modelstorage).
+
+### Transaction tokens removed (breaking)
+
+- All `token:` parameters and the `transaction { db, token in }` closures are removed, use `transaction { db in }`. The token is carried as a task-local (`SemaphoreToken.current`), so everything inside a transaction or migration re-enters it automatically.
+- See "Removing explicit tokens from your code" in [Documentation/Documentation.md](Documentation/Documentation.md#removing-explicit-tokens-from-your-code) for a find/replace recipe.
 
 ### Database settings (breaking)
 

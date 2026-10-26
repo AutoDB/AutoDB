@@ -25,7 +25,7 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	/// return a list of keypaths to the variables that have unique index, grouped together to make multi-column index
 	static var uniqueIndices: [[String]] { get }
 	
-	/// Migration delegate-function called when migrating. Queries inside re-enter the migration transaction automatically (the token is carried as an ambient task-local; the token parameter remains for compatibility and still wins when forwarded). If you are happy with auto-migrations (please double-check), you don't need to implement this function.
+	/// Migration delegate-function called when migrating. Queries inside re-enter the migration transaction automatically (the token is carried as an ambient task-local). If you are happy with auto-migrations (please double-check), you don't need to implement this function.
 	/// warning ⚠️: You can use any raw SQL query, but if you access/query a Table or Model from the same db-file, that is not setup yet -> it can deadlock. So when using raw queries, make sure Tables are created and setup.
 	/// See documentation for full set of rules for auto-migration.
 	static func migration(_ db: isolated Database, _ state: MigrationState) async -> Void
@@ -35,9 +35,9 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	 Understand that if your Table has a Model, you must call save or saveChanges (etc) on the model.
 	
 	/// save and wait until completed, potentially handling errors
-	func save(token: AutoId?) async throws
+	func save() async throws
 	/// save and don't wait until completed, ignoring errors
-	//func save(token: AutoId?) - if we don't include it in the protocol Swift adds it from the extension - but then it won't call the function in concrete types?
+	//func save() - if we don't include it in the protocol Swift adds it from the extension - but then it won't call the function in concrete types?
 	*/
 }
 
@@ -155,7 +155,7 @@ public extension Table {
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// The transaction token is carried as an ambient task-local for the duration of the closure, so all db-access inside re-enters the lock automatically - no need to forward the token.
-	/// Passing the token explicitly is still supported and always wins over the ambient one. Note: Task.detached inside the closure does not inherit the token and waits for the transaction (by design).
+	/// Note: Task.detached inside the closure does not inherit the token and waits for the transaction (by design).
 	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database) async throws -> R)) async throws -> R {
 		try await db().transaction(action)
 	}
@@ -355,7 +355,7 @@ public extension Table {
 	/// Synchronous delete, spawns deletion and ignores errors
 	func delete() {
 		Task {
-			// don't inherit an ambient transaction token - a fire-and-forget delete should wait for the transaction, not race into it. An explicit token still wins.
+			// don't inherit an ambient transaction token - a fire-and-forget delete should wait for the transaction, not race into it.
 			try? await SemaphoreToken.detached {
 				try await delete()
 			}

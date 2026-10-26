@@ -20,7 +20,7 @@ extension Table {
 	static var autoDBSettings: AutoDBSettings { IntegrationDatabase.settings }
 }
 
-private final class SmokeArtist: Model, @unchecked Sendable {
+private final class SmokeArtist: Model {
 	struct Value: Table {
 		static let tableName = "SmokeArtist"
 		
@@ -29,16 +29,14 @@ private final class SmokeArtist: Model, @unchecked Sendable {
 		var genre = ""
 	}
 	
-	var value: Value {
-		didSet { didSet(oldValue) }
-	}
+	let storage: ModelStorage<Value>
 	
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 }
 
-private final class SmokeAlbumArt: Model, @unchecked Sendable {
+private final class SmokeAlbumArt: Model {
 	struct Value: Table {
 		static let tableName = "SmokeAlbumArt"
 		
@@ -47,16 +45,14 @@ private final class SmokeAlbumArt: Model, @unchecked Sendable {
 		var artist = OneRelation<SmokeArtist>()
 	}
 	
-	var value: Value {
-		didSet { didSet(oldValue) }
-	}
+	let storage: ModelStorage<Value>
 	
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 }
 
-private final class SmokeArticle: Model, @unchecked Sendable {
+private final class SmokeArticle: Model {
 	struct Value: Table {
 		static let tableName = "SmokeArticle"
 		
@@ -65,14 +61,12 @@ private final class SmokeArticle: Model, @unchecked Sendable {
 		var body = ""
 	}
 	
-	var value: Value {
-		didSet { didSet(oldValue) }
-	}
+	let storage: ModelStorage<Value>
 	
-	var bodyIndex = FTSColumn<Value>("body")
+	let bodyIndex = FTSColumn<Value>("body")
 	
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	
 }

@@ -6,70 +6,26 @@
 //
 
 import Foundation
-
-/// Opt-in alternative to storing `value` directly: keep it in a ModelStorage instead.
-/// You get `value`, an atomic `withValue` and automatic change-tracking for free (no didSet boilerplate),
-/// and since the storage is the only stored property your class can drop @unchecked from Sendable:
-/// ```
-/// final class Person: StoredModel {
-///     struct Value: Table {
-///         var id: AutoId = 0
-///         var name: String = ""
-///     }
-///     let storage: ModelStorage<Value>
-///     init(_ value: Value) {
-///         self.storage = ModelStorage(value)
-///     }
-/// }
-/// ```
-public protocol StoredModel: Model {
-	/// The synchronized backing value, store as a `let`.
-	var storage: ModelStorage<TableType> { get }
-}
-
-public extension StoredModel {
-	
-	/// The id is cached in the storage - no lock is taken.
-	var id: AutoId {
-		storage.id
-	}
-	
-	/// Snapshot read / whole-value write, change-tracking is automatic - no need for didSet.
-	/// Note that field mutation through this property (`model.value.name = "x"`) is a get-modify-set and not atomic; use withValue when competing writers are possible.
-	var value: TableType {
-		get {
-			storage.snapshot()
-		}
-		set {
-			if storage.mutate({ $0 = newValue }).changed {
-				didChange()
-			}
-		}
-	}
-	
-	/// Atomically read or modify the value, fires change-tracking when the value changed.
-	@discardableResult
-	func withValue<R>(_ body: (inout TableType) throws -> R) rethrows -> R {
-		let (result, changed) = try storage.mutate(body)
-		if changed {
-			didChange()
-		}
-		return result
-	}
-}
+#if canImport(Observation)
+	import Observation
+#endif
 
 // MARK: - ModelStorage
 
 /// Thread-safe backing store for a Model's table value.
-/// Models that keep their value in a ModelStorage (see StoredModel) have no mutable stored properties,
-/// so they can conform to Sendable without @unchecked - the compiler then verifies all other stored properties.
+/// Models keep their value in a ModelStorage and have no mutable stored properties of their own,
+/// so they conform to Sendable without @unchecked - the compiler then verifies all other stored properties.
 /// The lock behind it is `Locked`: Synchronization.Mutex when the runtime has it, otherwise os_unfair_lock (Apple) or pthread_mutex (Linux/Android).
+/// The storage is Observable: reading the value through a model registers access, every change notifies observers - so SwiftUI tracks models without @Observable.
 public final class ModelStorage<T: Table>: Sendable {
 	
 	/// The id can never change after init, cache it so Identifiable/Hashable don't need to take the lock.
 	public let id: AutoId
 	
 	private let storage: Locked<T>
+	#if canImport(Observation)
+		private let registrar = ObservationRegistrar()
+	#endif
 	
 	public init(_ value: T) {
 		self.id = value.id
@@ -78,18 +34,42 @@ public final class ModelStorage<T: Table>: Sendable {
 	
 	/// A copy of the current value.
 	public func snapshot() -> T {
+		#if canImport(Observation)
+			registrar.access(self, keyPath: \.observedValue)
+		#endif
+		return observedValue
+	}
+	
+	/// The whole value is one observable property.
+	private var observedValue: T {
 		storage.withLock { $0 }
 	}
 	
 	/// Atomically read-modify-write the value. Returns the closure's result and whether the value changed.
 	public func mutate<R>(_ body: (inout T) throws -> R) rethrows -> (result: R, changed: Bool) {
-		try storage.withLock { value in
+		let (result, changed) = try storage.withLock { value in
 			let oldValue = value
 			let result = try body(&value)
 			return (result, oldValue != value)
 		}
+		if changed {
+			notifyObservers()
+		}
+		return (result, changed)
+	}
+	
+	/// Outside the lock, observers may read the value right away. Sent after the change since only then do we know if it changed.
+	private func notifyObservers() {
+		#if canImport(Observation)
+			registrar.willSet(self, keyPath: \.observedValue)
+			registrar.didSet(self, keyPath: \.observedValue)
+		#endif
 	}
 }
+
+#if canImport(Observation)
+	extension ModelStorage: Observable {}
+#endif
 
 /// Shows the value in the debugger (po, Quick Look, Print Description).
 /// Reads it without the lock, a paused thread - or the current one inside withValue - may hold it.

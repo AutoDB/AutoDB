@@ -1,6 +1,6 @@
 # Post-1.0 Backlog
 
-The items below are explicitly post-1.0 work. They are not part of the release contract described in [README.md](../README.md) and [CHANGELOG.md](../CHANGELOG.md).
+The items below are explicitly post-1.0 work. They are not part of the release contract described in [Roadmap.md](Roadmap.md) and [CHANGELOG.md](../CHANGELOG.md).
 
 SQL
 	- update hook when having fetch-lists in ManyRelation (as in RelationQuery)
@@ -12,16 +12,15 @@ Relations:
 	- RelationQuery is still Observation-only; build a separate implementation for older OS versions if that compatibility is needed
 	- think through update hooks for query-backed lists when brand new rows should be inserted directly instead of discovered on the next fetch
 
-# Known bugs / TODOs
+# TODOs
 
-Find a solution for temp-objects:
-	Use Structs and don't save them.
-	
+Use String interpolation to build "WHERE name = \(name)" and support "FROM \(verbatim: table) WHERE name = \(name)"
+
 Have a cleanup-function that can delete unused tables, or should we not care?
 
-For Table items, usually a BIG json downloaded from sources devs do not control. Would be nice if those could be auto-splitted into separate tables with foreign-key constrains. Now the related data needs to be json-data-struct or separated manually using a OneRelation.
+Should we adapt foreign-key constrains? 
 
-But how? 
+For Table items, usually a BIG json downloaded from sources devs do not control. Would be nice if those could be auto-splitted into separate tables with foreign-key constrains. Now the related data needs to be json-data-struct or separated manually using a OneRelation. But how? 
 - How about a special init when decoding, like SubType.init(superType). We can then decode the whole chain automatically and encode into different tables. But would require separate writes for each instance.
 
 ## Thinking

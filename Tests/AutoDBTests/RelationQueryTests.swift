@@ -10,7 +10,7 @@ import AutoDBTesting
 import Testing
 import Combine
 
-final class Album: Model, @unchecked Sendable {
+final class Album: Model {
 	
 	struct Value: Table {
 		
@@ -21,15 +21,15 @@ final class Album: Model, @unchecked Sendable {
 		static let tableName = "Album"
 	}
 	
-	var value: Value
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	//shorthand
 	var name: String { value.name }
 }
 
-final class AlbumArt: Model, @unchecked Sendable {
+final class AlbumArt: Model {
 	
 	struct Value: Table {
 		
@@ -43,9 +43,9 @@ final class AlbumArt: Model, @unchecked Sendable {
 		static let autoDBSettings = AutoDBSettings.cache
 	}
 	
-	var value: Value
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	//shorthand
 	var album: OneRelation<Album> { value.album }
@@ -66,16 +66,16 @@ final class DeallocTest: @unchecked Sendable {
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-final class CureAlbums: Model, @unchecked Sendable {
+final class CureAlbums: Model {
 	struct CureAlbumsTable: Table {
 		static let tableName = "CureAlbums"
 		
 		var id: AutoId = 0
 		var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 1, limit: 20)
 	}
-	var value: CureAlbumsTable
+	let storage: ModelStorage<CureAlbumsTable>
 	init(_ value: CureAlbumsTable) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 }
 
@@ -85,7 +85,7 @@ struct SaveFail: Table {
 	var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 3)
 }
 
-final class CombineAlbum: Model, @unchecked Sendable, ObservableObject {
+final class CombineAlbum: Model, ObservableObject {
 	
 	//var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
 	struct CombineAlbumTable: Table {
@@ -95,17 +95,12 @@ final class CombineAlbum: Model, @unchecked Sendable, ObservableObject {
 		var artist = ""
 	}
 	
-	@Published
-	var value: CombineAlbumTable
+	let storage: ModelStorage<CombineAlbumTable>
 	
+	// objectWillChange is sent automatically when the value changes
 	init(_ value: CombineAlbumTable) {
-		self.value = value
-		
-		$value.sink { [self] _ in
-			self.objectWillChange.send()
-		}.store(in: &listeners)
+		self.storage = ModelStorage(value)
 	}
-	var listeners = Set<AnyCancellable>()
 }
 
 // auto-call objectWillChange when changed.
@@ -120,7 +115,7 @@ final class CombineArtist: @unchecked Sendable, ObservableObject, RelationOwner 
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-final class PagedCureAlbums: Model, @unchecked Sendable {
+final class PagedCureAlbums: Model {
 	struct Value: Table {
 		static let tableName = "PagedCureAlbums"
 		
@@ -128,9 +123,9 @@ final class PagedCureAlbums: Model, @unchecked Sendable {
 		var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 2)
 	}
 	
-	var value: Value
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 }
 

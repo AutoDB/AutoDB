@@ -31,7 +31,7 @@ struct FTS: Table {
 	}
 }
 
-final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
+final class Post: Model, FTSCallbackOwner {
 	struct PostTable: Table {
 		var id: AutoId = 1
 		var title: String = "Untitled"
@@ -39,13 +39,13 @@ final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
 		var createdAt: Date = Date()
 	}
 	
-	var value: PostTable
+	let storage: ModelStorage<PostTable>
 	init(_ value: PostTable) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	
 	// probably smarter to put index in the owner, both should work
-	var ownerIndex = FTSColumn<PostTable>("Index")
+	let ownerIndex = FTSColumn<PostTable>("Index")
 	static func textCallback(_ ids: [AutoId]) async -> [AutoId: String] {
 		var result: [AutoId: String] = [:]
 		let list = (try? await PostTable.fetchIds(ids)) ?? []

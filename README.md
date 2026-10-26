@@ -2,37 +2,6 @@
 
 Automatic persistence and database handling in Swift, built on SQLite. AutoDB focuses on automatic migrations, cache-backed model identity, relations, and async/await-friendly access patterns.
 
-## 1.0 scope
-
-The 1.0 release target is:
-
-- Swift Package only
-- Apple-first support
-- the current package deployment floor
-- no cross-platform support promise
-- no older non-Observation `RelationQuery` implementation
-
-## Support matrix
-
-| Surface | Support |
-| --- | --- |
-| Package platforms | macOS 14+, iOS 17+, tvOS 13+ |
-| Tested regularly | macOS and iOS |
-| `RelationQuery` | macOS 14+, iOS 17+, tvOS 17+, watchOS 10+ |
-| Cross-platform targets | Out of scope for 1.0 |
-
-## Stable in 1.0
-
-- `Table` and `Model`
-- automatic migrations
-- cache-backed model identity
-- uniqueness constraints
-- batched saving
-- transactions
-- `ManyRelation` and `OneRelation`
-- `FTSColumn`
-- `RelationQuery` on supported Observation-capable OS versions
-
 ## Quick start
 
 Model persisted columns in a `Table` and wrap them in a `Model` when you want identity, caching, relations, and change coalescing.
@@ -40,7 +9,7 @@ Model persisted columns in a `Table` and wrap them in a `Model` when you want id
 ```swift
 import AutoDB
 
-final class Artist: Model, @unchecked Sendable {
+final class Artist: Model {
 	struct Value: Table {
 		static let tableName = "Artist"
 
@@ -49,12 +18,10 @@ final class Artist: Model, @unchecked Sendable {
 		var genre = ""
 	}
 
-	var value: Value {
-		didSet { didSet(oldValue) }
-	}
+	let storage: ModelStorage<Value>
 
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 }
 ```
@@ -89,7 +56,8 @@ While the object stays retained, `fetched === artist`.
 - use `Table` directly when you only want value storage
 - use `Model` when multiple parts of the app should share one live object identity
 - use `save()` when you want deterministic persistence now
-- use `didSet { didSet(oldValue) }` plus `saveChanges()` when you want batched writes
+- change a `Model` freely and call `saveChanges()` when you want batched writes - every change is tracked by its `ModelStorage`
+- use `withValue { }` when several tasks may write the same object at once
 
 ### Relations
 
@@ -103,7 +71,7 @@ While the object stays retained, `fetched === artist`.
 
 ### Debugging
 
-A `StoredModel` keeps its value behind a lock, so the variables view shows it several levels down (`storage → storage → box → value`). Quick Look (or Print Description) on the `storage` row shows the whole value, or print it from the console:
+A `Model` keeps its value behind a lock, so the variables view shows it several levels down (`storage → storage → box → value`). Quick Look (or Print Description) on the `storage` row shows the whole value, or print it from the console:
 
 ```
 (lldb) po self.storage
@@ -154,13 +122,13 @@ A `StoredModel` keeps its value behind a lock, so the variables view shows it se
 
 - [Documentation overview](Documentation/Documentation.md)
 - [Adoption guide](Documentation/Adoption.md)
-- [1.0 changelog draft](CHANGELOG.md)
+- [1.0 changelog](CHANGELOG.md)
 - [Post-1.0 backlog](Documentation/Backlog.md)
 - [Cross-platform notes](Documentation/Android.md)
 
 ## Contributing
 
-A pre-commit hook formats staged Swift files with swift-format. Enable it once per clone:
+Feel free to contribute, to make it easier to follow style you can install the pre-commit hook to format staged Swift files with swift-format. Enable it once per clone:
 
 ```bash
 git config core.hooksPath .githooks

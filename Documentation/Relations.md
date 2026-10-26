@@ -45,7 +45,7 @@ parent.saveChangesLater()	// save the new list
 Let's model a relationship. Imagine a list of AlbumArts and you want their respective Albums. Note that they could both be plain Table structs as well.
 
 ```
-final class AlbumArt: Model, @unchecked Sendable {
+final class AlbumArt: Model {
 	
 	struct Value: Table {
 		
@@ -61,9 +61,9 @@ final class AlbumArt: Model, @unchecked Sendable {
 		}
 	}
 	
-	var value: Value
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	//shorthand
 	var album: OneRelation<Album> { value.album }
@@ -71,7 +71,7 @@ final class AlbumArt: Model, @unchecked Sendable {
 ```
 
 ```
-final class Album: Model, @unchecked Sendable {
+final class Album: Model {
 	
 	struct Value: Table {
 		
@@ -82,9 +82,9 @@ final class Album: Model, @unchecked Sendable {
 		static let tableName = "Album"
 	}
 	
-	var value: Value
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	//shorthand
 	var name: String { value.name }

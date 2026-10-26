@@ -1,16 +1,17 @@
 //
-//  StoredModelTests.swift
+//  ModelStorageTests.swift
 //  AutoDB
 //
 //  Created by Olof Andersson-Thorén on 2026-08-21.
 //
 
 import Testing
+import Observation
 @testable import AutoDB
 import AutoDBTesting
 
-// A StoredModel keeps its value in a ModelStorage, needs no didSet boilerplate and conforms to Sendable without @unchecked.
-final class StoredPerson: StoredModel {
+// A Model keeps its value in a ModelStorage, needs no didSet boilerplate and conforms to Sendable without @unchecked.
+final class StoredPerson: Model {
 	struct Value: Table {
 		static let tableName = "StoredPerson"
 		var id: AutoId = 0
@@ -30,7 +31,7 @@ final class StoredPerson: StoredModel {
 }
 
 @Suite(.autoDB, .serialized)
-struct StoredModelTests {
+struct ModelStorageTests {
 	
 	private static let logSetup: Void = AutoLog.setup()
 	
@@ -111,5 +112,36 @@ struct StoredModelTests {
 		let item = await StoredPerson.create(5)
 		#expect(item.id == 5)
 		#expect(item.storage.id == item.value.id)
+	}
+	
+	@Test func testObservationTracksValue() async throws {
+		let item = await StoredPerson.create(6)
+		let changed = Locked(false)
+		withObservationTracking {
+			_ = item.value.name
+		} onChange: {
+			changed.withLock { $0 = true }
+		}
+		
+		// writing the same value is not a change
+		item.name = item.name
+		#expect(changed.withLock { $0 } == false)
+		
+		item.name = "observed"
+		#expect(changed.withLock { $0 })
+	}
+	
+	@Test func testRefreshDoesNotMarkChanged() async throws {
+		try await AutoDBManager.current.truncateTable(StoredPerson.Value.self)
+		
+		let item = await StoredPerson.create(7)
+		try await item.save()
+		try await StoredPerson.execute("UPDATE StoredPerson SET name = ? WHERE id = ?", ["external", 7])
+		
+		// values from the DB are already saved
+		try await item.refreshCache()
+		#expect(item.name == "external")
+		let pendingCount = await AutoDBManager.current.lookupObjectsCount(ObjectIdentifier(StoredPerson.self))
+		#expect(pendingCount == 0)
 	}
 }

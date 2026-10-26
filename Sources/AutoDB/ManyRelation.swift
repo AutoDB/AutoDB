@@ -17,8 +17,8 @@ import Foundation
  If it has an Owner, it can call `initFetch()` when fetched from DB to populate the list. Set `initFetch` to true to enable this.
 
  Usage:
-final class Parent: Model, @unchecked Sendable {
-	var value: Value
+final class Parent: Model {
+	let storage: ModelStorage<Value>
 	struct Value: Table {
 
 		var id: UInt64 = 0
@@ -28,7 +28,7 @@ final class Parent: Model, @unchecked Sendable {
 	}
 
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 
  	// Handle the relation like an array of objects

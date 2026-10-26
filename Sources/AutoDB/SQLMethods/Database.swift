@@ -38,8 +38,6 @@
 //  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //  SOFTWARE.
 
-// Note: the token: AutoId? parameters are deprecated - the ambient SemaphoreToken task-local (bound by transaction) carries the token instead. The deprecated variants live in Deprecated.swift and are removed in the next major, see Documentation/upgradeTODO.md.
-
 import Foundation
 #if canImport(Darwin)
 	import SQLite3
@@ -345,11 +343,6 @@ public actor Database {
 	
 	var gentleClose: Task<Void, Swift.Error>?
 	var harshClose: Task<Void, Swift.Error>?
-	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
-	public func close(_ token: AutoId?, waitSec: Double = 10, allowReopen: Bool = true) async {
-		await _close(waitSec: waitSec, allowReopen: allowReopen)
-	}
-	
 	/// Gently close the database - if a transaction is running, wait for it to finish first.
 	/// allowReopen: the next access reopens it transparently, like an idle auto-close. Pass false to keep it closed (queries throw databaseIsClosed) until open() is called.
 	/// A DB that is already closed until open() is never made reopenable by a later close.
@@ -538,14 +531,6 @@ public actor Database {
 		return try await query(queryString, sqlArguments: values)
 	}
 	
-	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
-	@discardableResult
-	public func query(token: AutoId?, _ queryString: String, _ arguments: [Sendable] = []) async throws -> [Row] {
-		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
-			try await query(queryString, arguments)
-		}
-	}
-	
 	@discardableResult
 	public func query(_ query: String, sqlArguments: [SQLValue]?) async throws -> [Row] {
 		// the ambient transaction token, if we are inside a transaction
@@ -560,14 +545,6 @@ public actor Database {
 		
 		let statement = try preparedStatement(query, sqlArguments ?? [])
 		return try rowsByExecutingPreparedStatement(statement, from: query)
-	}
-	
-	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
-	@discardableResult
-	public func query(token: AutoId?, _ query: String, sqlArguments: [SQLValue]?) async throws -> [Row] {
-		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
-			try await self.query(query, sqlArguments: sqlArguments)
-		}
 	}
 	
 	private func preparedStatement(_ query: String, _ sqlArguments: [SQLValue]) throws -> PreparedStatement {
@@ -719,14 +696,6 @@ public actor Database {
 		return try await execute(queryString, sqlArguments: values ?? [])
 	}
 	
-	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
-	@discardableResult
-	public func execute(token: AutoId?, _ queryString: String, _ arguments: [Sendable]?) async throws -> Int {
-		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
-			try await execute(queryString, arguments)
-		}
-	}
-	
 	/// Execute a query with parameters, returning amount of affected rows. Will throw an error if the query returns rows.
 	@discardableResult
 	public func execute(_ query: String, sqlArguments: [SQLValue] = []) async throws -> Int {
@@ -762,14 +731,6 @@ public actor Database {
 		}
 		let affectedRows = sqlite3_changes64(dbHandle)
 		return Int(affectedRows)
-	}
-	
-	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
-	@discardableResult
-	public func execute(token: AutoId?, _ query: String, sqlArguments: [SQLValue] = []) async throws -> Int {
-		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
-			try await self.execute(query, sqlArguments: sqlArguments)
-		}
 	}
 	
 	/// Execute a query with no parameters returning  amount of affected rows. Will throw an error if the query returns rows.
@@ -808,29 +769,12 @@ public actor Database {
 		return Int(affectedRows)
 	}
 	
-	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - remove the token argument, see 'Removing explicit tokens' in Documentation.md")
-	@discardableResult
-	public func execute(token: AutoId?, _ query: String) async throws -> Int {
-		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
-			try await execute(query)
-		}
-	}
-	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// The transaction token is carried as an ambient task-local (SemaphoreToken.current) for the duration of the closure,
 	/// so all db-access inside the transaction re-enters the lock automatically.
 	/// Note: the task-local does not flow into Task.detached - detached work inside the closure waits for the transaction to finish (by design).
 	public func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database) async throws -> R)) async throws -> R {
-		try await _transaction { db, _ in
-			try await action(db)
-		}
-	}
-	
-	@available(*, deprecated, message: "The transaction token is carried automatically (SemaphoreToken.current) - use transaction { db in ... } and remove all token arguments, see 'Removing explicit tokens' in Documentation.md")
-	public func transaction<R: Sendable>(token: AutoId? = nil, _ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
-		try await SemaphoreToken.$current.withValue(token ?? SemaphoreToken.current) {
-			try await _transaction(action)
-		}
+		try await _transaction(action)
 	}
 	
 	/// Runs `body` while no transaction is open on this database, and lets none start until it returns. Plain queries are not held back.
@@ -844,7 +788,7 @@ public actor Database {
 		}
 	}
 	
-	private func _transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database, _ token: AutoId) async throws -> R)) async throws -> R {
+	private func _transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database) async throws -> R)) async throws -> R {
 		
 		// note that we can have transactions inside transactions, as long as we reuse the token:
 		// reuse an ambient (outer-transaction) token; else start fresh
@@ -874,7 +818,7 @@ public actor Database {
 		return try await SemaphoreToken.$current.withValue(token) {
 			try await execute("SAVEPOINT \"\(transactionID)\"")
 			do {
-				let result: R = try await action(self, token)
+				let result: R = try await action(self)
 				try await execute("RELEASE SAVEPOINT \"\(transactionID)\"")
 				return result
 			} catch {

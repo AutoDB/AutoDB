@@ -11,7 +11,7 @@ import Foundation
 @testable import AutoDB
 import AutoDBTesting
 
-final class DelayModel: Model, @unchecked Sendable {
+final class DelayModel: Model {
 	struct Value: Table {
 		static let tableName = "DelayModel"
 		
@@ -19,14 +19,10 @@ final class DelayModel: Model, @unchecked Sendable {
 		var name: String = ""
 	}
 	
-	var value: Value {
-		didSet {
-			didSet(oldValue)
-		}
-	}
+	let storage: ModelStorage<Value>
 	
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	
 	var name: String {

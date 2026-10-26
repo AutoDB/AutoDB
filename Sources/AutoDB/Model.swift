@@ -6,6 +6,9 @@
 //
 
 import Foundation
+#if canImport(Combine)
+	import Combine
+#endif
 
 /// let the manager store info about the types so we don't need to perform the same lookups several times.
 struct Optimizations: @unchecked Sendable {
@@ -13,22 +16,29 @@ struct Optimizations: @unchecked Sendable {
 	var innerRelations: [AnyKeyPath]?
 }
 
-/// All table classes must implement AutoDB and be @unchecked Sendable. Regular Sendable is not meaningful (must both be decodable and owned by a global actor).
+/// A class wrapping a Table value, giving it identity, caching and change-tracking. Keep the value in a ModelStorage:
+/// ```
+/// final class Person: Model {
+///     struct Value: Table {
+///         var id: AutoId = 0
+///         var name: String = ""
+///     }
+///     let storage: ModelStorage<Value>
+///     init(_ value: Value) {
+///         self.storage = ModelStorage(value)
+///     }
+/// }
+/// ```
+/// The storage is the only mutable state, so the class is checked Sendable - no @unchecked.
+/// Reading and writing `value` or `withValue` tracks changes and notifies observers (Observation and ObservableObject) automatically.
 public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwner, TableModel, CustomStringConvertible {
 	associatedtype TableType: Table
 	
 	/// Always called when creating an object
 	init(_ value: TableType)
 	
-	//var originalValue: TableType { get set }
-	
-	/// The backing value
-	var value: TableType { get set }
-	
-	/// Read or modify the value, fires change-tracking when the value changed.
-	/// The default implementation is a get-modify-set on `value` (same guarantees as mutating `value` directly), StoredModel conformers get a truly atomic version.
-	@discardableResult
-	func withValue<R>(_ body: (inout TableType) throws -> R) rethrows -> R
+	/// The synchronized backing value, store as a `let`.
+	var storage: ModelStorage<TableType> { get }
 	
 	var valueIdentifier: ObjectIdentifier { get }
 	
@@ -56,17 +66,17 @@ public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwne
 	 Understand that if your Table has a Model, you must call save or saveChanges (etc) on the model.
 	
 	 /// save and wait until completed, potentially handling errors
-	 func save(token: AutoId?) async throws
+	 func save() async throws
 	 /// save and don't wait until completed, ignoring errors
-	 //func save(token: AutoId?) - if we don't include it in the protocol Swift adds it from the extension - but then it won't call the function in concrete types?
+	 //func save() - if we don't include it in the protocol Swift adds it from the extension - but then it won't call the function in concrete types?
 	 /// save changes to all objects of the same type and wait until completed, potentially handling errors
-	 static func saveChanges(token: AutoId?) async throws
+	 static func saveChanges() async throws
 	 /// save changes to all objects of the same type and don't wait until completed, ignoring errors
-	 static func saveChangesDetached(token: AutoId?)
+	 static func saveChangesDetached()
 	 /// save changes to all changed objects and wait until completed, potentially handling errors
-	 static func saveAllChanges(token: AutoId?) async throws
+	 static func saveAllChanges() async throws
 	 /// save changes to all changed objects and don't wait until completed, ignoring errors
-	 static func saveAllChangesDetacted(token: AutoId?)
+	 static func saveAllChangesDetacted()
 	 */
 	
 	// MARK: - cache
@@ -78,25 +88,47 @@ public protocol Model: Hashable, Identifiable, Sendable, AnyObject, RelationOwne
 
 public extension Model {
 	
+	/// The id is cached in the storage - no lock is taken.
 	var id: AutoId {
-		value.id
+		storage.id
 	}
 	
-	/// Read or modify the value through a closure. This default bridges via `value`,
-	/// so the conformer's didSet performs the change-tracking.
+	/// Snapshot read / whole-value write, change-tracking is automatic.
+	/// Note that field mutation through this property (`model.value.name = "x"`) is a get-modify-set and not atomic; use withValue when competing writers are possible.
+	var value: TableType {
+		get {
+			storage.snapshot()
+		}
+		set {
+			if storage.mutate({ $0 = newValue }).changed {
+				valueChanged()
+			}
+		}
+	}
+	
+	/// Atomically read or modify the value, fires change-tracking when the value changed.
 	@discardableResult
 	func withValue<R>(_ body: (inout TableType) throws -> R) rethrows -> R {
-		var copy = value
-		let result = try body(&copy)
-		value = copy
+		let (result, changed) = try storage.mutate(body)
+		if changed {
+			valueChanged()
+		}
 		return result
 	}
 	
-	/// Call this when value is changed for automatic change-tracking, like so: var value: TableType { didSet { didSet(oldValue) }}
-	func didSet(_ oldValue: TableType) {
-		// check if the value actually have changed
-		if oldValue == value { return }
+	/// Observation is told by the storage, ObservableObject models get objectWillChange and the object is marked for saving.
+	private func valueChanged() {
+		sendObjectWillChange()
 		didChange()
+	}
+	
+	/// Sent after the change, only then do we know if the value changed.
+	private func sendObjectWillChange() {
+		#if canImport(Combine)
+			if let observable = self as? any ObservableObject, let objectWillChange = observable.objectWillChange as? ObservableObjectPublisher {
+				objectWillChange.send()
+			}
+		#endif
 	}
 	
 	var valueIdentifier: ObjectIdentifier {
@@ -273,7 +305,7 @@ public extension Model {
 	
 	/// Run actions inside a transaction - any thrown error causes the DB to rollback (and the error is rethrown).
 	/// The transaction token is carried as an ambient task-local for the duration of the closure, so all db-access inside re-enters the lock automatically - no need to forward the token.
-	/// Passing the token explicitly is still supported and always wins over the ambient one. Note: Task.detached inside the closure does not inherit the token and waits for the transaction (by design).
+	/// Note: Task.detached inside the closure does not inherit the token and waits for the transaction (by design).
 	static func transaction<R: Sendable>(_ action: (@Sendable (_ db: isolated Database) async throws -> R)) async throws -> R {
 		try await db().transaction(action)
 	}
@@ -320,13 +352,20 @@ public extension Model {
 		let ids: [AutoId] = Array(objects.keys)
 		let values: [TableType] = try await AutoDBManager.current.fetchIds(ids)
 		for value in values {
-			objects[value.id]?.value = value
+			objects[value.id]?.replaceFromDB(value)
 		}
 	}
 	
 	/// Refresh our value
 	func refreshCache() async throws {
-		self.value = try await autoDBManager.fetchId(id)
+		replaceFromDB(try await autoDBManager.fetchId(id))
+	}
+	
+	/// Values from the DB are already saved, notify observers but don't mark for saving.
+	private func replaceFromDB(_ value: TableType) {
+		if storage.mutate({ $0 = value }).changed {
+			sendObjectWillChange()
+		}
 	}
 	
 	// MARK: - db queries
@@ -486,7 +525,7 @@ public extension Model {
 	/// Synchronous delete, spawns deletion and ignores errors
 	func delete() {
 		Task {
-			// don't inherit an ambient transaction token - a fire-and-forget delete should wait for the transaction, not race into it. An explicit token still wins.
+			// don't inherit an ambient transaction token - a fire-and-forget delete should wait for the transaction, not race into it.
 			try? await SemaphoreToken.detached {
 				try await delete()
 			}

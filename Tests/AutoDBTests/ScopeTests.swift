@@ -14,18 +14,16 @@ import Testing
 import AutoDBTesting
 
 /// a production-style type with one declaration, used by every suite below
-final class ScopeItem: Model, @unchecked Sendable {
+final class ScopeItem: Model {
 	struct Value: Table {
 		static let tableName = "ScopeItem"
 		var id: AutoId = 0
 		var name = ""
 		var cached = OneRelation<ScopeCached>()
 	}
-	var value: Value {
-		didSet { didSet(oldValue) }
-	}
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 }
 

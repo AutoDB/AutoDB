@@ -35,7 +35,7 @@ struct BaseClass: Table {
 	var arrayWithEncodables = [Int]()
 }
 
-final class UniqueString: Model, @unchecked Sendable {
+final class UniqueString: Model {
 	
 	struct Value: Table {
 		
@@ -48,9 +48,9 @@ final class UniqueString: Model, @unchecked Sendable {
 			]
 		}
 	}
-	var value: Value
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	
 	var string: String {
@@ -63,7 +63,7 @@ final class UniqueString: Model, @unchecked Sendable {
 	}
 }
 
-final class TrackedModel: Model, @unchecked Sendable {
+final class TrackedModel: Model {
 	struct Value: Table {
 		static let tableName = "TrackedModel"
 		
@@ -71,14 +71,10 @@ final class TrackedModel: Model, @unchecked Sendable {
 		var name: String = ""
 	}
 	
-	var value: Value {
-		didSet {
-			didSet(oldValue)
-		}
-	}
+	let storage: ModelStorage<Value>
 	
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	
 	var name: String {
@@ -139,16 +135,16 @@ final class IntTester: Table, @unchecked Sendable {
 }
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
-@Observable final class Artist: Model, @unchecked Sendable {
+@Observable final class Artist: Model {
 	
 	struct Value: Table {
 		var id: AutoId = 0  // all ids are of type UInt64, which makes it easy to handle uniqueness.
 		var name: String = ""  // we must have default values or nil
 		static let tableName: String = "Artist"
 	}
-	var value: Value
+	let storage: ModelStorage<Value>
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	
 	// note that all @Observables will show warning "Immutable property will not be decoded because ..." as long as there are no CodingKeys.
@@ -174,8 +170,8 @@ final class CodeWithKeys: Table, @unchecked Sendable {
 }
 
 // Building something to handle relations
-final class Parent: Model, @unchecked Sendable {
-	var value: Value
+final class Parent: Model {
+	let storage: ModelStorage<Value>
 	struct Value: Table {
 		
 		var id: UInt64 = 0
@@ -185,7 +181,7 @@ final class Parent: Model, @unchecked Sendable {
 	}
 	
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 }
 

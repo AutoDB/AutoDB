@@ -6,18 +6,16 @@ The purpose is to have an automatic system for handling persistence. Objects sho
 
 AutoDB 1.0 is an Apple-first Swift Package release.
 
-- Package platforms: macOS 14+, iOS 17+, tvOS 13+
-- `RelationQuery` availability: macOS 14+, iOS 17+, tvOS 17+, watchOS 10+
+- Package platforms: macOS 14+, iOS 17+, tvOS 17+, watchOS 10+
 - Cross-platform support outside Apple platforms is not part of the 1.0 contract
 
 For first integration steps, start with the [README](../README.md) and the [Adoption Guide](Adoption.md).
 
 ## Availability
 
-Current package support is macOS 14+, iOS 17+, and tvOS 13+.
+Current package support is macOS 14+, iOS 17+, tvOS 17+, and watchOS 10+ - the floor where Observation is available, which models and `RelationQuery` rely on.
 
 - The core table/model APIs, migrations, caching, and FTS are part of the stable package surface.
-- `RelationQuery` currently relies on Observation, so it is only available on macOS 14+, iOS 17+, tvOS 17+, and watchOS 10+.
 - Cross-platform work outside Apple platforms is still exploratory rather than release-ready.
 
 ## Quick start
@@ -28,13 +26,13 @@ See the [README](../README.md).
 
 The system is built on top of SQLite and uses Codable to read and write data to objects.
 
-All classes need to implement the AutoDB protocol. This in turn implements Codable, Hashable, Identifiable and Sendable. Since classes can't be Sendable (in practice) they have to be marked @unchecked Sendable. 
+Data lives in structs implementing `Table`, which are Codable. Classes implementing `Model` wrap a Table value, give it an identity and are Hashable, Identifiable and Sendable. A Model keeps its value in a `ModelStorage`, so it has no mutable state of its own and is checked `Sendable` - no `@unchecked`.
 
 It is required that all classes have an init method with no parameters. This is needed to have default values for all properties.
 
 # API Considerations
 
-Normally when working with database frameworks and managers, you end up with a lot of type-casting and similar annoyances. AutoDB preserves types so that fetching can be done as follows:
+It is common when working with database frameworks and managers, you end up with a lot of type-casting and similar annoyances. AutoDB preserves types so that fetching can be done as follows:
 
 	let list = try await DataClass.fetchQuery("WHERE goals > 2")
 	// list is of type [DataClass] where all have goals > 2.
@@ -48,13 +46,55 @@ A Model must be a class and holds a Table. It is always cached which avoids the 
 The separation seems unnecessary at first, why not just use a single object?
 
 The reasons are many:
-* Auto-detect changes, and coalesce all your objects into one big write. Especially if you change your objects many times, postponing saves are magnitudes faster since unnecessary ones is simply not done. An object can detect this itself in the ´didSet´ method. Writing those for every property however, quickly becomes tedious (and it is not automatic).
+* Auto-detect changes, and coalesce all your objects into one big write. Especially if you change your objects many times, postponing saves are magnitudes faster since unnecessary ones is simply not done. A Model's `ModelStorage` detects every change to its value, no boilerplate needed.
 * Control. There are times when you want a copy of your data just so it *won't* be updated by changes elsewhere. E.g. when building undo/redo. Keeping it as structs solves that problem.
 * Speed. When you have a million tiny data structures, like positions on a map, you don't want to allocate an object for each one. Structs are much faster and uses less memory.
 * Refresh. When external processes change your db-file you need to refresh the data (or other refresh situations like syncing). Held references makes this problematic, while very easy just updating its internal struct. 
 * Speed. When writing to DB you just need to send the structs to handle themselves. No locking, retain/release etc, needs to be done. 
 
 Eating the cake and having it too!
+
+### Models and ModelStorage
+
+A Model keeps its value in a `ModelStorage`, stored as a `let`:
+
+```swift
+final class Artist: Model {
+	struct Value: Table {
+		var id: AutoId = 0
+		var name = ""
+	}
+	
+	let storage: ModelStorage<Value>
+	
+	init(_ value: Value) {
+		self.storage = ModelStorage(value)
+	}
+}
+```
+
+- `artist.value` reads a snapshot, `artist.value = new` replaces it.
+- `artist.withValue { $0.name = "x" }` reads or modifies it atomically. `artist.value.name = "x"` also works and is change-tracked, but it is a get-modify-set: two lock acquisitions with a gap. Use `withValue` when several tasks may write at the same time.
+- Every change marks the object for `saveChanges()`, notifies Observation (SwiftUI tracks `artist.value` without `@Observable`) and sends `objectWillChange` when the model is an `ObservableObject`. Writing an equal value is not a change.
+- `refreshCache()` notifies observers but does not mark the object for saving - the value came from the database.
+
+Since the storage is the only mutable state, the compiler checks the rest of the class: a `var` stored property is an error. Make relation columns like `FTSColumn` a `let` (they are classes), and keep anything else mutable in the Table value or behind a lock.
+
+### Migrating to ModelStorage
+
+1.0 replaced the `var value` requirement with `storage`. Call sites don't change - `value` and `withValue` are still there - only the model declarations do:
+
+| Before | After |
+| --- | --- |
+| `final class Artist: Model, @unchecked Sendable` | `final class Artist: Model` |
+| `var value: Value { didSet { didSet(oldValue) } }` | `let storage: ModelStorage<Value>` |
+| `var value: Value` (without change-tracking) | `let storage: ModelStorage<Value>` - changes are now always tracked |
+| `@Published var value: Value` and a `$value` sink | `let storage: ModelStorage<Value>`, `objectWillChange` is sent automatically |
+| `self.value = value` in `init` | `self.storage = ModelStorage(value)` |
+| `final class Person: StoredModel` | `final class Person: Model` (`StoredModel` is a deprecated alias) |
+| `var index = FTSColumn<Value>(...)` on the model | `let index = FTSColumn<Value>(...)` |
+
+Then build and fix what the compiler flags: mutable or non-Sendable stored properties were unchecked data races before. `@Observable` on a model is no longer needed for its value; keep it only for other observable properties.
 
 ## 1.0 guarantees and limits
 
@@ -347,7 +387,7 @@ await AutoDBManager.shared.setDeleteLaterDelay(5)	// deleteLater
 The system supports FTS-columns, which is a powerful way to search for text. Create a FTSColumn like tihs:
 
 ```
-final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
+final class Post: Model, FTSCallbackOwner {
 	struct PostTable: Table {
 		var id: AutoId = 1
 		var title: String = "Untitled"
@@ -355,12 +395,12 @@ final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
 		var createdAt: Date = Date()
 	}
 	
-	var value: PostTable
+	let storage: ModelStorage<PostTable>
 	init(_ value: PostTable) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 	
-	var index = FTSColumn<PostTable>("Index")
+	let index = FTSColumn<PostTable>("Index")
 	
 	// note that the callback is optional if the name of the FTSColumn is the same as the column you want to index (and you only want to index one column), eg. "body".
 	static func textCallback(_ ids: [AutoId]) async -> [AutoId: String] {
@@ -408,7 +448,7 @@ The 1.0 contract for FTS is:
 Transactions are supported, wrap your code in a closure where no calls may throw errors. If it does, DB-state is rolled back to its initial state. Like this:
 
 ```
-try? await TransClass.transaction { _, _ in
+try? await TransClass.transaction { _ in
 	let first = await TransClass.create(1)
 	first.integer = 2
 	try await first.save()
@@ -423,19 +463,19 @@ try? await TransClass.transaction { _, _ in
 // All other calls to db will await until this point where the transaction is done.
 ```
 
-The transaction token is carried automatically for the duration of the closure (as a task-local, `SemaphoreToken.current`), so all AutoDB calls made inside the transaction - directly or indirectly - re-enter the lock without deadlocking. You no longer need to forward the `token` closure parameter; passing it explicitly remains supported and always takes precedence, so existing code keeps working unchanged.
+The transaction token is carried automatically for the duration of the closure (as a task-local, `SemaphoreToken.current`), so all AutoDB calls made inside the transaction - directly or indirectly - re-enter the lock without deadlocking. There is no token to forward.
 
 Details worth knowing:
 
 - A nested `transaction` call inside the closure reuses the outer token and only nests the savepoint - rolling back the outer transaction also rolls back the inner one.
 - The token flows into `Task { }` spawned inside the closure, but intentionally **not** into `Task.detached` - detached work waits for the transaction to finish, just like before.
-- The same applies to migrations: queries inside your `migration(_:_:_:)` implementation no longer need to forward the token.
+- The same applies to migrations: queries inside your `migration(_:_:)` implementation join the migration transaction.
 - `create()` binds a token the same way while your `awakeFromInit()` runs, so the hook can save or create the same type - see [awakeFromInit](#awakefrominit) for the caveat about `Task { }`.
 - `Database.excludingTransactions { }` runs a closure while no transaction is open and lets none start until it returns, without being a transaction itself (plain queries from other tasks are not held back). It re-enters through the ambient token and binds one for the closure. `create()` uses it; take it yourself before any lock of your own that code inside a transaction may also need.
 
 ## Removing explicit tokens from your code
 
-The `token:` parameters are deprecated: explicit tokens still work exactly as before (and win over the ambient one), but every call site that passes one now gets a compiler warning, and the parameters are removed in the next major version. The `migration(_:_:)` protocol requirement has already dropped its token parameter. These regex find/replace pairs (Xcode: Find navigator with "Regular Expression", or any editor with ICU/PCRE regex) clean up the call sites:
+1.0 removed the `token:` parameters and the `{ db, token in }` transaction closures; code that still passes tokens no longer compiles. These regex find/replace pairs (Xcode: Find navigator with "Regular Expression", or any editor with ICU/PCRE regex) clean up the call sites:
 
 1. **Token argument followed by other arguments** - `fetchId(token: token, 1)` → `fetchId(1)`, `db.query(token: token, "SELECT ...")` → `db.query("SELECT ...")`:
    - Find: `token:\s*[\w.]+,\s*`
@@ -452,13 +492,13 @@ The `token:` parameters are deprecated: explicit tokens still work exactly as be
 4. **Unused closure/function parameters** - after 1-3 the `token` parameter of `transaction { db, token in ... }` closures and your `migration(_ token:...)` implementations is unused; silence the warning with:
    - Find: `\{\s*(\w+),\s*token\s+in`
    - Replace: `{ $1, _ in`
-   - (The `migration` protocol signature itself must keep its token parameter until the next major version - just stop forwarding it.)
+   - Then remove the `_` parameter: `transaction { db in ... }`, and drop the token parameter from your `migration(_:_:)` implementations.
 
 ⚠️ Before you run these, check the exceptions - a plain `token:` text search finds anything the regexes miss (expressions like `token: t ?? other`):
 
 - **Don't remove tokens you generated yourself** for your own `Semaphore` instances - only tokens that originate from AutoDB's `transaction`/`migration` closures.
-- **`create(token: someToken)` without an id uses the token as the new object's id** (legacy behavior). If you rely on that, pass the id explicitly instead: `create(someToken)`.
-- **Tokens deliberately handed to *other tasks*** (e.g. passed into `Task.detached` or stored for later) keep working only as explicit tokens - the task-local does not follow them. If you pass a token into detached work so it can join the transaction, keep it explicit.
+- **`create(token: someToken)` without an id used the token as the new object's id.** If you rely on that, pass the id explicitly instead: `create(someToken)`.
+- **Tokens deliberately handed to *other tasks*** (e.g. passed into `Task.detached` or stored for later) can't join the transaction any more - the task-local does not follow them. Await that work inside the transaction with a plain `Task { }`, or bind the token yourself with `SemaphoreToken.$current.withValue(token) { ... }`.
 
 Then build: the compiler flags any now-unused `token` variables, which is your checklist of what's left.
 
@@ -483,15 +523,7 @@ Both are therefore `@available(*, noasync)`: calling them from an async function
 
 It is smarter to save many objects in one go, to mark an object to be saved for later call `artist.didChange()`. Later you can then save all those objects by calling `Artist.saveChanges()`. Note that the system will keep a reference to all objects waiting to be saved.
 To save all Models with changes call `Artist.saveAllChanges()` or `AutoDBManager.shared.saveAllChanges()`.
-This can be done automatically by using the `didSet` method on a Model's properties, like this:
-
-```swift
-var value: PostTable {
-	didSet { 
-		didSet(oldValue) 
-	}
-}
-```
+Models do this automatically: every change to `value` or through `withValue` marks the object, see [Models and ModelStorage](#models-and-modelstorage).
 
 ## Caching
 
@@ -563,43 +595,44 @@ When data has an identity, like for a user or specific items, it needs to be uni
 
 You may use your AutoDB data objects directly as viewModels if you wish, but you can also have nested objects in your viewModels. 
 
-### @Observable framework
+### Observation
 
-Just annotate your AutoDB classes with @Observable.
+Models are observable out of the box: `ModelStorage` registers every read of `value` and notifies on every change, so a SwiftUI view that reads `artist.value.name` updates when it changes - no `@Observable` needed. Writing an equal value does not notify.
 
-```
-@Observable final class Artist: AutoDB, @unchecked Sendable {
-	var id: AutoId = 0
-	var name: String = ""
-	...
-}
-```
-
-This path requires Observation availability, which currently means macOS 14+, iOS 17+, tvOS 17+, or watchOS 10+.
+Observers are notified after the change, outside the storage's lock, since only then is it known whether the value changed. The whole value is one observable property: a view reading `artist.value.name` also updates when `genre` changes.
 
 ### ObservableObject
 
-Here you need to subscribe to the nested object's changes, like this:
+A Model that conforms to `ObservableObject` gets `objectWillChange` sent automatically whenever its value changes:
 
+```swift
+import Combine
+
+final class Artist: Model, ObservableObject {
+	struct Value: Table { ... }
+	let storage: ModelStorage<Value>
+	init(_ value: Value) {
+		self.storage = ModelStorage(value)
+	}
+}
 ```
-	import Combine
-	final class NestedViewModel: AutoDB, ObservableObject, @unchecked Sendable {
-		var id: AutoId = 0
-	}
+
+To nest it in another view model, forward its changes:
+
+```swift
+class MainViewModel: ObservableObject {
+	private var cancellables = Set<AnyCancellable>()
+	@Published var artist: Artist
 	
-	class MainViewModel: ObservableObject {
-		private var cancellables = Set<AnyCancellable>()
-		@Published var nestedModel: NestedViewModel
-		
-		init(nestedModel: NestedViewModel) {
-			self.nestedModel = nestedModel
-			nestedModel.objectWillChange
-				.sink {
-					self.objectWillChange.send()
-				}
-				.store(in: &cancellables)
-		}
+	init(artist: Artist) {
+		self.artist = artist
+		artist.objectWillChange
+			.sink { [weak self] in
+				self?.objectWillChange.send()
+			}
+			.store(in: &cancellables)
 	}
+}
 ```
 
 # Codable, CodingKeys and default values

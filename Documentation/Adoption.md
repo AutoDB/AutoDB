@@ -9,7 +9,7 @@ Use a `Table` struct for the stored columns and a `Model` class when you want ca
 ```swift
 import AutoDB
 
-final class Artist: Model, @unchecked Sendable {
+final class Artist: Model {
 	struct Value: Table {
 		static let tableName = "Artist"
 
@@ -18,12 +18,10 @@ final class Artist: Model, @unchecked Sendable {
 		var genre = ""
 	}
 
-	var value: Value {
-		didSet { didSet(oldValue) }
-	}
+	let storage: ModelStorage<Value>
 
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 }
 ```
@@ -61,7 +59,7 @@ While the model remains retained, `fetched === artist`.
 Use `OneRelation` for parent-style references and `ManyRelation` for ordered child lists. Use RelationQuery when the relation can be described in a query, like "all Albums with genre X".
 
 ```swift
-final class AlbumArt: Model, @unchecked Sendable {
+final class AlbumArt: Model {
 	struct Value: Table {
 		static let tableName = "AlbumArt"
 
@@ -70,12 +68,10 @@ final class AlbumArt: Model, @unchecked Sendable {
 		var artist = OneRelation<Artist>()
 	}
 
-	var value: Value {
-		didSet { didSet(oldValue) }
-	}
+	let storage: ModelStorage<Value>
 
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 }
 ```
@@ -94,7 +90,7 @@ let relatedArtist = try await fetchedArt.value.artist.object
 ## 5. Add full-text search when you need ranked search
 
 ```swift
-final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
+final class Post: Model, FTSCallbackOwner {
 	struct Value: Table {
 		static let tableName = "Post"
 
@@ -103,14 +99,12 @@ final class Post: Model, @unchecked Sendable, FTSCallbackOwner {
 		var body = ""
 	}
 
-	var value: Value {
-		didSet { didSet(oldValue) }
-	}
+	let storage: ModelStorage<Value>
 
-	var searchIndex = FTSColumn<Value>("searchIndex")
+	let searchIndex = FTSColumn<Value>("searchIndex")
 
 	init(_ value: Value) {
-		self.value = value
+		self.storage = ModelStorage(value)
 	}
 
 	static func textCallback(_ ids: [AutoId]) async -> [AutoId: String] {
