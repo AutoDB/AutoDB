@@ -101,6 +101,16 @@ While the object stays retained, `fetched === artist`.
 
 `FTSColumn` provides ranked FTS5-backed search. Put the column on the model, optionally supply `FTSCallbackOwner`, and query through `search(_:)`.
 
+### Debugging
+
+A `StoredModel` keeps its value behind a lock, so the variables view shows it several levels down (`storage → storage → box → value`). Quick Look (or Print Description) on the `storage` row shows the whole value, or print it from the console:
+
+```
+(lldb) po self.storage
+```
+
+`po self.storage` reads without taking the lock, so it works even when a breakpoint is inside `withValue`. `p self.value` also works, but takes the lock.
+
 ## Guarantees and limits
 
 ### Migrations

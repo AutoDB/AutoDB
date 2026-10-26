@@ -90,3 +90,11 @@ public final class ModelStorage<T: Table>: Sendable {
 		}
 	}
 }
+
+/// Shows the value in the debugger (po, Quick Look, Print Description).
+/// Reads it without the lock, a paused thread - or the current one inside withValue - may hold it.
+extension ModelStorage: CustomDebugStringConvertible {
+	public var debugDescription: String {
+		String(reflecting: storage.unsafeValue)
+	}
+}

@@ -54,6 +54,13 @@ struct StoredModelTests {
 		#expect(value.name == "first")
 	}
 	
+	// the debugger's po / Quick Look must show the value, even while the lock is held
+	@Test func testDebugDescriptionInsideLock() {
+		let storage = ModelStorage(StoredPerson.Value(id: 1, name: "debug"))
+		let description = storage.mutate { _ in storage.debugDescription }.result
+		#expect(description.contains("name: \"debug\""))
+	}
+	
 	@Test func testChangeTrackingViaWithValue() async throws {
 		try await AutoDBManager.current.truncateTable(StoredPerson.Value.self)
 		

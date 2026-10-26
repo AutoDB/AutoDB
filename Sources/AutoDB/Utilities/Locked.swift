@@ -23,27 +23,40 @@ import Foundation
 
 /// Abstract synchronized box holding a value, subclasses supply the actual lock.
 /// The best available lock is picked at init by Locked.makeBox().
+/// Subclasses mark `value` @exclusivity(unchecked): the lock already makes access exclusive, and the runtime check
+/// would trap unsafeValue when the debugger reads it inside withLock.
 private class LockBox<Value: Sendable>: @unchecked Sendable {
 	func withLock<R>(_ body: (inout Value) throws -> R) rethrows -> R {
+		fatalError("abstract")
+	}
+	
+	/// The value read without taking the lock, see Locked.unsafeValue.
+	var unsafeValue: Value {
 		fatalError("abstract")
 	}
 }
 
 #if canImport(Synchronization)
-	/// First choice on all platforms: Synchronization.Mutex - a fully checked, futex/os_unfair_lock-backed mutex.
+	/// First choice on all platforms: Synchronization.Mutex - a futex/os_unfair_lock-backed mutex.
+	/// The mutex only guards `()` and the value is a plain stored property: Mutex keeps its value in a raw-layout cell
+	/// that the debugger can't read, this way the value shows up in Xcode's variables view.
 	@available(macOS 15.0, iOS 18.0, tvOS 18.0, watchOS 11.0, visionOS 2.0, *)
 	private final class MutexBox<Value: Sendable>: LockBox<Value>, @unchecked Sendable {
-		private let mutex: Mutex<Value>
+		private let mutex = Mutex(())
+		@exclusivity(unchecked) private var value: Value
 		
 		init(_ value: Value) {
-			self.mutex = Mutex(value)
+			self.value = value
 		}
 		
 		override func withLock<R>(_ body: (inout Value) throws -> R) rethrows -> R {
-			// Mutex.withLock requires a sending result, so keep the caller's R outside the closure.
-			try mutex.withLock { value in
+			try mutex.withLock { _ in
 				try body(&value)
 			}
+		}
+		
+		override var unsafeValue: Value {
+			value
 		}
 	}
 #endif
@@ -53,7 +66,7 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 	/// It must never move after init, so it lives behind a stable heap allocation.
 	private final class UnfairLockBox<Value: Sendable>: LockBox<Value>, @unchecked Sendable {
 		private let lock: os_unfair_lock_t
-		private var value: Value
+		@exclusivity(unchecked) private var value: Value
 		
 		init(_ value: Value) {
 			self.lock = os_unfair_lock_t.allocate(capacity: 1)
@@ -71,6 +84,10 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 			defer { os_unfair_lock_unlock(lock) }
 			return try body(&value)
 		}
+		
+		override var unsafeValue: Value {
+			value
+		}
 	}
 #elseif canImport(Glibc) || canImport(Musl) || canImport(Android)
 	/// Linux/Android without the Synchronization module: pthread_mutex.
@@ -79,7 +96,7 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 	/// pthread_mutex_t must never move after init, so it lives behind a stable heap allocation.
 	private final class PthreadMutexBox<Value: Sendable>: LockBox<Value>, @unchecked Sendable {
 		private let mutex: UnsafeMutablePointer<pthread_mutex_t>
-		private var value: Value
+		@exclusivity(unchecked) private var value: Value
 		
 		init(_ value: Value) {
 			self.mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
@@ -97,12 +114,16 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 			defer { pthread_mutex_unlock(mutex) }
 			return try body(&value)
 		}
+		
+		override var unsafeValue: Value {
+			value
+		}
 	}
 #else
 	/// Last resort for platforms without os or pthread (Windows, WASI): Foundation's NSLock.
 	private final class NSLockBox<Value: Sendable>: LockBox<Value>, @unchecked Sendable {
 		private let lock = NSLock()
-		private var value: Value
+		@exclusivity(unchecked) private var value: Value
 		
 		init(_ value: Value) {
 			self.value = value
@@ -112,6 +133,10 @@ private class LockBox<Value: Sendable>: @unchecked Sendable {
 			lock.lock()
 			defer { lock.unlock() }
 			return try body(&value)
+		}
+		
+		override var unsafeValue: Value {
+			value
 		}
 	}
 #endif
@@ -146,5 +171,11 @@ public final class Locked<Value: Sendable>: Sendable {
 	/// Read or mutate the value while holding the lock.
 	public func withLock<R>(_ body: (inout Value) throws -> R) rethrows -> R {
 		try box.withLock(body)
+	}
+	
+	/// The value read without taking the lock - only for debugger output, where the lock may be held by a paused thread (or the current one).
+	/// Racy: never use it in app code.
+	var unsafeValue: Value {
+		box.unsafeValue
 	}
 }
