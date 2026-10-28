@@ -95,7 +95,8 @@ extension UInt64 {
 	/// the settings each shared database was opened with, the first settings for a location win
 	private var openedSettings = [DatabaseLocation: AutoDBSettings]()
 	
-	#if !os(Android)
+	// TODO: Android/Linux memory pressure, see Backlog.md
+	#if canImport(Darwin)
 		// keep track of low memory warnings, save any unsaved objects to release memory.
 		private let lowMemoryEventSource: DispatchSourceMemoryPressure
 	#endif
@@ -104,7 +105,7 @@ extension UInt64 {
 	/// With a root, every file database lives inside root instead of its real location: app-folder settings in `root/Application Support/<path>`, cache-folder settings in `root/Caches/<path>`, absolute paths in `root/<file name>`. Memory databases are private to the manager either way.
 	public init(root: URL? = nil) {
 		self.root = root
-		#if !os(Android)
+		#if canImport(Darwin)
 			lowMemoryEventSource = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical])
 			lowMemoryEventSource.setEventHandler { [weak self] in
 				guard let self else { return }
@@ -116,7 +117,7 @@ extension UInt64 {
 		#endif
 	}
 	
-	#if !os(Android)
+	#if canImport(Darwin)
 		deinit {
 			lowMemoryEventSource.cancel()
 		}
@@ -329,7 +330,7 @@ extension UInt64 {
 			return try Database(nil)
 		}
 		print("sqlite3 \"\(path)\"")
-		let db = try Database(path)
+		let db = try Database(path, key: try await settings.encryptionKey?(), keyProvider: settings.encryptionKey)
 		await db.setAutoClose(after: settings.autoCloseDelay)
 		
 		// exclude from backup if desired
@@ -345,6 +346,16 @@ extension UInt64 {
 		}
 		return db
 	}
+	
+	#if SQLCipher
+		/// Re-encrypt the database of these settings with key. Store the new key where the settings' key closure reads it before calling this, or the next open uses the old key and throws wrongEncryptionKey.
+		public func changeEncryptionKey(for settings: AutoDBSettings, to key: EncryptionKey) async throws {
+			guard settings.isEncrypted else {
+				throw Database.Error.notEncrypted
+			}
+			try await sharedDatabase(for: settings).changeEncryptionKey(to: key)
+		}
+	#endif
 	
 	func lookupObjectsCount(_ tableName: ObjectIdentifier) async -> Int {
 		lookupTable.changedObjects[tableName]?.count ?? 0

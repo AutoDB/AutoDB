@@ -28,6 +28,9 @@ jobs:
       - name: Build package and tests
         run: swift build --build-tests
 
+      - name: Apple-only users must not download SQLCipher
+        run: test ! -e .build/checkouts/swift-sqlcipher
+
       - name: Run tests with live output and hang diagnostics
         shell: bash
         run: |
@@ -41,3 +44,59 @@ jobs:
           name: test-diagnostics
           path: ${{ runner.temp }}/autodb-test-logs/
           if-no-files-found: ignore
+
+  # the same suite on skip's SQLCipher instead of the system SQLite, including EncryptionTests
+  swift-package-sqlcipher:
+    runs-on: macos-26
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Build package and tests
+        run: swift build --build-tests --traits SQLCipher
+
+      - name: Run tests with live output and hang diagnostics
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/autodb-test-logs"
+          bash scripts/ci-tests.sh "$(swift build --traits SQLCipher --show-bin-path)" 2>&1 | tee "$RUNNER_TEMP/autodb-test-logs/tests.log"
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics-sqlcipher
+          path: ${{ runner.temp }}/autodb-test-logs/
+          if-no-files-found: ignore
+
+  linux:
+    runs-on: ubuntu-latest
+    container: swift:6.3
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Run tests
+        run: timeout 600 swift test --traits SQLCipher
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Build and run tests on an Android emulator
+        uses: skiptools/swift-android-action@v2
+        with:
+          swift-build-flags: --traits SQLCipher
+          swift-test-flags: --traits SQLCipher
+          # adb shell has no usable HOME, Foundation derives Application Support and Caches from it
+          test-env: HOME=/data/local/tmp/android-xctest
+          # Ubuntu runners low on space causes the emulator to fail to install
+          free-disk-space: true

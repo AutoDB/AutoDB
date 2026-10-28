@@ -5,23 +5,24 @@
 //  Created by Olof Andersson-Thorén on 2025-04-10.
 //
 
+import Foundation
 #if canImport(OSLog)
 	import OSLog
 #else
-	public final class Logger {
-		public init(subsystem: String, category: String) {}
-		public func info(_ message: String) {
+	// stand-in where OSLog is missing, internal so it never clashes with the app's own Logger
+	final class Logger: Sendable {
+		init(subsystem: String, category: String) {}
+		func info(_ message: String) {
 			print(message)
 		}
-		public func debug(_ message: String) {
+		func debug(_ message: String) {
 			print(message)
 		}
-		public func error(_ message: String) {
+		func error(_ message: String) {
 			print(message)
 		}
 	}
 #endif
-import CoreFoundation
 
 public actor AutoLog {
 	
@@ -47,9 +48,12 @@ public actor AutoLog {
 	
 	/// called in a background thread, blocks incoming writes until setup is done.
 	private func setup(appGroup: String? = nil, truncateLines: Int = 300) {
-		if let appGroup {
-			self.logURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)?.appendingPathComponent("Auto.log") ?? logURL
-		}
+		#if canImport(Darwin)
+			// app groups only exist on Apple platforms
+			if let appGroup {
+				self.logURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroup)?.appendingPathComponent("Auto.log") ?? logURL
+			}
+		#endif
 		
 		if FileManager.default.fileExists(atPath: logURL.path) == false {
 			FileManager.default.createFile(atPath: logURL.path, contents: nil)

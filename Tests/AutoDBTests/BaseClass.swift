@@ -6,7 +6,24 @@
 //
 import Foundation
 import AutoDB
-import Combine
+#if canImport(Combine)
+	import Combine
+#else
+	/// Combine is Apple-only, this stand-in keeps the @Published columns below compiling and encoding like the real one elsewhere
+	@propertyWrapper struct Published<Value: Codable>: Codable {
+		var wrappedValue: Value
+		init(wrappedValue: Value) {
+			self.wrappedValue = wrappedValue
+		}
+		init(from decoder: Decoder) throws {
+			wrappedValue = try decoder.singleValueContainer().decode(Value.self)
+		}
+		func encode(to encoder: Encoder) throws {
+			var container = encoder.singleValueContainer()
+			try container.encode(wrappedValue)
+		}
+	}
+#endif
 
 // They must all implement AutoDB
 // They must all not have an init OR an empty required one: required init() {... setup }, you may use convenience inits instead.

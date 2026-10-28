@@ -34,8 +34,8 @@ public struct AutoId128: Codable, Hashable, Sendable {
 	}
 	
 	public static func random() -> AutoId128 {
-		var bytes = [UInt8](repeating: 0, count: 16)
-		_ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+		// SystemRandomNumberGenerator is cryptographically secure on every platform
+		let bytes = (0..<16).map { _ in UInt8.random(in: .min ... .max) }
 		return AutoId128(rawValue: Data(bytes))
 	}
 }

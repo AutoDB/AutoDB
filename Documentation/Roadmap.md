@@ -33,5 +33,14 @@ The 1.0 release target is:
 
 ## 1.1 scope
 
-- Encryption, probably using SQLCipher
-- Android support
+Both come from one SwiftPM trait, `SQLCipher`, off by default. It builds AutoDB on [skip's swift-sqlcipher](https://github.com/skiptools/swift-sqlcipher) instead of the system SQLite, and Apple-only users who leave it off download nothing extra.
+
+- Encryption with SQLCipher: `AutoDBSettings.encrypted(key:)` with a closure that fetches the key, automatic in-place encryption of existing files, and key changes. See [Encryption](Documentation.md#encryption).
+- Android and Linux support: these need the trait, since there is no system SQLite to rely on. See [Cross-platform notes](Android.md).
+
+| Surface | 1.1 support |
+| --- | --- |
+| Encryption | With the `SQLCipher` trait, on every platform |
+| Linux | With the `SQLCipher` trait, tested in CI |
+| Android | With the `SQLCipher` trait, tested in CI on an emulator |
+| Windows, WASI | Not planned |

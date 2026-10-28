@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased (1.1)
+
+### Encryption and the SQLCipher trait
+
+- New SwiftPM trait `SQLCipher`, off by default, builds AutoDB on skip's swift-sqlcipher instead of the system SQLite. The package now needs swift-tools 6.1.
+- `AutoDBSettings.encrypted(key:)` and `EncryptionKey` (`.raw` or `.passphrase`) encrypt a database. The closure fetches the key when the database opens, so encrypted tables need no setup call. Existing unencrypted files are encrypted in place on first open.
+- `AutoDBManager.changeEncryptionKey(for:to:)` and `Database.changeEncryptionKey(to:)` re-encrypt with a new key.
+- New errors: `Database.Error.wrongEncryptionKey`, `.invalidEncryptionKey` and `.notEncrypted`.
+- `AutoDBSettings` compares and hashes its options itself, so the key closure stays out of equality.
+
+### Android and Linux
+
+- These build with the `SQLCipher` trait, and without it a clear `#error` says so. CI runs the tests on Linux and on an Android emulator.
+- Fixed: on non-Apple platforms the file-coordination stand-in never opened the database file.
+- `AutoId128.random()` uses `SystemRandomNumberGenerator` instead of the Darwin-only `SecRandomCopyBytes`.
+- `AutoLog` builds without OSLog and app groups. Its stand-in `Logger` is internal now.
+- Low-memory saves are Darwin-only for now, see the Backlog.
+
 ## 1.0.0 (2026-10-26)
 
 AutoDB 1.0 is the first stable Apple-first Swift Package release.

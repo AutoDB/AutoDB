@@ -5,10 +5,10 @@
 //  Created by Olof Andersson-Thorén on 2024-12-12.
 //
 import Foundation
-#if canImport(Darwin)
-	import SQLite3
-#else
+#if SQLCipher
 	import SQLCipher
+#elseif canImport(SQLite3)
+	import SQLite3
 #endif
 
 // implement this protocol if you don't want textCreation to be automatically pulled from the column with the same name.

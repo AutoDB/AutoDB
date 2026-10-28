@@ -14,6 +14,13 @@ Relations:
 
 # TODOs
 
+## Memory pressure on Android/Linux
+
+On Darwin the manager saves all changes when `DispatchSource.makeMemoryPressureSource` fires. That source doesn't exist on Android or Linux, so there low memory never flushes unsaved changes.
+
+- Android: the signal is `ComponentCallbacks2.onTrimMemory` in Java/Kotlin, which Swift can't observe on its own. A likely shape is a public `AutoDBManager.handleMemoryWarning()` that calls `saveAllChanges()`, which the app (or a Skip bridge) calls from `onTrimMemory`.
+- Linux: cgroup `memory.pressure` (PSI) could serve, if anyone asks for it.
+
 Use String interpolation to build "WHERE name = \(name)" and support "FROM \(verbatim: table) WHERE name = \(name)"
 
 Have a cleanup-function that can delete unused tables, or should we not care?

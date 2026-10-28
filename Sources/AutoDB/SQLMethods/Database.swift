@@ -39,9 +39,15 @@
 //  SOFTWARE.
 
 import Foundation
-#if canImport(Darwin)
+#if SQLCipher
+	import SQLCipher
+#elseif canImport(SQLite3)
 	import SQLite3
 #else
+	#error("AutoDB needs the SQLCipher trait on this platform: .package(url: \"https://github.com/AutoDB/AutoDB\", from: \"1.1.0\", traits: [\"SQLCipher\"])")
+#endif
+
+#if !canImport(Darwin)
 	fileprivate class NSFileCoordinator {
 		struct WritingOptions: OptionSet, @unchecked Sendable {
 			
@@ -52,15 +58,18 @@ import Foundation
 			static var forMerging: NSFileCoordinator.WritingOptions { .init(rawValue: 0) }
 		}
 		init(filePresenter whateverNilThing: Int?) {}
-		func coordinate(writingItemAt url: URL, options: NSFileCoordinator.WritingOptions = [], error: inout NSError?, byAccessor writer: (URL) -> Void) {}
+		func coordinate(writingItemAt url: URL, options: NSFileCoordinator.WritingOptions = [], error: inout NSError?, byAccessor writer: (URL) -> Void) {
+			writer(url)
+		}
 	}
-	import SQLCipher
 #endif
 
 #if canImport(Android)
 	import Android
-#elseif canImport(GlibC)
-	import GlibC
+#elseif canImport(Glibc)
+	import Glibc
+#elseif canImport(Musl)
+	import Musl
 #endif
 
 public typealias RowChangeObserver = AsyncObserver<RowChangeParameters>
@@ -89,6 +98,13 @@ struct PreparedStatement {
 }
 
 public typealias Row = Dictionary<String, SQLValue>
+
+// without the SQLCipher trait there are no keys, Never? keeps the open code free of #if
+#if SQLCipher
+	typealias DatabaseKey = EncryptionKey
+#else
+	typealias DatabaseKey = Never
+#endif
 
 // shortcuts to create smart lists
 extension [Row] {
@@ -130,6 +146,10 @@ public actor Database {
 	private var inTransaction: Bool = false
 	private var debugPrintEveryQuery = false
 	
+	/// the key every reopen uses, dropped by closes that need open() - which fetches it again from keyProvider
+	private var key: DatabaseKey?
+	private let keyProvider: (@Sendable () async throws -> DatabaseKey)?
+	
 	public func setDebug(_ enabled: Bool = true) {
 		debugPrintEveryQuery = enabled
 		if enabled {
@@ -146,43 +166,132 @@ public actor Database {
 	}
 	
 	public init(_ path: String?) throws {
-		
-		let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
+		try self.init(path, key: nil, keyProvider: nil)
+	}
+	
+	/// key unlocks an encrypted file on this open and every reopen, keyProvider fetches it again when open() follows a close that dropped it.
+	init(_ path: String?, key: DatabaseKey?, keyProvider: (@Sendable () async throws -> DatabaseKey)?) throws {
 		let url: URL? = path.flatMap { URL(fileURLWithPath: $0) }
 		if let url {
 			let folder = url.deletingLastPathComponent()
 			try FileManager.default.createDirectory(atPath: folder.path, withIntermediateDirectories: true)
 		}
-		let path = path ?? ":memory:"
-		// this is pointless: flags |= SQLITE_OPEN_MEMORY
 		dbURL = url
-		
-		var handle: OpaquePointer? = nil
-		var result: Int32 = SQLITE_ERROR
-		if let dbURL {
-			var coordinatorError: NSError?
-			NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: dbURL, options: .forMerging, error: &coordinatorError) { _ in
-				result = sqlite3_open_v2(path, &handle, flags, nil)
-			}
-			if let coordinatorError {
-				throw coordinatorError
-			}
-		} else {
-			result = sqlite3_open_v2(":memory:", &handle, flags, nil)
+		self.key = key
+		self.keyProvider = keyProvider
+		dbHandle = try Self.openHandle(url, key: key)
+		maxQueryVariableCount = Int(sqlite3_limit(dbHandle, SQLITE_LIMIT_VARIABLE_NUMBER, -1))
+		try setup(dbHandle)
+	}
+	
+	/// Open the file, or a memory database when url is nil, unlocked with key.
+	private static func openHandle(_ url: URL?, key: DatabaseKey?) throws -> OpaquePointer {
+		guard let url else {
+			return try openHandle(":memory:", key: nil)
 		}
+		let path = url.path(percentEncoded: false)
+		var result: Result<OpaquePointer, Swift.Error> = .failure(Error.cannotOpenDatabaseAtPath(path: path, description: "file coordination never ran"))
+		var coordinatorError: NSError?
+		NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: url, options: .forMerging, error: &coordinatorError) { _ in
+			result = Result { try openHandle(path, key: key) }
+		}
+		if let coordinatorError {
+			throw coordinatorError
+		}
+		return try result.get()
+	}
+	
+	private static func openHandle(_ path: String, key: DatabaseKey?) throws -> OpaquePointer {
+		let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
+		var handle: OpaquePointer? = nil
+		let result = sqlite3_open_v2(path, &handle, flags, nil)
 		guard let handle else {
 			throw Error.cannotOpenDatabaseAtPath(path: path, description: "SQLite cannot allocate memory")
 		}
 		guard result == SQLITE_OK else {
-			let code = sqlite3_errcode(handle)
-			let msg = String(cString: sqlite3_errmsg(handle), encoding: .utf8) ?? "(unknown)"
+			let description = errorDescription(handle)
 			sqlite3_close(handle)
-			throw Error.cannotOpenDatabaseAtPath(path: path, description: "SQLite error code \(code): \(msg)")
+			throw Error.cannotOpenDatabaseAtPath(path: path, description: description)
 		}
-		self.dbHandle = handle
-		self.maxQueryVariableCount = Int(sqlite3_limit(dbHandle, SQLITE_LIMIT_VARIABLE_NUMBER, -1))
-		try setup(dbHandle)
+		#if SQLCipher
+			if let key {
+				do {
+					try unlock(handle, key, path)
+				} catch Error.wrongEncryptionKey where isUnencrypted(path) {
+					// a file from before encryption was turned on
+					sqlite3_close(handle)
+					try encryptInPlace(path, key)
+					return try openHandle(path, key: key)
+				} catch {
+					sqlite3_close(handle)
+					throw error
+				}
+			}
+		#endif
+		return handle
 	}
+	
+	private static func errorDescription(_ handle: OpaquePointer) -> String {
+		let msg = String(cString: sqlite3_errmsg(handle), encoding: .utf8) ?? "(unknown)"
+		return "SQLite error code \(sqlite3_errcode(handle)): \(msg)"
+	}
+	
+	#if SQLCipher
+		/// SQLCipher only checks the key on the first read, so read something.
+		private static func unlock(_ handle: OpaquePointer, _ key: EncryptionKey, _ path: String) throws {
+			let keyString = try key.sqlCipherKey()
+			guard sqlite3_key_v2(handle, "main", keyString, Int32(keyString.utf8.count)) == SQLITE_OK else {
+				throw Error.cannotOpenDatabaseAtPath(path: path, description: errorDescription(handle))
+			}
+			let result = sqlite3_exec(handle, "SELECT count(*) FROM sqlite_master", nil, nil, nil)
+			if result == SQLITE_NOTADB {
+				throw Error.wrongEncryptionKey
+			}
+			guard result == SQLITE_OK else {
+				throw Error.cannotOpenDatabaseAtPath(path: path, description: errorDescription(handle))
+			}
+		}
+		
+		/// Unencrypted SQLite files start with this header, encrypted ones look random.
+		private static func isUnencrypted(_ path: String) -> Bool {
+			guard let file = FileHandle(forReadingAtPath: path) else {
+				return false
+			}
+			defer { try? file.close() }
+			let header = (try? file.read(upToCount: 16)) ?? Data()
+			return header == Data("SQLite format 3\0".utf8)
+		}
+		
+		/// Export an unencrypted file into an encrypted copy next to it, then swap the copy in. The original is untouched until the atomic rename, so a crash leaves it readable and the next open tries again.
+		private static func encryptInPlace(_ path: String, _ key: EncryptionKey) throws {
+			let encryptingPath = path + ".encrypting"
+			try? FileManager.default.removeItem(atPath: encryptingPath)
+			let plain = try openHandle(path, key: nil)
+			let literal = { (text: String) in "'" + text.replacingOccurrences(of: "'", with: "''") + "'" }
+			let export = """
+				PRAGMA wal_checkpoint(TRUNCATE);
+				ATTACH DATABASE \(literal(encryptingPath)) AS autodb_encrypted KEY \(literal(try key.sqlCipherKey()));
+				SELECT sqlcipher_export('autodb_encrypted');
+				DETACH DATABASE autodb_encrypted;
+				"""
+			let result = sqlite3_exec(plain, export, nil, nil, nil)
+			let description = errorDescription(plain)
+			sqlite3_close(plain)
+			guard result == SQLITE_OK else {
+				try? FileManager.default.removeItem(atPath: encryptingPath)
+				throw Error.cannotOpenDatabaseAtPath(path: path, description: "cannot encrypt the existing database, \(description)")
+			}
+			guard rename(encryptingPath, path) == 0 else {
+				try? FileManager.default.removeItem(atPath: encryptingPath)
+				throw Error.cannotOpenDatabaseAtPath(path: path, description: "cannot replace the existing database with the encrypted copy, errno \(errno)")
+			}
+			// the checkpoint emptied the log, what is left belongs to the old file
+			for suffix in ["-wal", "-shm"] {
+				try? FileManager.default.removeItem(atPath: path + suffix)
+			}
+			AutoLog.debug("encrypted the existing database at \(path)")
+		}
+	#endif
 	
 	nonisolated
 		private func setup(_ dbHandle: OpaquePointer) throws
@@ -218,34 +327,8 @@ public actor Database {
 	}
 	
 	func reopen() throws {
-		let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
-		var handle: OpaquePointer? = nil
-		var result: Int32 = SQLITE_ERROR
-		var coordinatorError: NSError?
-		let path = dbURL?.path(percentEncoded: false) ?? ":memory:"
-		
-		if let dbURL {
-			NSFileCoordinator(filePresenter: nil).coordinate(writingItemAt: dbURL, options: .forMerging, error: &coordinatorError) { _ in
-				result = sqlite3_open_v2(path, &handle, flags, nil)
-			}
-			if let coordinatorError {
-				throw coordinatorError
-			}
-		} else {
-			result = sqlite3_open_v2(path, &handle, flags, nil)
-		}
-		
-		guard let handle else {
-			throw Error.cannotOpenDatabaseAtPath(path: path, description: "SQLite cannot allocate memory")
-		}
-		guard result == SQLITE_OK else {
-			let code = sqlite3_errcode(handle)
-			let msg = String(cString: sqlite3_errmsg(handle), encoding: .utf8) ?? "(unknown)"
-			sqlite3_close(handle)
-			throw Error.cannotOpenDatabaseAtPath(path: path, description: "SQLite error code \(code): \(msg)")
-		}
-		self.dbHandle = handle
-		self.maxQueryVariableCount = Int(sqlite3_limit(dbHandle, SQLITE_LIMIT_VARIABLE_NUMBER, -1))
+		dbHandle = try Self.openHandle(dbURL, key: key)
+		maxQueryVariableCount = Int(sqlite3_limit(dbHandle, SQLITE_LIMIT_VARIABLE_NUMBER, -1))
 		try setup(dbHandle)
 	}
 	
@@ -403,11 +486,13 @@ public actor Database {
 		case .reopensOnAccess:
 			// the handle is already closed, it must now stay closed
 			closeState = .closedUntilOpen
+			dropKeyIfRefetchable()
 			return
 		case .open:
 			break
 		}
 		closeState = .closedUntilOpen
+		dropKeyIfRefetchable()
 		
 		// interrubt any other long-running query or transaction, to let go of the handle. If there is no long-running query, this will do nothing
 		sqlite3_interrupt(dbHandle)  //https://www.sqlite.org/c3ref/interrupt.html
@@ -434,6 +519,7 @@ public actor Database {
 		if reason == .closedUntilOpen {
 			idleWatcher?.cancel()
 			idleWatcher = nil
+			dropKeyIfRefetchable()
 		}
 		guard closeState == .open else {
 			// already physically closed - only escalate reopensOnAccess -> closedUntilOpen, never close the handle twice
@@ -450,10 +536,41 @@ public actor Database {
 		// since there is no await between any usages of dbHandle and closeState, we know that no task can access the db now.
 		sqlite3_close(dbHandle)
 	}
+	/// Keep the key only while the connection may reopen by itself, open() fetches it again.
+	private func dropKeyIfRefetchable() {
+		if keyProvider != nil {
+			key = nil
+		}
+	}
+	
+	#if SQLCipher
+		/// Re-encrypt the file with newKey, after running transactions finish. Every later open uses newKey, so the key provider must return it from now on.
+		public func changeEncryptionKey(to newKey: EncryptionKey) async throws {
+			try await excludingTransactions {
+				try await self.rekey(newKey)
+			}
+		}
+		
+		private func rekey(_ newKey: EncryptionKey) throws {
+			guard key != nil || keyProvider != nil else {
+				throw Error.notEncrypted
+			}
+			try ensureOpen()
+			let keyString = try newKey.sqlCipherKey()
+			guard sqlite3_rekey_v2(dbHandle, "main", keyString, Int32(keyString.utf8.count)) == SQLITE_OK else {
+				throw Error.queryExecutionError(query: "rekey", description: Self.errorDescription(dbHandle))
+			}
+			key = newKey
+		}
+	#endif
+	
 	public func open() async throws {
 		harshClose?.cancel()
 		gentleClose?.cancel()
 		if closeState != .open {
+			if key == nil, let keyProvider {
+				key = try await keyProvider()
+			}
 			do {
 				try reopen()
 			} catch {
@@ -500,6 +617,12 @@ public actor Database {
 		case queryResultValueError(query: String, column: String)
 		case uniqueConstraintFailed
 		case databaseIsClosed
+		/// The file is encrypted with another key, or isn't a database.
+		case wrongEncryptionKey
+		/// Raw keys must be exactly 32 bytes.
+		case invalidEncryptionKey
+		/// Only encrypted databases can change key.
+		case notEncrypted
 	}
 	
 	public var changeCount: Int64 {
@@ -883,3 +1006,28 @@ public actor Database {
 		return listener
 	}
 }
+
+#if SQLCipher
+	/// The key SQLCipher opens an encrypted database with.
+	public enum EncryptionKey: Sendable {
+		/// 32 random bytes, e.g. stored in the Keychain. Used as-is, so opening is fast.
+		case raw(Data)
+		/// A passphrase. Only the passphrase is kept between connections, so SQLCipher re-runs PBKDF2 (around 100 ms) on every physical open, including the transparent reopen after each idle auto-close. Prefer `.raw`.
+		case passphrase(String)
+	}
+	
+	extension EncryptionKey {
+		/// The key as SQLCipher takes it, a raw key in its x'hex' form so PBKDF2 is skipped.
+		func sqlCipherKey() throws -> String {
+			switch self {
+			case .raw(let data):
+				guard data.count == 32 else {
+					throw Database.Error.invalidEncryptionKey
+				}
+				return "x'" + data.map { ($0 < 16 ? "0" : "") + String($0, radix: 16) }.joined() + "'"
+			case .passphrase(let passphrase):
+				return passphrase
+			}
+		}
+	}
+#endif

@@ -124,7 +124,8 @@ A `Model` keeps its value behind a lock, so the variables view shows it several 
 - [Adoption guide](Documentation/Adoption.md)
 - [1.0 changelog](CHANGELOG.md)
 - [Post-1.0 backlog](Documentation/Backlog.md)
-- [Cross-platform notes](Documentation/Android.md)
+- [Cross-platform notes](Documentation/Android.md), Android and Linux are coming in 1.1 through the `SQLCipher` trait
+- [Encryption](Documentation/Documentation.md#encryption), coming in 1.1 through the same trait
 
 ## Contributing
 

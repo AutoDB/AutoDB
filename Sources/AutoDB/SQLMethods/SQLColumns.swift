@@ -38,10 +38,10 @@
 //
 
 import Foundation
-#if canImport(Darwin)
-	import SQLite3
-#else
+#if SQLCipher
 	import SQLCipher
+#elseif canImport(SQLite3)
+	import SQLite3
 #endif
 
 public typealias EncodableSendable = Encodable & Sendable

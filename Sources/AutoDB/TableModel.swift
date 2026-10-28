@@ -105,6 +105,7 @@ public enum TableError: Error {
 }
 
 /// Where a database lives and how its connection behaves. Tables pick one through `Table.autoDBSettings`, equal settings share one connection.
+/// Equal settings compare every option and whether the file is encrypted, never the key closure.
 public struct AutoDBSettings: Sendable, Hashable {
 	
 	/// The default file in the app's support folder, backed up.
@@ -124,14 +125,24 @@ public struct AutoDBSettings: Sendable, Hashable {
 		self.init(path: path, iCloudBackup: iCloudBackup, inAppFolder: inAppFolder, inCacheFolder: inCacheFolder, autoCloseDelay: autoCloseDelay, inMemory: false)
 	}
 	
-	init(path: String, iCloudBackup: Bool, inAppFolder: Bool, inCacheFolder: Bool, autoCloseDelay: Double?, inMemory: Bool) {
+	init(path: String, iCloudBackup: Bool, inAppFolder: Bool, inCacheFolder: Bool, autoCloseDelay: Double?, inMemory: Bool, encryptionKey: (@Sendable () async throws -> DatabaseKey)? = nil) {
 		self.path = path
 		self.iCloudBackup = iCloudBackup
 		self.inAppFolder = inAppFolder
 		self.inCacheFolder = inCacheFolder
 		self.autoCloseDelay = autoCloseDelay
 		self.inMemory = inMemory
+		self.encryptionKey = encryptionKey
 	}
+	
+	#if SQLCipher
+		/// The same database encrypted with SQLCipher. An existing unencrypted file is encrypted in place the first time it is opened. Ignored for in-memory databases.
+		/// key fetches the key, e.g. from the Keychain, when the database is created and when open() follows closeNow() or close(allowReopen: false). Idle auto-close reopens with the key the database kept.
+		/// Prefer `.raw` keys of 32 random bytes: a passphrase is stretched with PBKDF2 (around 100 ms) on every physical open, including each reopen after idle auto-close. Declare encrypted settings once, e.g. `static let secure = AutoDBSettings.regular.encrypted { ... }`, so every table in the file uses the same key.
+		public func encrypted(key: @escaping @Sendable () async throws -> EncryptionKey) -> AutoDBSettings {
+			AutoDBSettings(path: path, iCloudBackup: iCloudBackup, inAppFolder: inAppFolder, inCacheFolder: inCacheFolder, autoCloseDelay: autoCloseDelay, inMemory: inMemory, encryptionKey: inMemory ? nil : key)
+		}
+	#endif
 	
 	/// the path or fileName inside your app's supportDirectory or cachesDirectory
 	public let path: String
@@ -145,6 +156,25 @@ public struct AutoDBSettings: Sendable, Hashable {
 	public let autoCloseDelay: Double?
 	/// Keep the database in memory instead of a file, path and folder flags are ignored.
 	public let inMemory: Bool
+	/// fetches the key of an encrypted file, a closure so the key itself is never compared, hashed or logged with the settings
+	let encryptionKey: (@Sendable () async throws -> DatabaseKey)?
+	/// Is the file encrypted with SQLCipher? Always false without the SQLCipher trait, see `encrypted(key:)`.
+	public var isEncrypted: Bool { encryptionKey != nil }
+	
+	public static func == (lhs: AutoDBSettings, rhs: AutoDBSettings) -> Bool {
+		lhs.path == rhs.path && lhs.iCloudBackup == rhs.iCloudBackup && lhs.inAppFolder == rhs.inAppFolder && lhs.inCacheFolder == rhs.inCacheFolder
+			&& lhs.autoCloseDelay == rhs.autoCloseDelay && lhs.inMemory == rhs.inMemory && lhs.isEncrypted == rhs.isEncrypted
+	}
+	
+	public func hash(into hasher: inout Hasher) {
+		hasher.combine(path)
+		hasher.combine(iCloudBackup)
+		hasher.combine(inAppFolder)
+		hasher.combine(inCacheFolder)
+		hasher.combine(autoCloseDelay)
+		hasher.combine(inMemory)
+		hasher.combine(isEncrypted)
+	}
 	
 	/// Should this get its own unique actor to issue queries from, or share with other tables with the same DB-file? If you have a lot of writes it is usually FASTER to share (one actor are better at scheduling than many SQLite connectors who uses locks with busy/retries). In normal usage you won't see any difference so there is typically no need to split them up. It may improve performance in some esotheric situations, so the option is available. Measure!
 	// let shareDB: Bool // this was a bad idea and is always worse. Don't do it.

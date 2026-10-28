@@ -16,7 +16,8 @@ For first integration steps, start with the [README](../README.md) and the [Adop
 Current package support is macOS 14+, iOS 17+, tvOS 17+, and watchOS 10+ - the floor where Observation is available, which models and `RelationQuery` rely on.
 
 - The core table/model APIs, migrations, caching, and FTS are part of the stable package surface.
-- Cross-platform work outside Apple platforms is still exploratory rather than release-ready.
+- Cross-platform work outside Apple platforms is still exploratory rather than release-ready. Android and Linux build with the `SQLCipher` trait, see [Cross-platform notes](Android.md).
+- Encryption needs the `SQLCipher` trait, see [Encryption](#encryption).
 
 ## Quick start
 
@@ -236,6 +237,59 @@ The module can keep an internal `extension Table` next to it for its internal ta
 | `AutoDBManager.shared.setAppSettings(s, for: .regular)` at startup | `extension Table { static var autoDBSettings: AutoDBSettings { s } }` |
 | `setAppSettings(s, for: .cache)` | a refined protocol, or `s` on each cache table |
 | `switchDB([.regular: url])` in tests | `@Suite(.autoDB)`, see [Scopes and testing](#scopes-and-testing) |
+
+## Encryption
+
+Encryption needs the `SQLCipher` trait, which builds AutoDB on [skip's swift-sqlcipher](https://github.com/skiptools/swift-sqlcipher) (SQLite with SQLCipher and FTS5) instead of the system SQLite:
+
+```swift
+.package(url: "https://github.com/AutoDB/AutoDB", from: "1.1.0", traits: ["SQLCipher"])
+```
+
+Without the trait nothing extra is downloaded and `encrypted(key:)` does not exist, so asking for encryption without it is a compile error rather than a plaintext file.
+
+Encrypted settings carry a closure that fetches the key, so there is nothing to set up before the first table is used. Declare them once, so every table in the file shares one key:
+
+```swift
+extension AutoDBSettings {
+	static let secure = AutoDBSettings.regular.encrypted { .raw(try Keychain.databaseKey()) }
+}
+
+extension Table {
+	static var autoDBSettings: AutoDBSettings { .secure }
+}
+```
+
+- `.raw(Data)` is 32 random bytes and opens fast. `.passphrase(String)` is stretched with PBKDF2 on every open, around 100 ms, and connections reopen after each idle auto-close, so prefer raw keys.
+- The closure runs when a database is created and when `open()` follows `closeNow()` or `close(allowReopen: false)`. In between, the database keeps the key so an idle auto-close can reopen without waiting. Fetching it late also means a Keychain read doesn't happen at launch, when the device may still be locked.
+- The key is never part of the settings' equality or description. Settings that differ only in their key closure count as equal and share the first one's connection, like any other settings for the same file.
+- A wrong key throws `Database.Error.wrongEncryptionKey`.
+- An existing unencrypted file is encrypted in place the first time it is opened with encrypted settings: it is exported into `<file>.encrypting` and then renamed over the original, so a crash in between leaves the old file readable.
+- `manager.changeEncryptionKey(for: settings, to: newKey)` re-encrypts the file once running transactions finish. Store the new key where the closure reads it first, since the closure must return it from then on.
+- `.memory` ignores `encrypted(key:)`.
+
+A key in the Keychain, created on first use:
+
+```swift
+enum Keychain {
+	static func databaseKey() throws -> Data {
+		let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: "AutoDB", kSecReturnData as String: true]
+		var item: CFTypeRef?
+		if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let key = item as? Data {
+			return key
+		}
+		let key = Data((0..<32).map { _ in UInt8.random(in: .min ... .max) })
+		let add: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrAccount as String: "AutoDB", kSecValueData as String: key, kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
+		let status = SecItemAdd(add as CFDictionary, nil)
+		guard status == errSecSuccess else {
+			throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+		}
+		return key
+	}
+}
+```
+
+`AfterFirstUnlock` lets background work open the database while the device is locked. `ThisDeviceOnly` keeps the key out of backups: a restored backup of an encrypted file can't be read on a new device. Drop it if the database is backed up (`iCloudBackup: true`) and should survive a restore.
 
 ## Scopes and testing
 

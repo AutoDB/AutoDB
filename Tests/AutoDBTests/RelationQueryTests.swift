@@ -8,7 +8,9 @@ import Foundation
 @testable import AutoDB
 import AutoDBTesting
 import Testing
-import Combine
+#if canImport(Combine)
+	import Combine
+#endif
 
 final class Album: Model {
 	
@@ -85,34 +87,37 @@ struct SaveFail: Table {
 	var albums = RelationQuery<Album>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 3)
 }
 
-final class CombineAlbum: Model, ObservableObject {
-	
-	//var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
-	struct CombineAlbumTable: Table {
+#if canImport(Combine)
+	final class CombineAlbum: Model, ObservableObject {
 		
-		var id: AutoId = 0
-		var name = ""
-		var artist = ""
+		//var albums = RelationQuery<Album>("WHERE artist = ?",  arguments: ["The Cure"], initial: 2, limit: 3)
+		struct CombineAlbumTable: Table {
+			
+			var id: AutoId = 0
+			var name = ""
+			var artist = ""
+		}
+		
+		let storage: ModelStorage<CombineAlbumTable>
+		
+		// objectWillChange is sent automatically when the value changes
+		init(_ value: CombineAlbumTable) {
+			self.storage = ModelStorage(value)
+		}
 	}
 	
-	let storage: ModelStorage<CombineAlbumTable>
-	
-	// objectWillChange is sent automatically when the value changes
-	init(_ value: CombineAlbumTable) {
-		self.storage = ModelStorage(value)
+	// auto-call objectWillChange when changed.
+	final class CombineArtist: @unchecked Sendable, ObservableObject, RelationOwner {
+		
+		@Published
+		var albums = RelationQuery<CombineAlbum.CombineAlbumTable>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 3)
+		
+		func didChange() async {
+			objectWillChange.send()
+		}
 	}
-}
 
-// auto-call objectWillChange when changed.
-final class CombineArtist: @unchecked Sendable, ObservableObject, RelationOwner {
-	
-	@Published
-	var albums = RelationQuery<CombineAlbum.CombineAlbumTable>("WHERE artist = ? ORDER BY name", arguments: ["The Cure"], initial: 2, limit: 3)
-	
-	func didChange() async {
-		objectWillChange.send()
-	}
-}
+#endif
 
 @available(macOS 14.0, iOS 17.0, tvOS 17.0, watchOS 10.0, *)
 final class PagedCureAlbums: Model {
@@ -129,41 +134,44 @@ final class PagedCureAlbums: Model {
 	}
 }
 
-class CombineTester: @unchecked Sendable {
-	
-	var listeners = Set<AnyCancellable>()
-	var gotMessage = false
-	
-	// will models be notified when values change or Relation-changes
-	@Test func plainListener() async throws {
-		try await AutoDBManager.current.truncateTable(CombineAlbum.CombineAlbumTable.self)
-		let item = await CombineAlbum.create()
-		item.objectWillChange.sink { [self] _ in
-			gotMessage = true
-		}.store(in: &listeners)
+#if canImport(Combine)
+	class CombineTester: @unchecked Sendable {
 		
-		item.value.name = "Wild mood swings"
+		var listeners = Set<AnyCancellable>()
+		var gotMessage = false
 		
-		try await waitForCondition {
-			gotMessage
-		}
-		
-		listeners.removeAll()
-		gotMessage = false
-		
-		let artist = CombineArtist()
-		artist.albums.setOwner(artist)
-		try await artist.albums.fetchItems()
-		artist.objectWillChange.sink { [self] _ in
-			gotMessage = true
-		}.store(in: &listeners)
-		
-		try await item.save()
-		try await waitForCondition {
-			gotMessage
+		// will models be notified when values change or Relation-changes
+		@Test func plainListener() async throws {
+			try await AutoDBManager.current.truncateTable(CombineAlbum.CombineAlbumTable.self)
+			let item = await CombineAlbum.create()
+			item.objectWillChange.sink { [self] _ in
+				gotMessage = true
+			}.store(in: &listeners)
+			
+			item.value.name = "Wild mood swings"
+			
+			try await waitForCondition {
+				gotMessage
+			}
+			
+			listeners.removeAll()
+			gotMessage = false
+			
+			let artist = CombineArtist()
+			artist.albums.setOwner(artist)
+			try await artist.albums.fetchItems()
+			artist.objectWillChange.sink { [self] _ in
+				gotMessage = true
+			}.store(in: &listeners)
+			
+			try await item.save()
+			try await waitForCondition {
+				gotMessage
+			}
 		}
 	}
-}
+
+#endif
 
 class ListenerHelp: @unchecked Sendable {
 	var list: RowChangeObserver
