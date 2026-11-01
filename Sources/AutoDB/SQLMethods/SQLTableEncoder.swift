@@ -6,6 +6,9 @@
 //
 
 import Foundation
+#if canImport(Observation)
+	import Observation
+#endif
 
 /// Setup and do migrations using the tableEncoder, it will then return a TableInfo we need to store for future use.
 class SQLTableEncoder: Encoder, @unchecked Sendable {
@@ -237,7 +240,7 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 	}
 	
 	static func alwaysIgnoreType<T>(_ value: T) -> Bool {
-		#if canImport(Darwin) && canImport(Observation)
+		#if canImport(Observation)
 			if #available(macOS 14.0, *), #available(iOS 17.0, *) {
 				if type(of: value) is Observation.ObservationRegistrar.Type {
 					// all observed objects get this, we ignore it

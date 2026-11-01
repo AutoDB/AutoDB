@@ -5,6 +5,7 @@
 //  Created by Olof Thorén on 2021-07-02.
 //
 import Foundation
+import Observation
 import AutoDB
 #if canImport(Combine)
 	import Combine

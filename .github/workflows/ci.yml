@@ -94,9 +94,9 @@ jobs:
       - name: Build and run tests on an Android emulator
         uses: skiptools/swift-android-action@v2
         with:
+          # swift-test-flags would go to the test binary on the device, the trait only belongs in the build
           swift-build-flags: --traits SQLCipher
-          swift-test-flags: --traits SQLCipher
-          # adb shell has no usable HOME, Foundation derives Application Support and Caches from it
-          test-env: HOME=/data/local/tmp/android-xctest
+          # adb shell has no usable HOME, Foundation derives Application Support and Caches from it. This is the folder the action pushes the tests to, so it exists.
+          test-env: HOME=/data/local/tmp/swift-android-tests CFFIXED_USER_HOME=/data/local/tmp/swift-android-tests
           # Ubuntu runners low on space causes the emulator to fail to install
           free-disk-space: true

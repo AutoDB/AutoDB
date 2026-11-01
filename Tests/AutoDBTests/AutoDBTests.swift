@@ -218,7 +218,7 @@ final class AutoDBTests {
 		
 		let double: Double = -1
 		let intConvert = Int64(double)
-		#expect(UInt64(bitPattern: intConvert) == UINT64_MAX)
+		#expect(UInt64(bitPattern: intConvert) == UInt64.max)
 		
 		// now fetch a regular object!
 		let mod = try await Mod.fetchId(1)
