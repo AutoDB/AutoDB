@@ -97,6 +97,7 @@ jobs:
           # swift-test-flags would go to the test binary on the device, the trait only belongs in the build
           swift-build-flags: --traits SQLCipher
           # adb shell has no usable HOME, Foundation derives Application Support and Caches from it. This is the folder the action pushes the tests to, so it exists.
-          test-env: HOME=/data/local/tmp/swift-android-tests
+          # The action puts this right before each test binary, so timeout bounds every run like scripts/ci-tests.sh does on macOS.
+          test-env: HOME=/data/local/tmp/swift-android-tests timeout 180
           # Ubuntu runners low on space causes the emulator to fail to install
           free-disk-space: true
