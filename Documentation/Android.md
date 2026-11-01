@@ -14,8 +14,7 @@ Locally: `swift build --swift-sdk <android or linux sdk> --traits SQLCipher`. Wi
 
 ## Current state
 
-- The library compiles for Linux (static musl SDK). CI builds and runs the tests on Linux and on an Android emulator.
-- macOS and iOS are still the platforms with regular test coverage.
+- The library compiles for Linux (static musl SDK). CI builds and runs the tests on Linux and on an Android emulator (x86_64, API 28), the same suite as on Apple platforms apart from the Combine test.
 - Combine is Apple-only: `ObservableObject` support is left out elsewhere, Observation works everywhere.
 - Low-memory saves are Darwin-only. Off Darwin, unsaved changes are not flushed on memory pressure, see the [Backlog](Backlog.md).
 - File locations come from `FileManager`'s Application Support and Caches folders, which derive from `HOME`. Skip apps set this up. A plain NDK app may have no usable `HOME`: create your manager with `AutoDBManager(root: filesDir)`.
