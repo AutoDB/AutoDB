@@ -180,29 +180,55 @@ public extension Table {
 		return try await AutoDBManager.current.fetchIds(ids, identifier)
 	}
 	
-	static func fetchQuery(_ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Self] {
+	// String overloads are disfavored so string literals become SQLQuery, binding interpolated values instead of pasting them into the SQL.
+	@_disfavoredOverload
+	static func fetchQuery(_ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> [Self] {
 		try await AutoDBManager.current.fetchQuery(query, arguments: arguments, sqlArguments: sqlArguments)
 	}
 	
+	/// Fetch with interpolated arguments: `fetchQuery("WHERE name = \(name)")`
+	static func fetchQuery(_ query: SQLQuery = "") async throws -> [Self] {
+		try await AutoDBManager.current.fetchQuery(query.query, arguments: query.arguments)
+	}
+	
+	@_disfavoredOverload
 	@discardableResult
-	static func query(_ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Row] {
+	static func query(_ query: String, _ arguments: [Sendable]? = nil) async throws -> [Row] {
 		try await AutoDBManager.current.query(Self.self, query, arguments)
 	}
 	
+	@discardableResult
+	static func query(_ query: SQLQuery = "") async throws -> [Row] {
+		try await AutoDBManager.current.query(Self.self, query.query, query.arguments)
+	}
+	
 	/// Execute a query without returning any rows, like INSERT or UPDATE.
-	static func execute(_ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws {
+	@_disfavoredOverload
+	static func execute(_ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws {
 		try await AutoDBManager.current.execute(Self.self, query, arguments, sqlArguments: sqlArguments)
 	}
 	
+	/// Execute a query without returning any rows, like INSERT or UPDATE.
+	static func execute(_ query: SQLQuery = "") async throws {
+		try await AutoDBManager.current.execute(Self.self, query.query, query.arguments)
+	}
+	
 	/// Execute a query without returning any rows, like INSERT or UPDATE. Returns number of affected rows. Swift has a bug for @discardableResult, so we must have two functions with different signatures.
+	@_disfavoredOverload
 	@discardableResult
-	static func executeAffectedRows(_ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Int {
+	static func executeAffectedRows(_ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Int {
 		return try await AutoDBManager.current.execute(Self.self, query, arguments, sqlArguments: sqlArguments)
 	}
 	
-	// this cannot have the same signature
 	@discardableResult
-	static func query(_ query: String = "", sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
+	static func executeAffectedRows(_ query: SQLQuery = "") async throws -> Int {
+		return try await AutoDBManager.current.execute(Self.self, query.query, query.arguments)
+	}
+	
+	// this cannot have the same signature
+	@_disfavoredOverload
+	@discardableResult
+	static func query(_ query: String, sqlArguments: [SQLValue]? = nil) async throws -> [Row] {
 		try await AutoDBManager.current.query(Self.self, query, sqlArguments: sqlArguments ?? [])
 	}
 	
@@ -216,16 +242,26 @@ public extension Table {
 	
 	/// return the first value of the first row of the result,
 	/// throws fetchError if the value is nil
-	static func valueQuery<Val: SQLColumnWrappable>(_ query: String = "", _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Val {
+	@_disfavoredOverload
+	static func valueQuery<Val: SQLColumnWrappable>(_ query: String, _ arguments: [Sendable]? = nil, sqlArguments: [SQLValue]? = nil) async throws -> Val {
 		if let value: Val = try await AutoDBManager.current.valueQuery(Self.self, query, arguments, sqlArguments: sqlArguments) {
 			return value
 		}
 		throw AutoError.fetchError
 	}
 	
+	static func valueQuery<Val: SQLColumnWrappable>(_ query: SQLQuery = "") async throws -> Val {
+		try await valueQuery(query.query, query.arguments)
+	}
+	
 	///return an array with all values in the result for a (the first) column.
-	static func groupConcatQuery<Val: SQLColumnWrappable>(_ query: String = "", _ arguments: [Sendable]? = nil) async throws -> [Val] {
+	@_disfavoredOverload
+	static func groupConcatQuery<Val: SQLColumnWrappable>(_ query: String, _ arguments: [Sendable]? = nil) async throws -> [Val] {
 		try await AutoDBManager.current.groupConcatQuery(Self.self, query, arguments)
+	}
+	
+	static func groupConcatQuery<Val: SQLColumnWrappable>(_ query: SQLQuery = "") async throws -> [Val] {
+		try await AutoDBManager.current.groupConcatQuery(Self.self, query.query, query.arguments)
 	}
 	
 	// MARK: - saving

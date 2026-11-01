@@ -183,7 +183,7 @@ struct MigrationContractTests {
 		try await db.execute("INSERT INTO OptionalTightenNullTarget (id, title, legacy) VALUES (1, NULL, 'drop me')")
 		
 		let fetched = try await OptionalTightenNullTarget.fetchId(1)
-		#expect(fetched.title == "")
+		#expect(fetched.title == "fallback")
 		
 		let schema = try await schemaMap(OptionalTightenNullTarget.tableName, db: db)
 		#expect(schema["title"]?.nullable == false)

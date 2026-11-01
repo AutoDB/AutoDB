@@ -240,14 +240,14 @@ public final class FTSColumn<TargetTableType: Table>: Codable, Relation, @unchec
 			return
 		}
 		
-		let isEmpty: Bool = try await TargetTableType.valueQuery("SELECT count(*) = 0 as isEmpty FROM `\(tableInfo.tableName)`")
+		let isEmpty: Bool = try await TargetTableType.valueQuery("SELECT count(*) = 0 as isEmpty FROM `\(verbatim: tableInfo.tableName)`")
 		if isEmpty {
 			// sometimes these indieces gets messed up, then the join below will always return nothing. Fix that by deleting all and starting over.
-			try await TargetTableType.query("DELETE FROM `\(tableInfo.tableName)`")
+			try await TargetTableType.query("DELETE FROM `\(verbatim: tableInfo.tableName)`")
 		}
 		
 		// a NULL id in the index poisons the NOT IN below (three-valued logic makes it never match), remove any such rows
-		try await TargetTableType.query("DELETE FROM `\(tableInfo.tableName)` WHERE id IS NULL")
+		try await TargetTableType.query("DELETE FROM `\(verbatim: tableInfo.tableName)` WHERE id IS NULL")
 		
 		let limit = 20000  // any limit will do, just make it small enough to not take noticable RAM/CPU per fetch, while big enough to handle most updates in one go.
 		let query = "SELECT id FROM `\(tableInfo.targetTableName)` WHERE id NOT in (SELECT id FROM `\(tableInfo.tableName)`) LIMIT \(limit)"

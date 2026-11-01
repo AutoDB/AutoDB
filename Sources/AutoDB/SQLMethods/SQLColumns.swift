@@ -89,10 +89,10 @@ public struct Column: Equatable, Hashable, Sendable {
 			guard let defaultValue else {
 				throw Error.cannotParseColumnDefinition(table: name, description: "Non-nullable column \(name) must have a default value")
 			}
-			self.defaultValueString = try SQLValue.fromAny(defaultValue).ignoreDefault()
+			self.defaultValueString = try SQLValue.fromAny(defaultValue).defaultLiteral()
 			
 		} else {
-			self.defaultValueString = defaultValue.flatMap { try? SQLValue.fromAny($0).ignoreDefault() }
+			self.defaultValueString = defaultValue.flatMap { try? SQLValue.fromAny($0).defaultLiteral() }
 		}
 	}
 	
@@ -388,16 +388,10 @@ public enum SQLValue: Sendable, ExpressibleByStringLiteral, ExpressibleByFloatLi
 		}
 	}
 	
-	/// SQLite needs a default value when we are not null - but we can't ever store/define an AutoModel without a default value. So having a duplicate value stored in the DB is pointless. Sometimes you also don't want that, e.g. when default should be Date.now()
-	public func ignoreDefault() -> String {
-		switch self {
-		case .uinteger(_): return "1"
-		case .integer(_): return "1"
-		case .double(_): return "1.0"
-		case .text(_): return "''"
-		case .data(_): return "X''"
-		case .null: return "NULL"
-		}
+	/// The column default: what SQLite gives rows that existed before the column was added, so they read like a new instance from init(). A non-finite Double has no SQL literal and gets 0.0.
+	public func defaultLiteral() -> String {
+		if case let .double(d) = self, !d.isFinite { return "0.0" }
+		return sqliteLiteral()
 	}
 	
 	public static func fromSQLiteLiteral(_ literalString: String?) -> Self? {

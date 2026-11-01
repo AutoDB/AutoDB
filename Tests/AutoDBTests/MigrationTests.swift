@@ -118,8 +118,44 @@ struct Mig: Table {
 	}
 }
 
+/// columns added to a table that already has a row, which must read the defaults set here
+struct MigAddedColumns: Table {
+	var id: AutoId = 1
+	var flag = false
+	var count = 19
+	var ratio = 7.5
+	var name = "O'Brien"
+	
+	static var createTableSQL: String {
+		"""
+		CREATE TABLE IF NOT EXISTS "MigAddedColumns" (
+		 `id` INTEGER NOT NULL DEFAULT 1,
+		 PRIMARY KEY (`id`));
+		"""
+	}
+}
+
 @Suite("Migration", .autoDB, .serialized)
 class MigrationTests {
+	
+	@Test func addedColumnsUseTheGivenDefaults() async throws {
+		let db = try await MigFirst.db()
+		_ = try? await db.execute("DROP TABLE MigAddedColumns")
+		try await db.execute(MigAddedColumns.createTableSQL)
+		try await db.execute("INSERT INTO MigAddedColumns (id) VALUES (1)")
+		
+		let old = try await MigAddedColumns.fetchId(1)
+		#expect(old.flag == false)
+		#expect(old.count == 19)
+		#expect(old.ratio == 7.5)
+		#expect(old.name == "O'Brien")
+		
+		// a row inserted outside AutoDB gets them too
+		try await db.execute("INSERT INTO MigAddedColumns (id) VALUES (2)")
+		let inserted = try await MigAddedColumns.fetchId(2)
+		#expect(inserted.flag == false)
+		#expect(inserted.count == 19)
+	}
 	
 	@Test func createTable() async throws {
 		
