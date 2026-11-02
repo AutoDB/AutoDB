@@ -1,5 +1,10 @@
 # AutoDB
 
+![iOS 17+](https://img.shields.io/badge/iOS-17%2B-blue?logo=apple)
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue?logo=apple)
+![Linux](https://img.shields.io/badge/Linux-supported-blue?logo=linux&logoColor=white)
+![Android](https://img.shields.io/badge/Android-supported-blue?logo=android&logoColor=white)
+
 Automatic persistence and database handling in Swift, built on SQLite. AutoDB focuses on automatic migrations, cache-backed model identity, relations, and async/await-friendly access patterns.
 
 ## Quick start

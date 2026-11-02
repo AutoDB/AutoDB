@@ -803,6 +803,22 @@ extension UInt64 {
 		// lookupTable.removeDeleted(typeID, Set(ids))
 	}
 	
+	/// Forget rows that SQL moved to another id. Their live objects leave the cache and lose their unsaved changes, so a fetch never returns them.
+	/// Like deleted rows they are never saved again: a save would insert the row under its old id once more.
+	public func forget<T: Table>(_ ids: [AutoId], _ classType: T.Type) {
+		if ids.isEmpty {
+			return
+		}
+		let typeID = ObjectIdentifier(classType)
+		lookupTable.setDeleted(ids, typeID)
+		for modelTypeID in modelCacheIdentifiersByTableIdentifier[typeID] ?? [] {
+			for id in ids {
+				cachedObjects[modelTypeID]?[id] = nil
+			}
+			removeFromChanged(ids, modelTypeID)
+		}
+	}
+	
 	// MARK: - debounce delays
 	
 	/// The standard wait for all debounced work: idle auto-close, saveChangesLater, saveAllChangesLater and deleteLater.

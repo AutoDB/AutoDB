@@ -69,6 +69,54 @@ class ManyRelationTest {
 		#expect(fetched.children.hasMore == false)
 	}
 	
+	@Test
+	func testIdsCanBeSetAndReplacedWithoutFetching() async throws {
+		try await AutoDBManager.current.truncateTable(PagedParentStruct.self)
+		try await AutoDBManager.current.truncateTable(Child.self)
+		
+		for (index, name) in ["A", "B", "C"].enumerated() {
+			var child = await Child.create(AutoId(index + 1))
+			child.name = name
+			try await child.save()
+		}
+		let parent = await PagedParentStruct.create(1)
+		await parent.children.set(ids: [1, 2, 1])
+		#expect(parent.children.allIds == [1, 2, 1])
+		#expect(parent.children.contains(2))
+		#expect(parent.children.contains(3) == false)
+		
+		await parent.children.replace(1, with: 3)
+		#expect(parent.children.allIds == [3, 2, 3])
+		try await parent.save()
+		
+		let fetched = try await PagedParentStruct.fetchId(1)
+		#expect(fetched.children.allIds == [3, 2, 3])
+		let names = try await fetched.children.firstFetch().map(\.name)
+		#expect(names == ["C", "B"])
+	}
+	
+	@Test
+	func testForgottenIdIsNeitherCachedNorSaved() async throws {
+		try await AutoDBManager.current.truncateTable(Parent.Value.self)
+		try await AutoDBManager.current.truncateTable(Child.self)
+		
+		let parent = await Parent.create(10)
+		parent.value.name = "Old"
+		try await parent.save()
+		
+		// another id for the same row, the way a sync re-keys it with SQL
+		try await Parent.query("UPDATE Parent SET id = 11 WHERE id = 10")
+		await AutoDBManager.current.forget([10], Parent.Value.self)
+		#expect(await AutoDBManager.current.cached(Parent.self, 10) == nil)
+		
+		// the stale object must not bring the old row back
+		parent.value.name = "Stale"
+		try await parent.save()
+		let rows = try await Parent.query("SELECT id FROM Parent ORDER BY id")
+		#expect(rows.map { $0["id"]?.uint64Value } == [11])
+		#expect(try await Parent.fetchId(11).value.name == "Old")
+	}
+	
 	func createData() async throws {
 		var item: ParentStruct = await ParentStruct.create(1)
 		try await item.children.fetch()

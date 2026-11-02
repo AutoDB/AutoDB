@@ -79,6 +79,16 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 		ids.count
 	}
 	
+	/// Every id in the relation in order, also the ones not fetched yet.
+	public var allIds: [AutoId] {
+		ids
+	}
+	
+	/// Whether the relation holds this id, fetched or not.
+	public func contains(_ id: AutoId) -> Bool {
+		ids.contains(id)
+	}
+	
 	private var _items: [AutoType]?
 	public var items: [AutoType] {
 		get {
@@ -169,6 +179,31 @@ public final class ManyRelation<AutoType: TableModel>: Codable, Relation, @unche
 	public func set(_ items: [AutoType]) {
 		ids = items.map { $0.id }
 		_items = items
+		hasMore = false
+		didChange()
+	}
+	
+	/// Replace the relation with these ids, without fetching them. The items are fetched again on the next fetch.
+	public func set(ids newIds: [AutoId]) async {
+		await semaphore.wait()
+		defer { Task { await semaphore.signal() } }
+		
+		ids = newIds
+		_items = nil
+		hasMore = false
+		didChange()
+	}
+	
+	/// Point every occurrence of `old` at `new`, for a row whose id changed. The items are fetched again on the next fetch.
+	public func replace(_ old: AutoId, with new: AutoId) async {
+		await semaphore.wait()
+		defer { Task { await semaphore.signal() } }
+		
+		if ids.contains(old) == false {
+			return
+		}
+		ids = ids.map { $0 == old ? new : $0 }
+		_items = nil
 		hasMore = false
 		didChange()
 	}
