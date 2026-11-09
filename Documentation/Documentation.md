@@ -16,7 +16,7 @@ For first integration steps, start with the [README](../README.md) and the [Adop
 Current package support is macOS 14+, iOS 17+, tvOS 17+, and watchOS 10+ - the floor where Observation is available, which models and `RelationQuery` rely on.
 
 - The core table/model APIs, migrations, caching, and FTS are part of the stable package surface.
-- Cross-platform work outside Apple platforms is still exploratory rather than release-ready. Android and Linux build with the `SQLCipher` trait, see [Cross-platform notes](Android.md).
+- Android and Linux are supported from 2.0 with the `SQLCipher` trait and tested in CI. The support is new, see [Cross-platform notes](Android.md) for what is covered.
 - Encryption needs the `SQLCipher` trait, see [Encryption](#encryption).
 
 ## Quick start
@@ -243,7 +243,7 @@ The module can keep an internal `extension Table` next to it for its internal ta
 Encryption needs the `SQLCipher` trait, which builds AutoDB on [skip's swift-sqlcipher](https://github.com/skiptools/swift-sqlcipher) (SQLite with SQLCipher and FTS5) instead of the system SQLite:
 
 ```swift
-.package(url: "https://github.com/AutoDB/AutoDB", from: "1.1.0", traits: ["SQLCipher"])
+.package(url: "https://github.com/AutoDB/AutoDB", from: "2.0.0", traits: ["SQLCipher"])
 ```
 
 Without the trait nothing extra is downloaded and `encrypted(key:)` does not exist, so asking for encryption without it is a compile error rather than a plaintext file.
@@ -547,6 +547,7 @@ Details worth knowing:
    - Find: `\{\s*(\w+),\s*token\s+in`
    - Replace: `{ $1, _ in`
    - Then remove the `_` parameter: `transaction { db in ... }`, and drop the token parameter from your `migration(_:_:)` implementations.
+   - ⚠️ A `migration` that keeps the token is not the protocol's function and is never called. Set `AutoDBSettings.performMigration` (`.regular.performingMigration()`) in the settings of every table that has a migration: then the default implementation stops debug builds with an `assertionFailure` on the table's next schema change, so a missed one shows up on your own device first.
 
 ⚠️ Before you run these, check the exceptions - a plain `token:` text search finds anything the regexes miss (expressions like `token: t ?? other`):
 

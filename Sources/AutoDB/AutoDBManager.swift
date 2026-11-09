@@ -271,27 +271,24 @@ extension UInt64 {
 	/// the table's first-time setup: create or migrate it and register it. Runs with the table's setup lock held, inside the transaction slot.
 	private func setUpTable<TableType: Table>(_ table: TableType.Type, _ typeID: ObjectIdentifier, _ database: Database, _ settings: AutoDBSettings) async throws -> Database {
 		do {
-			let (encoder, migrations) = try await SQLTableEncoder().setup(table, database, settings)
-			tables[typeID] = encoder
-			
-			if let migrations, migrations.isEmpty == false {
-				// migrations run inside a transaction so a failure rolls the table back. The table is registered first: a migration callback's own queries on it must hit the fast path, not set it up again.
-				try? await database.transaction { db in
-					await self.setDatabase(db, typeID)
-					for migration in migrations {
-						await TableType.migration(database, migration)
-						
-						if case MigrationState.changes(let tempTableName, _) = migration {
-							try await database.query("DROP TABLE `\(tempTableName)`")
-						}
+			// the migration runs in the schema change's transaction: a failure rolls both back, and the next use migrates again
+			let (encoder, _) = try await SQLTableEncoder().setup(table, database, settings) { db, tableInfo, migrations in
+				// registered first: a migration callback's own queries on the table must hit the fast path, not set it up again
+				await self.register(tableInfo, db, typeID)
+				for migration in migrations {
+					try await TableType.migration(db, migration)
+					if case MigrationState.changes(let tempTableName, _) = migration {
+						try await db.query("DROP TABLE `\(tempTableName)`")
 					}
 				}
-			} else {
-				databases[typeID] = database
 			}
+			register(encoder, database, typeID)
 			return database
 			
 		} catch {
+			// rolled back: not set up, the next use tries again
+			tables[typeID] = nil
+			databases[typeID] = nil
 			if case Database.Error.databaseIsClosed = error {
 				print("database is closed error, perhaps switching DB-path during migrations? \(error)")
 			} else {
@@ -301,7 +298,8 @@ extension UInt64 {
 		}
 	}
 	
-	func setDatabase(_ db: Database, _ typeID: ObjectIdentifier) {
+	private func register(_ tableInfo: TableInfo, _ db: Database, _ typeID: ObjectIdentifier) {
+		tables[typeID] = tableInfo
 		databases[typeID] = db
 	}
 	

@@ -160,6 +160,17 @@ public struct AutoDBSettings: Sendable, Hashable {
 	let encryptionKey: (@Sendable () async throws -> DatabaseKey)?
 	/// Is the file encrypted with SQLCipher? Always false without the SQLCipher trait, see `encrypted(key:)`.
 	public var isEncrypted: Bool { encryptionKey != nil }
+	/// The tables using these settings implement `Table.migration(_:_:)`. Off by default, where auto-migration alone moves the data. On, a schema
+	/// change that reaches the default implementation instead stops on an assertionFailure: the table's own migration has another signature and
+	/// is never called. Not part of the file's identity: tables with and without it share the file.
+	public var performMigration = false
+	
+	/// These settings, for tables that implement `Table.migration(_:_:)`, see `performMigration`.
+	public func performingMigration() -> AutoDBSettings {
+		var settings = self
+		settings.performMigration = true
+		return settings
+	}
 	
 	public static func == (lhs: AutoDBSettings, rhs: AutoDBSettings) -> Bool {
 		lhs.path == rhs.path && lhs.iCloudBackup == rhs.iCloudBackup && lhs.inAppFolder == rhs.inAppFolder && lhs.inCacheFolder == rhs.inCacheFolder

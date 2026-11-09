@@ -44,7 +44,7 @@ import Foundation
 #elseif canImport(SQLite3)
 	import SQLite3
 #else
-	#error("AutoDB needs the SQLCipher trait on this platform: .package(url: \"https://github.com/AutoDB/AutoDB\", from: \"1.1.0\", traits: [\"SQLCipher\"])")
+	#error("AutoDB needs the SQLCipher trait on this platform: .package(url: \"https://github.com/AutoDB/AutoDB\", from: \"2.0.0\", traits: [\"SQLCipher\"])")
 #endif
 
 #if !canImport(Darwin)
@@ -172,9 +172,15 @@ public actor Database {
 	/// key unlocks an encrypted file on this open and every reopen, keyProvider fetches it again when open() follows a close that dropped it.
 	init(_ path: String?, key: DatabaseKey?, keyProvider: (@Sendable () async throws -> DatabaseKey)?) throws {
 		let url: URL? = path.flatMap { URL(fileURLWithPath: $0) }
-		if let url {
+		if let url, url.path.isEmpty == false, url.path != ":memory:" {
 			let folder = url.deletingLastPathComponent()
-			try FileManager.default.createDirectory(atPath: folder.path, withIntermediateDirectories: true)
+			// Only attempt to create if the directory doesn't already exist
+			var isDirectory: ObjCBool = false
+			
+			let exists = FileManager.default.fileExists(atPath: folder.path(percentEncoded: false), isDirectory: &isDirectory)
+			if (exists && isDirectory.boolValue) == false {
+				try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: nil)
+			}
 		}
 		dbURL = url
 		self.key = key

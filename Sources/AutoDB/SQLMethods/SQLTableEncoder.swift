@@ -32,8 +32,11 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		return encoder
 	}()
 
-	/// We return a list of migrations that has been done, if the auto-conversions are not suitable, just supply your own functions.
-	func setup<T: Table>(_ classType: T.Type, _ db: Database, _ settings: AutoDBSettings) async throws -> (TableInfo, [MigrationState]?) {
+	/// Creates or migrates the table. `migrate` gets the migrations done, inside the same transaction as the schema change: when it throws, or the
+	/// process ends before the commit, the table stays as it was and the next setup migrates again. A column added without its migration would
+	/// never get a `.newColumn` again. Returns the migrations, nil when the table needed none.
+	typealias Migrate = @Sendable (_ db: isolated Database, _ tableInfo: TableInfo, _ migrations: [MigrationState]) async throws -> Void
+	func setup<T: Table>(_ classType: T.Type, _ db: Database, _ settings: AutoDBSettings, migrate: Migrate) async throws -> (TableInfo, [MigrationState]?) {
 		let instance = classType.init()
 		let tableName = classType.tableName
 		
@@ -64,10 +67,12 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 		
 		if columnsInDB.isEmpty {
 			// table does not exist. Create it!
-			try await db.execute(tableInfo.createTableSyntax())
-			
-			for statement in tableInfo.createIndexStatements(instance) {
-				try await db.execute(statement)
+			let statements = [tableInfo.createTableSyntax()] + tableInfo.createIndexStatements(instance)
+			try await db.transaction { db in
+				for statement in statements {
+					try await db.execute(statement)
+				}
+				try await migrate(db, tableInfo, [.createdTable])
 			}
 			return (tableInfo, [.createdTable])
 		}
@@ -180,6 +185,8 @@ class SQLTableEncoder: Encoder, @unchecked Sendable {
 					migrations.append(.failedIndex(index: indexToAdd, error: error))
 				}
 			}
+			
+			try await migrate(db, tableInfo, migrations)
 		}
 		
 		return (tableInfo, migrations)

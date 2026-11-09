@@ -1,13 +1,13 @@
 # Linux / Android / Windows 
 
-Cross-platform support outside Apple platforms is a goal for 1.1, not current release-ready functionality. The direction is to avoid hard dependencies on ObjC-only system layers and keep the core database layer portable.
+Android and Linux are supported from 2.0 with the `SQLCipher` trait. The support is new: CI tests Linux and one Android emulator (x86_64, API 28), so test on your own devices before relying on it in production. The direction is to avoid hard dependencies on ObjC-only system layers and keep the core database layer portable.
 
 ## Building
 
 Android and Linux have no system SQLite to rely on (the Android NDK doesn't expose one), so they need the `SQLCipher` trait, which brings SQLite with SQLCipher and FTS5 from [skip's swift-sqlcipher](https://github.com/skiptools/swift-sqlcipher):
 
 ```swift
-.package(url: "https://github.com/AutoDB/AutoDB", from: "1.1.0", traits: ["SQLCipher"])
+.package(url: "https://github.com/AutoDB/AutoDB", from: "2.0.0", traits: ["SQLCipher"])
 ```
 
 Locally: `swift build --swift-sdk <android or linux sdk> --traits SQLCipher`. Without the trait a non-Apple build stops with an `#error` that says so. Apple-only apps don't enable it and download nothing extra.

@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased (1.1)
+## Unreleased (2.0)
+
+### Migrations
+
+- **Breaking:** `Table.migration(_:_:)` is `async throws` and runs inside the transaction of its schema change, the new columns, the rebuilt table and the new indices: a thrown error, or a process that ends before the commit, rolls both back and the next use of the table migrates again. Before, the schema change was committed first and the migration ran in a second transaction whose errors were ignored, so a failure left a new column without the data its migration should have copied, and `.newColumn` never came again. Existing non-throwing migrations still satisfy the requirement.
+- `AutoDBSettings.performMigration` (`performingMigration()`), off by default: auto-migration is the common case and needs no migration. Set it for the tables that implement one: if the default implementation runs instead on a schema change, an `assertionFailure` stops debug builds, naming the table and the column. That catches a migration with another signature, which compiles as an unrelated function and is never called - an app lost data to one that kept the old `(token, db, state)` signature. A migration of its own always runs, with the flag or without. It is not part of the settings' equality, so tables with and without it share the file.
 
 ### Encryption and the SQLCipher trait
 

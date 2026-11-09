@@ -25,10 +25,14 @@ public protocol Table: Codable, Hashable, Identifiable, Sendable, TableModel {
 	/// return a list of keypaths to the variables that have unique index, grouped together to make multi-column index
 	static var uniqueIndices: [[String]] { get }
 	
-	/// Migration delegate-function called when migrating. Queries inside re-enter the migration transaction automatically (the token is carried as an ambient task-local). If you are happy with auto-migrations (please double-check), you don't need to implement this function.
+	/// Migration delegate-function called when migrating, always, inside the transaction of the schema change: a thrown error rolls both back and the
+	/// next use of the table migrates again. Queries inside re-enter the migration transaction automatically (the token is carried as an ambient task-local).
+	/// If you are happy with auto-migrations (please double-check), you don't need to implement this function. If you do, also set
+	/// `AutoDBSettings.performMigration` in the table's settings: then the default stops on an assertionFailure, so a function with another
+	/// signature - which compiles, but is not this one and is never called - shows up the first time it should have run.
 	/// warning ⚠️: You can use any raw SQL query, but if you access/query a Table or Model from the same db-file, that is not setup yet -> it can deadlock. So when using raw queries, make sure Tables are created and setup.
 	/// See documentation for full set of rules for auto-migration.
-	static func migration(_ db: isolated Database, _ state: MigrationState) async -> Void
+	static func migration(_ db: isolated Database, _ state: MigrationState) async throws -> Void
 	
 	/*
 	 Note that the save functions are not exposed, since no need to implement them.
@@ -165,7 +169,28 @@ public extension Table {
 	/// return a list of variable names that have unique index, group together to make multi-column index
 	static var uniqueIndices: [[String]] { [] }
 	
-	static func migration(_ db: isolated Database, _ state: MigrationState) async {}
+	/// No migration of its own: auto-migration is all the table needs. Unless its settings say it has one (`performMigration`): then the
+	/// migration it declares has another signature and is never called, and a schema change stops here in debug builds.
+	static func migration(_ db: isolated Database, _ state: MigrationState) async {
+		if autoDBSettings.performMigration == false {
+			return
+		}
+		switch state {
+		case .createdTable, .failedIndex:
+			return
+		case .newColumn(let column):
+			missingMigration("a new column `\(column.name)`")
+		case .changes(_, let columns):
+			missingMigration("changed or dropped columns \(columns.map(\.name).sorted())")
+		}
+	}
+	
+	private static func missingMigration(_ change: String) {
+		// the full name: a Model's table is its nested Value
+		let message = "AutoDB: \(String(reflecting: Self.self)) (table \(tableName)) has \(change) and its settings set performMigration, but no migration(_ db: isolated Database, _ state: MigrationState) of its own was called - check that signature: one that differs is never called. Without a migration, turn performMigration off."
+		print(message)
+		assertionFailure(message)
+	}
 	
 	// MARK: - fetch shortcuts
 	
