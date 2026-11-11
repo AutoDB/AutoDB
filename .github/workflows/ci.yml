@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload test diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-diagnostics
           path: ${{ runner.temp }}/autodb-test-logs/
@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload test diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-diagnostics-sqlcipher
           path: ${{ runner.temp }}/autodb-test-logs/

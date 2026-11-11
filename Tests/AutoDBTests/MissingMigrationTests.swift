@@ -131,35 +131,38 @@ struct MissingMigrationTests {
 		_ = try await FlaggedNoMigration.create(1)
 	}
 	
-	@Test func flaggedSchemaChangeWithoutMigrationStops() async {
-		await #expect(processExitsWith: .failure) {
-			try await Self.inFreshDatabase {
-				try await Self.createOldTable(FlaggedNoMigration.tableName)
-				_ = try await FlaggedNoMigration.fetchId(1)
-			}
-		}
-	}
-	
-	@Test func migrationWithAnotherSignatureStops() async {
-		await #expect(processExitsWith: .failure) {
-			try await Self.inFreshDatabase {
-				try await Self.createOldTable(FlaggedWrongSignature.tableName)
-				_ = try await FlaggedWrongSignature.fetchId(1)
-			}
-		}
-	}
-	
-	/// the control of the two above: the same child process with a migration of its own exits normally, so they stop at the assertion, not on an error of the harness
-	@Test func flaggedWithMigrationExitsNormally() async {
-		await #expect(processExitsWith: .success) {
-			try await Self.inFreshDatabase {
-				try await Self.createOldTable(FlaggedWithMigration.tableName)
-				if try await FlaggedWithMigration.fetchId(1).added != "filled" {
-					exit(1)
+	// exit tests run the code in a child process, which Swift Testing only supports on these platforms
+	#if os(macOS) || os(Linux) || os(Windows)
+		@Test func flaggedSchemaChangeWithoutMigrationStops() async {
+			await #expect(processExitsWith: .failure) {
+				try await Self.inFreshDatabase {
+					try await Self.createOldTable(FlaggedNoMigration.tableName)
+					_ = try await FlaggedNoMigration.fetchId(1)
 				}
 			}
 		}
-	}
+		
+		@Test func migrationWithAnotherSignatureStops() async {
+			await #expect(processExitsWith: .failure) {
+				try await Self.inFreshDatabase {
+					try await Self.createOldTable(FlaggedWrongSignature.tableName)
+					_ = try await FlaggedWrongSignature.fetchId(1)
+				}
+			}
+		}
+		
+		/// the control of the two above: the same child process with a migration of its own exits normally, so they stop at the assertion, not on an error of the harness
+		@Test func flaggedWithMigrationExitsNormally() async {
+			await #expect(processExitsWith: .success) {
+				try await Self.inFreshDatabase {
+					try await Self.createOldTable(FlaggedWithMigration.tableName)
+					if try await FlaggedWithMigration.fetchId(1).added != "filled" {
+						exit(1)
+					}
+				}
+			}
+		}
+	#endif
 	
 	/// a migration that fails takes its schema change with it: the column is not there, so the next use gets the `.newColumn` again
 	@Test func failedMigrationRollsBackTheSchemaChange() async throws {
